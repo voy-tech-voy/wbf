@@ -38,7 +38,7 @@ class RateLimiter:
             'forgot_license': {
                 'max_requests': 5,       # Max 5 forgot requests per window
                 'window_seconds': 3600,   # 1 hour window
-                'block_duration': 1800    # Block for 30 minutes
+                'block_duration': 300     # Block for 5 minutes
             },
             'login_validate': {
                 'max_requests': 10,      # Max 10 login attempts per window

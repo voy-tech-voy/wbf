@@ -1712,6 +1712,9 @@ class ModernLoginWindow(QDialog):
 
     def handle_resend(self):
         """Handle forgot license - retrieve license key from server"""
+        # Clear any existing messages/overlays first to ensure consistent behavior
+        self._remove_message_overlay()
+        
         email = self.resend_input.text().strip()
         if not email:
             self.resend_input.setStyleSheet(self.resend_input.styleSheet() + "; border: 2px solid red;")
@@ -1775,11 +1778,17 @@ class ModernLoginWindow(QDialog):
         try:
             from client.config.config import FORGOT_LICENSE_URL
             
+            print(f"🔍 DEBUG: Sending forgot license request to {FORGOT_LICENSE_URL} for {email}")
+            
             response = requests.post(FORGOT_LICENSE_URL, json={
                 'email': email
             }, timeout=10)
             
+            print(f"✅ DEBUG: Server response received: {response.status_code}")
+            
             result = response.json()
+            
+            print(f"✅ DEBUG: Response JSON: {result}")
             
             if result.get('success'):
                 # License found and email sent
@@ -1801,19 +1810,32 @@ class ModernLoginWindow(QDialog):
                 # License not found or error
                 error = result.get('error', 'unknown')
                 message = result.get('message', 'Failed to find license')
+                title = "License Not Found"
                 
                 if error == 'no_license_found':
                     message = 'No license found for this email address'
                 elif error == 'rate_limit_exceeded':
+                    title = "🔒 Too Many Requests"
                     retry_after = result.get('retry_after', 60)
                     minutes = int(retry_after / 60)
+                    seconds = retry_after % 60
+                    
                     if minutes > 0:
-                        message = f'Too many requests. Please wait {minutes} minute(s) before trying again.'
+                        message = (
+                            f"You've reached the maximum number of requests.\n\n"
+                            f"⏳ Please wait {minutes} minute(s)"
+                        )
+                        if seconds > 0:
+                            message += f" and {seconds} second(s)"
+                        message += " before trying again."
                     else:
-                        message = f'Too many requests. Please wait {retry_after} seconds before trying again.'
+                        message = (
+                            f"You've reached the maximum number of requests.\n\n"
+                            f"⏳ Please wait {retry_after} seconds before trying again."
+                        )
                 
                 self._show_inline_forgot_message(
-                    "Request Failed" if error == 'rate_limit_exceeded' else "License Not Found",
+                    title,
                     message,
                     message_type="error"
                 )
@@ -1850,6 +1872,9 @@ class ModernLoginWindow(QDialog):
 
     def _show_inline_forgot_message(self, title, subtitle, message_type="info"):
         """Display message inline for Forgot flow, replacing Forgot UI and adding a back button."""
+        # Clear any existing overlays/messages first
+        self._remove_message_overlay()
+        
         # Remove forgot/trial block widgets if they exist
         try:
             if hasattr(self, 'forgot_block_widget') and self.forgot_block_widget:
@@ -1957,17 +1982,21 @@ class ModernLoginWindow(QDialog):
         try:
             from PyQt5.QtCore import QEvent
             if event.type() == QEvent.KeyPress and event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                # Also consume Enter while waiting for server response to avoid accidental close
+                if self.waiting_for_response:
+                    print(f"🔍 DEBUG: Enter key pressed while waiting_for_response=True, consuming event")
+                    return True
+                
+                # Only reset to login if there's an inline message AND not waiting for response
                 has_inline = (
                     (hasattr(self, 'overlay_widget') and self.overlay_widget) or
                     (hasattr(self, 'message_container') and self.message_container) or
                     (hasattr(self, 'success_message_container') and self.success_message_container)
                 )
                 if has_inline:
+                    print(f"🔍 DEBUG: Enter key pressed with inline message, resetting to login")
                     self.reset_trial_to_login_mode()
                     return True  # consume event
-                # Also consume Enter while waiting for server response to avoid accidental close
-                if self.waiting_for_response:
-                    return True
         except:
             pass
         return super().eventFilter(obj, event)
