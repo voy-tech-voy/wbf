@@ -381,6 +381,8 @@ class ModernLoginWindow(QDialog):
             "QCheckBox::indicator:unchecked:hover { border: 2px solid #2e7d32; }"
         )
         self.auto_login_cb.setStyleSheet(auto_login_style)
+        # Connect toggle to fill saved credentials
+        self.auto_login_cb.stateChanged.connect(self.on_auto_login_toggled)
         controls_layout.addWidget(self.auto_login_cb)
         
         # Stretch between checkbox and forgot button
@@ -681,7 +683,7 @@ class ModernLoginWindow(QDialog):
             return None
     
     def load_saved_credentials(self):
-        """Pre-fill email if saved"""
+        """Pre-fill email and license key if saved"""
         try:
             path = self.get_config_path()
             if path and os.path.exists(path):
@@ -693,12 +695,38 @@ class ModernLoginWindow(QDialog):
                         self.license_input.setText(data['license_key'])
                     if data.get('remember', False):
                         self.remember_cb.setChecked(True)
+                    # Set auto-login checkbox based on saved state
+                    if data.get('auto_login', True):
+                        self.auto_login_cb.setChecked(True)
         except:
             pass
     
+    def on_auto_login_toggled(self, state):
+        """Handle auto-login checkbox toggle - fill saved credentials"""
+        if self.auto_login_cb.isChecked():
+            # When toggled ON, fill in the saved credentials
+            try:
+                path = self.get_config_path()
+                if path and os.path.exists(path):
+                    with open(path, 'r') as f:
+                        data = json.load(f)
+                        email = data.get('email', '')
+                        license_key = data.get('license_key', '')
+                        if email:
+                            self.email_input.setText(email)
+                        if license_key:
+                            self.license_input.setText(license_key)
+            except:
+                pass
+        else:
+            # When toggled OFF, clear the input fields
+            self.email_input.clear()
+            self.license_input.clear()
+    
+
     def save_credentials(self, email, license_key):
-        """Save credentials locally if remember me is checked"""
-        if not hasattr(self, 'remember_cb') or not self.remember_cb.isChecked():
+        """Save credentials locally if auto-login is checked"""
+        if not hasattr(self, 'auto_login_cb') or not self.auto_login_cb.isChecked():
             return
         try:
             path = self.get_config_path()
@@ -707,6 +735,7 @@ class ModernLoginWindow(QDialog):
             data = {
                 'email': email,
                 'license_key': license_key,
+                'auto_login': True,
                 'remember': True,
                 'last_login': datetime.now().isoformat()
             }
@@ -1713,23 +1742,6 @@ class ModernLoginWindow(QDialog):
                 "QPushButton { background-color: transparent; color: white; border: 2px solid #2196f3; border-radius: 8px; }"
             )
             self.waiting_for_response = False
-        # Placeholder: simulate negative lookup after 2s
-        def _finish_real_resend():
-            self._show_inline_forgot_message(
-                "License for the give mail hasn't been found in our database",
-                "",
-                message_type="error"
-            )
-            try:
-                self.send_btn.setEnabled(True)
-                self.send_btn.setText("Send")
-                self.send_btn.setStyleSheet(
-                    "QPushButton { background-color: transparent; color: white; border: 2px solid #2196f3; border-radius: 8px; }"
-                )
-            except:
-                pass
-            self.waiting_for_response = False
-        QTimer.singleShot(2000, _finish_real_resend)
 
     def _show_inline_forgot_message(self, title, subtitle, message_type="info"):
         """Display message inline for Forgot flow, replacing Forgot UI and adding a back button."""

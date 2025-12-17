@@ -2,9 +2,11 @@ from flask import jsonify, request
 from . import api_bp
 from services.trial_manager import TrialManager
 from services.license_manager import LicenseManager
+from services.email_service import EmailService
 
 trial_manager = TrialManager()
 license_manager = LicenseManager()
+email_service = EmailService()
 
 @api_bp.route('/status', methods=['GET'])
 def status():
@@ -116,9 +118,13 @@ def forgot_license():
     
     result = license_manager.find_license_by_email(email)
     
+    if result.get('success'):
+        # Send email with license key
+        license_key = result.get('license_key')
+        email_service.send_license_email(email, license_key, customer_name="Customer")
+    
     status_code = 200 if result.get('success') else 404 if result.get('error') == 'no_license_found' else 400
     return jsonify(result), status_code
-
 @api_bp.route('/trial/create', methods=['POST'])
 def create_trial():
     """Create a trial license for a user"""
@@ -134,6 +140,11 @@ def create_trial():
         return jsonify({'success': False, 'error': 'missing_parameters'}), 400
     
     result = license_manager.create_trial_license(email, hardware_id, device_name)
+    
+    if result.get('success'):
+        # Send trial email to user
+        license_key = result.get('license_key')
+        email_service.send_trial_email(email, license_key)
     
     status_code = 201 if result.get('success') else 400
     return jsonify(result), status_code
