@@ -3,6 +3,7 @@ from . import api_bp
 from services.trial_manager import TrialManager
 from services.license_manager import LicenseManager
 from services.email_service import EmailService
+from services.rate_limiter import rate_limiter
 
 trial_manager = TrialManager()
 license_manager = LicenseManager()
@@ -116,12 +117,24 @@ def forgot_license():
     if not email:
         return jsonify({'success': False, 'error': 'email_required'}), 400
     
+    # Rate limiting check
+    ip_address = request.remote_addr
+    rate_check = rate_limiter.check_rate_limit('forgot_license', email=email, ip_address=ip_address)
+    
+    if not rate_check['allowed']:
+        return jsonify({
+            'success': False,
+            'error': 'rate_limit_exceeded',
+            'message': rate_check['message'],
+            'retry_after': rate_check['retry_after']
+        }), 429  # HTTP 429 Too Many Requests
+    
     result = license_manager.find_license_by_email(email)
     
     if result.get('success'):
-        # Send email with license key
+        # Send email with recovered license key
         license_key = result.get('license_key')
-        email_service.send_license_email(email, license_key, customer_name="Customer")
+        email_service.send_forgot_license_email(email, license_key)
     
     status_code = 200 if result.get('success') else 404 if result.get('error') == 'no_license_found' else 400
     return jsonify(result), status_code
@@ -138,6 +151,18 @@ def create_trial():
     
     if not all([email, hardware_id]):
         return jsonify({'success': False, 'error': 'missing_parameters'}), 400
+    
+    # Rate limiting check (very strict for trials)
+    ip_address = request.remote_addr
+    rate_check = rate_limiter.check_rate_limit('trial_create', email=email, ip_address=ip_address, hardware_id=hardware_id)
+    
+    if not rate_check['allowed']:
+        return jsonify({
+            'success': False,
+            'error': 'rate_limit_exceeded',
+            'message': rate_check['message'],
+            'retry_after': rate_check['retry_after']
+        }), 429  # HTTP 429 Too Many Requests
     
     result = license_manager.create_trial_license(email, hardware_id, device_name)
     

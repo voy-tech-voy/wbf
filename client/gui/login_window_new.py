@@ -702,9 +702,9 @@ class ModernLoginWindow(QDialog):
             pass
     
     def on_auto_login_toggled(self, state):
-        """Handle auto-login checkbox toggle - fill saved credentials"""
+        """Handle auto-login checkbox toggle - fill with last successful login credentials"""
         if self.auto_login_cb.isChecked():
-            # When toggled ON, fill in the saved credentials
+            # When toggled ON, fill in the last saved successful login credentials
             try:
                 path = self.get_config_path()
                 if path and os.path.exists(path):
@@ -725,9 +725,7 @@ class ModernLoginWindow(QDialog):
     
 
     def save_credentials(self, email, license_key):
-        """Save credentials locally if auto-login is checked"""
-        if not hasattr(self, 'auto_login_cb') or not self.auto_login_cb.isChecked():
-            return
+        """Save credentials locally on every successful login (for auto-login feature)"""
         try:
             path = self.get_config_path()
             if not path:
@@ -1659,7 +1657,7 @@ class ModernLoginWindow(QDialog):
         self.request_forgot_license(email)
     
     def request_forgot_license(self, email):
-        """Request forgot license from server"""
+        """Request forgot license from server - ALWAYS shows result"""
         try:
             from client.config.config import FORGOT_LICENSE_URL
             
@@ -1670,7 +1668,7 @@ class ModernLoginWindow(QDialog):
             result = response.json()
             
             if result.get('success'):
-                # License found
+                # License found and email sent
                 license_key = result.get('license_key', 'Unknown')
                 expiry_date = result.get('expiry_date', 'Unknown')
                 
@@ -1678,6 +1676,7 @@ class ModernLoginWindow(QDialog):
                 display_text = f"Your License Key:\n\n{license_key}"
                 if expiry_date and expiry_date != 'Unknown':
                     display_text += f"\n\nExpires: {expiry_date[:10]}"
+                display_text += f"\n\nAn email has been sent to:\n{email}"
                 
                 self._show_inline_forgot_message(
                     "License Found!",
@@ -1685,26 +1684,25 @@ class ModernLoginWindow(QDialog):
                     message_type="success"
                 )
             else:
-                # License not found
+                # License not found or error
                 error = result.get('error', 'unknown')
                 message = result.get('message', 'Failed to find license')
                 
                 if error == 'no_license_found':
                     message = 'No license found for this email address'
+                elif error == 'rate_limit_exceeded':
+                    retry_after = result.get('retry_after', 60)
+                    minutes = int(retry_after / 60)
+                    if minutes > 0:
+                        message = f'Too many requests. Please wait {minutes} minute(s) before trying again.'
+                    else:
+                        message = f'Too many requests. Please wait {retry_after} seconds before trying again.'
                 
                 self._show_inline_forgot_message(
-                    "License Not Found",
+                    "Request Failed" if error == 'rate_limit_exceeded' else "License Not Found",
                     message,
                     message_type="error"
                 )
-            
-            # Re-enable button
-            self.send_btn.setEnabled(True)
-            self.send_btn.setText("Send")
-            self.send_btn.setStyleSheet(
-                "QPushButton { background-color: transparent; color: white; border: 2px solid #2196f3; border-radius: 8px; }"
-            )
-            self.waiting_for_response = False
             
         except requests.exceptions.Timeout:
             self._show_inline_forgot_message(
@@ -1712,35 +1710,28 @@ class ModernLoginWindow(QDialog):
                 "The server took too long to respond. Please try again.",
                 message_type="error"
             )
-            self.send_btn.setEnabled(True)
-            self.send_btn.setText("Send")
-            self.send_btn.setStyleSheet(
-                "QPushButton { background-color: transparent; color: white; border: 2px solid #2196f3; border-radius: 8px; }"
-            )
-            self.waiting_for_response = False
         except requests.exceptions.ConnectionError:
             self._show_inline_forgot_message(
                 "No Internet Connection",
                 "Unable to connect to the server. Please check your internet connection and try again.",
                 message_type="error"
             )
-            self.send_btn.setEnabled(True)
-            self.send_btn.setText("Send")
-            self.send_btn.setStyleSheet(
-                "QPushButton { background-color: transparent; color: white; border: 2px solid #2196f3; border-radius: 8px; }"
-            )
-            self.waiting_for_response = False
         except Exception as e:
             self._show_inline_forgot_message(
                 "Error",
                 f"An error occurred: {str(e)}",
                 message_type="error"
             )
-            self.send_btn.setEnabled(True)
-            self.send_btn.setText("Send")
-            self.send_btn.setStyleSheet(
-                "QPushButton { background-color: transparent; color: white; border: 2px solid #2196f3; border-radius: 8px; }"
-            )
+        finally:
+            # ALWAYS re-enable button and reset state
+            try:
+                self.send_btn.setEnabled(True)
+                self.send_btn.setText("Send")
+                self.send_btn.setStyleSheet(
+                    "QPushButton { background-color: transparent; color: white; border: 2px solid #2196f3; border-radius: 8px; }"
+                )
+            except:
+                pass
             self.waiting_for_response = False
 
     def _show_inline_forgot_message(self, title, subtitle, message_type="info"):
