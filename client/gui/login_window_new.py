@@ -18,6 +18,7 @@ from PyQt5.QtCore import Qt, QSize, QTimer, pyqtSignal, QPoint, QByteArray
 from PyQt5.QtGui import QFont, QIcon, QPixmap, QColor, QPainter, QPalette
 from PyQt5.QtSvg import QSvgWidget, QSvgRenderer
 from client.utils.font_manager import AppFonts, FONT_FAMILY
+from client.utils.server_health import ServerHealthChecker
 from client.version import APP_NAME
 import requests
 
@@ -207,6 +208,7 @@ class ModernLoginWindow(QDialog):
         self.show_forgot_mode = False
         self.drag_position = None
         self.waiting_for_response = False
+        self.server_health_checker = ServerHealthChecker()
         
         self.setWindowTitle("ImgApp - Login")
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
@@ -773,6 +775,42 @@ class ModernLoginWindow(QDialog):
             self.accept()
             return
         
+        # Check server health BEFORE attempting login
+        self.login_btn.setEnabled(False)
+        self.login_btn.setText("Checking server...")
+        QApplication.processEvents()
+        
+        try:
+            from client.config.config import BASE_URL
+            status, details = self.server_health_checker.check_server_health(BASE_URL, timeout=5)
+            
+            if status != 'online':
+                # Server is not available
+                message_info = self.server_health_checker.get_user_message(status, details)
+                
+                self._show_server_error_message(
+                    title=message_info['title'],
+                    message=message_info['message'],
+                    action=message_info['action']
+                )
+                
+                # Re-enable button
+                self.login_btn.setEnabled(True)
+                self.login_btn.setText("Login")
+                return
+            
+            # Server is online - show slow connection warning if needed
+            if status == 'slow':
+                self.login_btn.setText("Login (slow connection...)")
+            else:
+                self.login_btn.setText("Logging in...")
+            
+            QApplication.processEvents()
+            
+        except Exception as e:
+            # If health check fails, continue anyway (don't block login)
+            print(f"Health check error (continuing): {e}")
+        
         # Validate with server
         self.validate_login_with_server(email, license_key)
     
@@ -907,6 +945,36 @@ class ModernLoginWindow(QDialog):
             self.license_input.setPlaceholderText(original_license_placeholder)
         
         QTimer.singleShot(2000, restore_original)
+    
+    def _show_server_error_message(self, title, message, action=None):
+        """Show server error message with user-friendly styling"""
+        # Create message widget
+        is_dark = self.is_dark_mode()
+        
+        message_widget = LoginMessage(title, message, is_dark=is_dark)
+        
+        # Add action button if provided
+        if action:
+            button_layout = QHBoxLayout()
+            button_layout.addStretch()
+            
+            retry_button = QPushButton(action)
+            retry_button.setFixedSize(150, 40)
+            retry_button.clicked.connect(self._close_centered_message)
+            
+            button_layout.addWidget(retry_button)
+            button_layout.addStretch()
+            
+            message_widget.layout().addSpacing(10)
+            message_widget.layout().addLayout(button_layout)
+        
+        # Show centered overlay
+        self._show_centered_message(message_widget)
+        self.message_widget = message_widget
+    
+    def _close_centered_message(self):
+        """Close the centered message overlay"""
+        self._remove_message_overlay()
     
     def reset_input_styles(self):
         """Reset input field styles to normal"""

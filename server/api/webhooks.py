@@ -2,6 +2,7 @@ from flask import jsonify, request
 from . import webhook_bp
 from services.license_manager import LicenseManager
 from services.email_service import EmailService
+from services.backup_manager import BackupManager
 import logging
 import json
 from datetime import datetime
@@ -10,6 +11,7 @@ import os
 logger = logging.getLogger(__name__)
 license_manager = LicenseManager()
 email_service = EmailService()
+backup_manager = BackupManager()
 
 # Webhook debug log file
 WEBHOOK_DEBUG_LOG = 'webhook_debug.jsonl'
@@ -157,6 +159,13 @@ def gumroad_webhook():
             return jsonify(error_response), 404
     
     # PURCHASE: If not a refund, process as new purchase
+    # Create backup before modifying data (safety measure)
+    try:
+        logger.info("Creating pre-webhook backup...")
+        backup_manager.create_backup('pre_webhook')
+    except Exception as e:
+        logger.warning(f"Failed to create backup (continuing anyway): {e}")
+    
     # Determine duration based on tier first, then product
     # Priority: tier variant > product permalink > default
     if tier and tier in TIER_DURATIONS:
@@ -168,35 +177,94 @@ def gumroad_webhook():
     
     # Normalize Gumroad data into standardized purchase_info structure
     purchase_info = normalize_gumroad_purchase(data, duration_days, tier)
+    purchase_info['expires_days'] = int(duration_days)
     
     logger.info(f"Normalized purchase info: {json.dumps(purchase_info, indent=2)}")
     
+    # Check if user had a trial (conversion scenario)
+    licenses = license_manager.load_licenses()
+    had_trial = False
+    trial_days_used = 0
+    
+    for lic_key, lic_data in licenses.items():
+        if lic_data.get('email', '').lower() == email.lower() and license_manager.is_trial_license(lic_key):
+            had_trial = True
+            # Calculate trial usage
+            try:
+                created = datetime.fromisoformat(lic_data.get('created_date'))
+                trial_days_used = (datetime.now() - created).days
+            except:
+                trial_days_used = 0
+            break
+    
     # Create License with structured purchase_info
     try:
-        license_key = license_manager.create_license(
-            email=email,
-            expires_days=int(duration_days),
-            license_key=None,
-            purchase_info=purchase_info
-        )
-        
-        if license_key:
-            # Send Email
-            email_sent = email_service.send_license_email(email, license_key, None)
+        if had_trial:
+            # Trial conversion - use special method
+            logger.info(f"🔄 Converting trial to full license for {email}")
             
-            response = {
-                "status": "success", 
-                "license_key": license_key,
-                "email_sent": email_sent
-            }
-            save_webhook_log(data, "success", response)
-            logger.info(f"License created successfully for {email}")
+            # Generate new license key
+            license_key = license_manager.generate_license_key()
             
-            return jsonify(response), 200
+            # Convert trial to full
+            full_license = license_manager.convert_trial_to_full(
+                email=email,
+                new_license_key=license_key,
+                purchase_info=purchase_info
+            )
+            
+            if full_license:
+                # Send upgrade email
+                email_sent = email_service.send_upgrade_email(
+                    to_email=email,
+                    license_key=license_key,
+                    trial_days_used=trial_days_used
+                )
+                
+                response = {
+                    "status": "success", 
+                    "type": "trial_conversion",
+                    "license_key": license_key,
+                    "trial_days_used": trial_days_used,
+                    "email_sent": email_sent
+                }
+                save_webhook_log(data, "success", response)
+                logger.info(f"✅ Trial converted to full license for {email}")
+                
+                return jsonify(response), 200
+            else:
+                error_response = {"error": "Failed to convert trial"}
+                save_webhook_log(data, "error", error_response)
+                return jsonify(error_response), 500
         else:
-            error_response = {"error": "Failed to create license"}
-            save_webhook_log(data, "error", error_response)
-            return jsonify(error_response), 500
+            # New customer (no trial history)
+            logger.info(f"ℹ️  New customer purchase: {email}")
+            
+            license_key = license_manager.create_license(
+                email=email,
+                expires_days=int(duration_days),
+                license_key=None,
+                purchase_info=purchase_info
+            )
+            
+            if license_key:
+                # Send welcome email
+                email_sent = email_service.send_license_email(email, license_key, None)
+                
+                response = {
+                    "status": "success",
+                    "type": "new_purchase", 
+                    "license_key": license_key,
+                    "email_sent": email_sent
+                }
+                save_webhook_log(data, "success", response)
+                logger.info(f"License created successfully for {email}")
+                
+                return jsonify(response), 200
+            else:
+                error_response = {"error": "Failed to create license"}
+                save_webhook_log(data, "error", error_response)
+                return jsonify(error_response), 500
             
     except Exception as e:
         logger.error(f"Exception processing webhook: {str(e)}", exc_info=True)

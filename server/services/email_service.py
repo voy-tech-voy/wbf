@@ -183,3 +183,72 @@ The {APP_NAME} Team
         except Exception as e:
             logger.error(f"Failed to send forgot license email: {e}")
             return False
+
+    def send_upgrade_email(self, to_email, license_key, trial_days_used=0):
+        """
+        Send upgrade confirmation email (trial → full license)
+        
+        Args:
+            to_email: Customer email
+            license_key: New full license key
+            trial_days_used: Number of days trial was used
+        """
+        if not self.username or not self.password:
+            logger.warning("Email credentials not configured. Skipping upgrade email send.")
+            logger.info(f"Would have sent upgrade email for license {license_key} to {to_email}")
+            return False
+
+        try:
+            msg = MIMEMultipart()
+            msg['From'] = self.from_email
+            msg['To'] = to_email
+            msg['Subject'] = f"🎉 Welcome to {APP_NAME} - Full License Activated!"
+
+            body = f"""
+Hello!
+
+🎉 **Congratulations!** Your {APP_NAME} trial has been upgraded to a full license!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+YOUR FULL LICENSE KEY:
+{license_key}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 **Your Trial Stats:**
+You used {APP_NAME} for {trial_days_used} day(s) during your trial period. We're glad you decided to upgrade!
+
+🔑 **What's Changed:**
+✅ Your trial license has been automatically upgraded
+✅ All your settings and preferences are preserved
+✅ No need to reinstall or reconfigure
+✅ Unlimited access to all features
+✅ Lifetime updates and support
+
+📱 **Next Login:**
+The next time you open {APP_NAME}, it will automatically use your new full license. No action needed!
+
+If you manually entered your trial license, you can replace it with your new full license key above.
+
+💡 **Need Help?**
+If you have any questions or need assistance, simply reply to this email.
+
+Thank you for choosing {APP_NAME}! 🚀
+
+Best regards,
+The {APP_NAME} Team
+"""
+            msg.attach(MIMEText(body, 'plain'))
+
+            server = smtplib.SMTP(self.smtp_server, self.smtp_port)
+            server.starttls()
+            server.login(self.username, self.password)
+            text = msg.as_string()
+            server.sendmail(self.from_email, to_email, text)
+            server.quit()
+            
+            logger.info(f"Upgrade email sent to {to_email}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to send upgrade email: {e}")
+            return False

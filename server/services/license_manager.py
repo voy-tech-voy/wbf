@@ -312,9 +312,22 @@ class LicenseManager:
             
             license_data = licenses[license_key]
             
+            # Check if this is a converted trial
+            if license_data.get('converted_to_full'):
+                full_key = license_data.get('full_license_key', 'your full license key')
+                return {
+                    'success': False,
+                    'error': 'trial_converted',
+                    'message': f'Your trial has been upgraded to a full license. Please use your full license key sent to {email}.'
+                }
+            
             # Check if license is active
             if not license_data.get('is_active', False):
                 return {'success': False, 'error': 'license_deactivated'}
+            
+            # If this is a full license (not trial), deactivate any active trials for this email
+            if not self.is_trial_license(license_key):
+                self._deactivate_trial_for_email(email)
             
             # Check email match
             if license_data['email'] != email:
@@ -577,6 +590,119 @@ class LicenseManager:
         except Exception as e:
             logger.error(f"Failed to get license info: {e}")
             return {'success': False, 'error': 'lookup_failed'}    
+    def convert_trial_to_full(self, email, new_license_key, purchase_info):
+        """
+        Convert trial license to full license (industry standard flow)
+        
+        Best Practice Flow:
+        1. Find existing trial in licenses.json
+        2. Archive trial data (keep for analytics/audit)
+        3. Create full license with trial history
+        4. Mark trial as converted (don't delete - audit trail)
+        
+        Args:
+            email: User's email address
+            new_license_key: New full license key from purchase
+            purchase_info: Dictionary with purchase details (product, price, date, etc.)
+        
+        Returns:
+            Full license dictionary
+        """
+        try:
+            licenses = self.load_licenses()
+            
+            # Find trial license by email
+            trial_key = None
+            trial_data = None
+            for lic_key, lic_data in licenses.items():
+                if lic_data.get('email', '').lower() == email.lower() and self.is_trial_license(lic_key):
+                    trial_key = lic_key
+                    trial_data = lic_data
+                    break
+            
+            if trial_data:
+                # Calculate trial usage stats
+                trial_start = datetime.fromisoformat(trial_data.get('created_date'))
+                trial_duration_days = (datetime.now() - trial_start).days
+                
+                # Mark trial as converted (keep for audit trail)
+                trial_data['converted_to_full'] = True
+                trial_data['conversion_date'] = datetime.now().isoformat()
+                trial_data['full_license_key'] = new_license_key
+                trial_data['is_active'] = False  # Deactivate trial
+                trial_data['trial_duration_days'] = trial_duration_days
+                
+                # Update trial in licenses
+                licenses[trial_key] = trial_data
+                
+                logger.info(
+                    f"✅ Trial converted to full license\n"
+                    f"   Email: {email}\n"
+                    f"   Trial duration: {trial_duration_days} days\n"
+                    f"   New license: {new_license_key[:8]}..."
+                )
+            else:
+                logger.info(f"ℹ️  No trial found for {email} (new customer)")
+            
+            # Create full license with trial history
+            expiry_date = datetime.now() + timedelta(days=purchase_info.get('expires_days', 36500))
+            
+            full_license = {
+                'email': email,
+                'created_date': datetime.now().isoformat(),
+                'expiry_date': expiry_date.isoformat(),
+                'is_active': True,
+                'hardware_id': trial_data.get('hardware_id') if trial_data else None,
+                'device_name': trial_data.get('device_name') if trial_data else None,
+                'last_validation': datetime.now().isoformat(),
+                'validation_count': 0,
+                'source_license_key': purchase_info.get('source_license_key'),
+                'was_trial': trial_data is not None,
+                'trial_started': trial_data.get('created_date') if trial_data else None,
+                'trial_duration_days': trial_data.get('trial_duration_days', 0) if trial_data else 0
+            }
+            
+            # Save full license
+            licenses[new_license_key] = full_license
+            self.save_licenses(licenses)
+            
+            logger.info(f"✅ Full license created: {new_license_key[:8]}... for {email}")
+            
+            return full_license
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to convert trial to full: {e}")
+            return None
+    
+    def _deactivate_trial_for_email(self, email):
+        """
+        Deactivate trial when full license is activated
+        
+        Keeps trial record for audit trail but marks as superseded
+        """
+        try:
+            licenses = self.load_licenses()
+            email_lower = email.lower()
+            
+            for license_key, license_data in licenses.items():
+                if license_data.get('email', '').lower() == email_lower and self.is_trial_license(license_key):
+                    if license_data.get('is_active'):
+                        license_data['is_active'] = False
+                        license_data['deactivated_at'] = datetime.now().isoformat()
+                        license_data['deactivation_reason'] = 'superseded_by_full'
+                        
+                        licenses[license_key] = license_data
+                        self.save_licenses(licenses)
+                        
+                        logger.info(f"✅ Trial deactivated for {email} (superseded by full license)")
+                        return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to deactivate trial: {e}")
+            return False
+
     def find_license_by_email(self, email):
         """Find and return a license key for a given email
         
