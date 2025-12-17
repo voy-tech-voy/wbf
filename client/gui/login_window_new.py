@@ -215,7 +215,7 @@ class EmailInput(QLineEdit):
             f"  border: 2px solid #ff0000;"
             f"  border-radius: 8px;"
             f"  padding: 10px;"
-            f"  background-color: {'#2b2b2b' if is_dark else '#ffffff'};"
+            f"  background-color: {'#2b2b2b' if is_dark else '#e8e8e8'};"
             f"  color: {'white' if is_dark else 'black'};"
             f"}}"
             f"QLineEdit::placeholder {{"
@@ -266,7 +266,7 @@ class EmailInput(QLineEdit):
             border_color = "#555555"
             placeholder_color = "#dddddd"  # Darker/brighter in dark mode (more visible)
         else:
-            bg_color = "#ffffff"
+            bg_color = "#e8e8e8"
             text_color = "black"
             border_color = "#cccccc"
             placeholder_color = "#444444"  # Brighter/darker in light mode (more visible)
@@ -336,6 +336,7 @@ class StoreButton(QPushButton):
     """Reusable store button component with SVG icon"""
     def __init__(self, svg_filename, store_url, parent=None):
         super().__init__(parent)
+        self.svg_filename = svg_filename
         self.store_url = store_url
         self.setFixedSize(350, 65)
         self.setFlat(False)
@@ -350,8 +351,12 @@ class StoreButton(QPushButton):
         )
         self.clicked.connect(self.open_store)
         
-        # Load SVG icon with preserved aspect ratio
-        icon_path = os.path.join(os.path.dirname(__file__), "../assets/icons", svg_filename)
+        # Load SVG icon
+        self.reload_icon()
+    
+    def reload_icon(self):
+        """Reload SVG icon with current theme colors"""
+        icon_path = os.path.join(os.path.dirname(__file__), "../assets/icons", self.svg_filename)
         if os.path.exists(icon_path):
             # Determine fill color based on dark mode
             dark_mode = is_dark_mode()
@@ -363,31 +368,46 @@ class StoreButton(QPushButton):
             
             # Replace all fill="..." with the desired color using regex
             import re
+            import tempfile
+            # Replace both double and single quoted fill attributes
             svg_content = re.sub(r'fill="[^"]*"', f'fill="{fill_color}"', svg_content)
-            # Also replace fill='...' (single quotes)
             svg_content = re.sub(r"fill='[^']*'", f"fill='{fill_color}'", svg_content)
-            # Handle fill without explicit color (add color to svg root if needed)
-            if 'fill=' not in svg_content:
-                svg_content = svg_content.replace('<svg', f'<svg fill="{fill_color}"', 1)
             
-            # Create renderer from modified SVG content
-            renderer = QSvgRenderer(QByteArray(svg_content.encode()))
-            svg_size = renderer.defaultSize()
-            aspect = svg_size.width() / svg_size.height()
+            # Also check for any path/other elements without explicit fill and add it
+            # This ensures all elements get the right color even if they don't have fill attribute
+            svg_content = re.sub(r'<path([^>]*?)>', lambda m: f'<path{m.group(1)} fill="{fill_color}">' if 'fill=' not in m.group(1) else f'<path{m.group(1)}>', svg_content)
             
-            # Calculate size maintaining aspect ratio (max width 225px, max height 38px = 75% of original)
-            if aspect > 6:  # Wide logo
-                pixmap = QPixmap(225, int(225 / aspect))
-            else:
-                pixmap = QPixmap(int(38 * aspect), 38)
+            # Write modified SVG to temporary file (QSvgRenderer works better with files)
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.svg', delete=False) as tmp:
+                tmp.write(svg_content)
+                tmp_path = tmp.name
             
-            pixmap.fill(Qt.transparent)
-            painter = QPainter(pixmap)
-            renderer.render(painter)
-            painter.end()
-            
-            self.setIcon(QIcon(pixmap))
-            self.setIconSize(pixmap.size())
+            try:
+                # Create renderer from temporary file
+                renderer = QSvgRenderer(tmp_path)
+                svg_size = renderer.defaultSize()
+                aspect = svg_size.width() / svg_size.height()
+                
+                # Calculate size maintaining aspect ratio (max width 225px, max height 38px = 75% of original)
+                if aspect > 6:  # Wide logo
+                    pixmap = QPixmap(225, int(225 / aspect))
+                else:
+                    pixmap = QPixmap(int(38 * aspect), 38)
+                
+                pixmap.fill(Qt.transparent)
+                painter = QPainter(pixmap)
+                renderer.render(painter)
+                painter.end()
+                
+                self.setIcon(QIcon(pixmap))
+                self.setIconSize(pixmap.size())
+            finally:
+                # Clean up temporary file
+                import os as os_module
+                try:
+                    os_module.unlink(tmp_path)
+                except:
+                    pass
     
     def open_store(self):
         """Open store URL in browser"""
@@ -500,11 +520,12 @@ class ModernLoginWindow(QDialog):
         self.overlay_widget = overlay
     
     def center_on_screen(self):
-        """Center the window on the screen"""
+        """Center the window on the screen, shifted to the right"""
         geometry = self.frameGeometry()
         center_point = QDesktopWidget().availableGeometry().center()
         geometry.moveCenter(center_point)
-        self.move(geometry.topLeft())
+        # Shift 150px to the right
+        self.move(geometry.topLeft().x() + 150, geometry.topLeft().y())
         
     def setup_ui(self):
         """Setup the main UI layout"""
@@ -534,10 +555,38 @@ class ModernLoginWindow(QDialog):
         login_layout.setContentsMargins(30, 5, 30, 30)
         login_layout.setSpacing(0)
         
-        # Close button at top right corner
-        top_right_layout = QHBoxLayout()
-        top_right_layout.setContentsMargins(0, 0, 0, 0)
-        top_right_layout.addStretch()
+        # Top bar with theme toggle (left) and close button (right)
+        top_bar_layout = QHBoxLayout()
+        top_bar_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Dark mode toggle button (sun/moon icon) - left side
+        # DISABLED: Toggle functionality commented out as requested
+        # self.theme_toggle_btn = QPushButton()
+        # self.theme_toggle_btn.setFixedSize(30, 30)
+        # self.theme_toggle_btn.setFlat(True)
+        # self.theme_toggle_btn.setCursor(Qt.PointingHandCursor)
+        # self.theme_toggle_btn.setStyleSheet(
+        #     "QPushButton { background: transparent; border: none; }"
+        #     "QPushButton:hover { background: rgba(0, 0, 0, 0.1); border-radius: 4px; }"
+        # )
+        # # Load SVG icon
+        # try:
+        #     svg_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'icons', 'sun-moon.svg')
+        #     if os.path.exists(svg_path):
+        #         icon = QIcon(svg_path)
+        #         self.theme_toggle_btn.setIcon(icon)
+        #         self.theme_toggle_btn.setIconSize(QSize(24, 24))
+        # except:
+        #     # Fallback to emoji if SVG not found
+        #     self.theme_toggle_btn.setText("☀️" if self.is_dark_mode() else "🌙")
+        #     self.theme_toggle_btn.setFont(QFont(FONT_FAMILY, 16))
+        # self.theme_toggle_btn.clicked.connect(self.toggle_dark_mode)
+        # top_bar_layout.addWidget(self.theme_toggle_btn)
+        
+        # Stretch in middle
+        top_bar_layout.addStretch()
+        
+        # Close button on right side
         close_btn = QPushButton("×")
         close_btn.setFixedSize(30, 30)
         close_btn.setFont(QFont(FONT_FAMILY, 18, QFont.Bold))
@@ -548,8 +597,9 @@ class ModernLoginWindow(QDialog):
             "QPushButton:hover { color: #ccc; }"
         )
         close_btn.clicked.connect(self.reject)
-        top_right_layout.addWidget(close_btn)
-        login_layout.addLayout(top_right_layout)
+        top_bar_layout.addWidget(close_btn)
+        
+        login_layout.addLayout(top_bar_layout)
         login_layout.addSpacing(5)
         
         # App icon and name - fixed at top
@@ -618,9 +668,9 @@ class ModernLoginWindow(QDialog):
         self.auto_login_cb.setFont(QFont(FONT_FAMILY, 11))
         # Custom toggle style with grey text
         is_dark = self.is_dark_mode()
-        bg_color = "#2b2b2b" if is_dark else "#ffffff"
+        bg_color = "#2b2b2b" if is_dark else "#e8e8e8"
         auto_login_style = (
-            f"QCheckBox {{ color: #999999; }} "
+            f"QCheckBox {{ color: {'#cccccc' if is_dark else '#333333'}; }} "
             f"QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 8px;"
             f" border: 2px solid #43a047; background: {bg_color}; }}"
             "QCheckBox::indicator:checked { background: #43a047; border: 2px solid #2e7d32; }"
@@ -785,7 +835,7 @@ class ModernLoginWindow(QDialog):
             login_bg = "#2b2b2b"
             text_color = "white"
         else:
-            login_bg = "#ffffff"
+            login_bg = "#e8e8e8"
             text_color = "black"
         
         self.login_section.setStyleSheet(f"background-color: {login_bg};")
@@ -813,6 +863,17 @@ class ModernLoginWindow(QDialog):
         # Update buttons
         if hasattr(self, 'remember_cb'):
             self.remember_cb.setStyleSheet(f"color: {text_color};")
+        if hasattr(self, 'auto_login_cb'):
+            # Update auto-login checkbox background and text color
+            bg_color = "#2b2b2b" if is_dark else "#e8e8e8"
+            auto_login_style = (
+                f"QCheckBox {{ color: {text_color}; }} "
+                f"QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 8px;"
+                f" border: 2px solid #43a047; background: {bg_color}; }}"
+                "QCheckBox::indicator:checked { background: #43a047; border: 2px solid #2e7d32; }"
+                "QCheckBox::indicator:unchecked:hover { border: 2px solid #2e7d32; }"
+            )
+            self.auto_login_cb.setStyleSheet(auto_login_style)
         if hasattr(self, 'close_btn'):
             self.close_btn.setStyleSheet(f"color: {text_color}; background-color: transparent; border: none;")
         
@@ -840,15 +901,28 @@ class ModernLoginWindow(QDialog):
         if hasattr(self, 'trial_btn'):
             self.trial_btn.setStyleSheet(trial_btn_style)
         
-        # Update store button icons for dark mode (set white fill)
-        if is_dark and hasattr(self, 'msstore_icon_path'):
-            pixmap = self._load_svg_with_color(self.msstore_icon_path, QColor("white"), 80)
-            if pixmap:
-                self.msstore_btn.setIcon(QIcon(pixmap))
-        if is_dark and hasattr(self, 'gumroad_icon_path'):
-            pixmap = self._load_svg_with_color(self.gumroad_icon_path, QColor("white"), 80)
-            if pixmap:
-                self.gumroad_btn.setIcon(QIcon(pixmap))
+        # Update send button styling (forgot password flow)
+        send_btn_style = (
+            f"QPushButton {{ "
+            f"background-color: transparent; "
+            f"color: {text_color}; "
+            f"border: 2px solid #2196f3; "
+            f"border-radius: 8px; "
+            f"}} "
+            f"QPushButton:hover {{ background-color: #2196f3; color: white; }}"
+        )
+        if hasattr(self, 'send_btn'):
+            self.send_btn.setStyleSheet(send_btn_style)
+        
+        # Update trial send button styling (trial flow)
+        if hasattr(self, 'trial_send_btn'):
+            self.trial_send_btn.setStyleSheet(send_btn_style)
+        
+        # Update store button icons for both light and dark modes
+        if hasattr(self, 'msstore_btn'):
+            self.msstore_btn.reload_icon()
+        if hasattr(self, 'gumroad_btn'):
+            self.gumroad_btn.reload_icon()
         
         # Update store buttons styling
         if hasattr(self, 'msstore_btn'):
@@ -918,6 +992,27 @@ class ModernLoginWindow(QDialog):
             return apps_use_light_theme == 0
         except:
             return False
+    
+    def toggle_dark_mode(self):
+        """Toggle between light and dark mode"""
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                               r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+                               0, winreg.KEY_WRITE)
+            current = self.is_dark_mode()
+            # Set to opposite: if dark (True), set to light (1); if light (False), set to dark (0)
+            new_value = 1 if current else 0
+            winreg.SetValueEx(key, "AppsUseLightTheme", 0, winreg.REG_DWORD, new_value)
+            winreg.CloseKey(key)
+            
+            # Update UI immediately
+            self.apply_theme()
+            
+            print(f"✅ Theme toggled to {'dark' if self.is_dark_mode() else 'light'} mode")
+        except Exception as e:
+            print(f"⚠️  Could not toggle dark mode: {e}")
+    
     
     def get_config_path(self):
         """Get path for local user config"""
@@ -1155,7 +1250,7 @@ class ModernLoginWindow(QDialog):
             login_bg = "#2b2b2b"
             text_color = "white"
         else:
-            login_bg = "#ffffff"
+            login_bg = "#e8e8e8"
             text_color = "black"
         
         # Apply red border style
@@ -1223,7 +1318,7 @@ class ModernLoginWindow(QDialog):
             login_bg = "#2b2b2b"
             text_color = "white"
         else:
-            login_bg = "#ffffff"
+            login_bg = "#e8e8e8"
             text_color = "black"
         
         input_style = f"""
@@ -1335,14 +1430,16 @@ class ModernLoginWindow(QDialog):
         self.send_btn = QPushButton("Send")
         self.send_btn.setFixedSize(350, 65)
         self.send_btn.setFont(QFont(FONT_FAMILY, 14, QFont.Bold))
+        is_dark = is_dark_mode()
+        btn_text_color = "white" if is_dark else "black"
         self.send_btn.setStyleSheet(
-            "QPushButton { "
-            "background-color: transparent; "
-            "color: white; "
-            "border: 2px solid #2196f3; "
-            "border-radius: 8px; "
-            "} "
-            "QPushButton:hover { background-color: #2196f3; color: white; }"
+            f"QPushButton {{ "
+            f"background-color: transparent; "
+            f"color: {btn_text_color}; "
+            f"border: 2px solid #2196f3; "
+            f"border-radius: 8px; "
+            f"}} "
+            f"QPushButton:hover {{ background-color: #2196f3; color: white; }}"
         )
         self.send_btn.clicked.connect(self.handle_resend)
         
@@ -1444,14 +1541,16 @@ class ModernLoginWindow(QDialog):
         self.trial_send_btn = QPushButton("enter trial mode")
         self.trial_send_btn.setFixedSize(350, 65)
         self.trial_send_btn.setFont(QFont(FONT_FAMILY, 14, QFont.Bold))
+        is_dark = is_dark_mode()
+        btn_text_color = "white" if is_dark else "black"
         self.trial_send_btn.setStyleSheet(
-            "QPushButton { "
-            "background-color: transparent; "
-            "color: white; "
-            "border: 2px solid #2196f3; "
-            "border-radius: 8px; "
-            "} "
-            "QPushButton:hover { background-color: #2196f3; color: white; }"
+            f"QPushButton {{ "
+            f"background-color: transparent; "
+            f"color: {btn_text_color}; "
+            f"border: 2px solid #2196f3; "
+            f"border-radius: 8px; "
+            f"}} "
+            f"QPushButton:hover {{ background-color: #2196f3; color: white; }}"
         )
         self.trial_send_btn.clicked.connect(self.handle_trial_send)
         
@@ -1844,7 +1943,7 @@ class ModernLoginWindow(QDialog):
             login_bg = "#2b2b2b"
             text_color = "white"
         else:
-            login_bg = "#ffffff"
+            login_bg = "#e8e8e8"
             text_color = "black"
         
         input_style = f"""

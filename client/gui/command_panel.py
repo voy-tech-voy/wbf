@@ -323,6 +323,7 @@ class CommandPanel(QWidget):
     def update_theme(self, is_dark):
         """Update theme-dependent styles"""
         style = get_toggle_style(is_dark)
+        combobox_style = get_combobox_style(is_dark)
         
         # Update all toggle controls
         toggles = self.findChildren((QCheckBox, QRadioButton))
@@ -344,6 +345,11 @@ class CommandPanel(QWidget):
                 getattr(self, 'output_mode_nested', None)
             ]:
                 toggle.setStyleSheet(style)
+        
+        # Update all ComboBox controls
+        comboboxes = self.findChildren(QComboBox)
+        for combobox in comboboxes:
+            combobox.setStyleSheet(combobox_style)
 
     def setup_ui(self):
         """Setup the command panel interface"""
