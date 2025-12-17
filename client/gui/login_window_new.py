@@ -823,6 +823,9 @@ class ModernLoginWindow(QDialog):
                 elif error == 'invalid_license':
                     message = 'Invalid license key'
                 
+                # Visual feedback: Red outline and placeholder text
+                self._show_login_error_visual()
+                
                 self._show_inline_message("Login Failed", message, message_type="error")
                 
                 # Reset button
@@ -861,6 +864,49 @@ class ModernLoginWindow(QDialog):
     def handle_trial(self):
         """Show trial mode UI"""
         self.show_trial_mode_ui()
+    
+    def _show_login_error_visual(self):
+        """Show visual feedback for failed login - red outline and placeholder"""
+        # Store original placeholders
+        original_email_placeholder = self.email_input.placeholderText()
+        original_license_placeholder = self.license_input.placeholderText()
+        
+        # Get current style to preserve dark/light mode colors
+        is_dark = self.is_dark_mode()
+        if is_dark:
+            login_bg = "#2b2b2b"
+            text_color = "white"
+        else:
+            login_bg = "#ffffff"
+            text_color = "black"
+        
+        # Apply red border style
+        error_style = f"""
+            QLineEdit {{
+                background-color: {login_bg};
+                color: {text_color};
+                border: 2px solid red;
+                border-radius: 4px;
+                padding: 10px;
+            }}
+            QLineEdit::placeholder {{
+                color: #ff6b6b;
+            }}
+        """
+        
+        self.email_input.setStyleSheet(error_style)
+        self.email_input.setPlaceholderText("Incorrect login")
+        
+        self.license_input.setStyleSheet(error_style)
+        self.license_input.setPlaceholderText("Incorrect login")
+        
+        # Reset after 2 seconds
+        def restore_original():
+            self.reset_input_styles()
+            self.email_input.setPlaceholderText(original_email_placeholder)
+            self.license_input.setPlaceholderText(original_license_placeholder)
+        
+        QTimer.singleShot(2000, restore_original)
     
     def reset_input_styles(self):
         """Reset input field styles to normal"""
@@ -1254,12 +1300,12 @@ class ModernLoginWindow(QDialog):
                     if reason == 'trial_already_used_email':
                         self.show_trial_warning_dialog(
                             "Trial Already Used",
-                            "You have already used your free trial with this email address."
+                            "You have used your free trial with this email address."
                         )
                     elif reason == 'trial_already_used_hardware':
                         self.show_trial_warning_dialog(
                             "Trial Already Used",
-                            "This device has already been used for a free trial."
+                            "This device has been used for a free trial."
                         )
                     else:
                         self.show_trial_warning_dialog("Not Eligible", message)
@@ -1631,7 +1677,7 @@ class ModernLoginWindow(QDialog):
                 if email_norm == "f@f.com":
                     self._show_inline_forgot_message(
                         "License Found",
-                        "IW-123456-ABCDEF12",
+                        "license_key_12345",
                         message_type="success"
                     )
                 else:
@@ -1673,10 +1719,10 @@ class ModernLoginWindow(QDialog):
                 expiry_date = result.get('expiry_date', 'Unknown')
                 
                 # Show license key to user
-                display_text = f"Your License Key:\n\n{license_key}"
+                display_text = f"Your License Key has been found!"
                 if expiry_date and expiry_date != 'Unknown':
                     display_text += f"\n\nExpires: {expiry_date[:10]}"
-                display_text += f"\n\nAn email has been sent to:\n{email}"
+                display_text += f"\n\nAn email with your license key \n has been sent to:\n{email}"
                 
                 self._show_inline_forgot_message(
                     "License Found!",
