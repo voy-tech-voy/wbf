@@ -155,3 +155,23 @@ def check_trial_eligibility():
     
     status_code = 200
     return jsonify(result), status_code
+
+
+@api_bp.route('/trial/status', methods=['GET', 'POST'])
+def trial_status():
+    """Get trial status for a license key"""
+    if request.method == 'POST':
+        data = request.get_json()
+        license_key = data.get('license_key') if data else None
+    else:
+        license_key = request.args.get('license_key')
+    
+    if not license_key:
+        return jsonify({'error': 'missing_license_key'}), 400
+    
+    result = license_manager.check_trial_status(license_key)
+    
+    if 'error' in result:
+        return jsonify(result), 404
+    
+    return jsonify(result), 200

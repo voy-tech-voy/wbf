@@ -23,6 +23,7 @@ class Config:
     # Trial Configuration
     TRIAL_CHECK_ELIGIBILITY_ENDPOINT = f"{API_PREFIX}/trial/check-eligibility"
     TRIAL_CREATE_ENDPOINT = f"{API_PREFIX}/trial/create"
+    TRIAL_STATUS_ENDPOINT = f"{API_PREFIX}/trial/status"
     
     # Application Configuration
     APP_NAME = "ImageWave Converter"
@@ -71,3 +72,4 @@ FORGOT_LICENSE_URL = f"{API_BASE_URL}{current_config.LICENSE_FORGOT_ENDPOINT}"
 # Trial System URLs
 TRIAL_CHECK_ELIGIBILITY_URL = f"{API_BASE_URL}{current_config.TRIAL_CHECK_ELIGIBILITY_ENDPOINT}"
 TRIAL_CREATE_URL = f"{API_BASE_URL}{current_config.TRIAL_CREATE_ENDPOINT}"
+TRIAL_STATUS_URL = f"{API_BASE_URL}{current_config.TRIAL_STATUS_ENDPOINT}"
