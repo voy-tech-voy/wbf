@@ -1,0 +1,1705 @@
+"""
+New Login Window for ImgApp
+Modern split-layout with media display and login section
+"""
+
+import os
+import json
+import sys
+import socket
+import platform
+from datetime import datetime
+from datetime import timedelta
+from PyQt5.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QFrame, QCheckBox, QMessageBox, QApplication, QDesktopWidget, QWidget
+)
+from PyQt5.QtCore import Qt, QSize, QTimer, pyqtSignal, QPoint, QByteArray
+from PyQt5.QtGui import QFont, QIcon, QPixmap, QColor, QPainter, QPalette
+from PyQt5.QtSvg import QSvgWidget, QSvgRenderer
+from client.utils.font_manager import AppFonts, FONT_FAMILY
+from client.version import APP_NAME
+import requests
+
+# Development mode detection
+DEVELOPMENT_MODE = getattr(sys, '_called_from_test', False) or __debug__ and not getattr(sys, 'frozen', False)
+
+# Helper function to detect dark mode
+def is_dark_mode():
+    """Check if system is in dark mode"""
+    if sys.platform == 'win32':
+        try:
+            import winreg
+            registry_path = r'Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
+            registry_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, registry_path)
+            value, _ = winreg.QueryValueEx(registry_key, 'AppsUseLightTheme')
+            return value == 0
+        except Exception:
+            return True
+    return True
+
+def get_toggle_style(is_dark=None):
+    """Get toggle style matching main app style"""
+    if is_dark is None:
+        is_dark = is_dark_mode()
+    bg_color = "#2b2b2b" if is_dark else "#ffffff"
+    text_color = "white" if is_dark else "black"
+    
+    return (
+        f"QCheckBox {{ color: {text_color}; }} "
+        f"QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 8px;"
+        f" border: 2px solid #43a047; background: {bg_color}; }}"
+        "QCheckBox::indicator:checked { background: #43a047; border: 2px solid #2e7d32; }"
+        "QCheckBox::indicator:unchecked:hover { border: 2px solid #2e7d32; }"
+    )
+
+
+class LoginLineEdit(QLineEdit):
+    """Unified line edit for login window inputs"""
+    def __init__(self, placeholder_text="", is_password=False, parent=None):
+        super().__init__(parent)
+        self.setPlaceholderText(placeholder_text)
+        self.setFixedSize(350, 50)
+        self.setFont(QFont(FONT_FAMILY, 14))
+        self.setAlignment(Qt.AlignCenter)
+        if is_password:
+            self.setEchoMode(QLineEdit.Password)
+        
+        # Apply styling
+        self.apply_theme_style(is_dark_mode())
+    
+    def apply_theme_style(self, is_dark):
+        """Apply theme-aware styling"""
+        if is_dark:
+            bg_color = "#2b2b2b"
+            text_color = "white"
+            border_color = "#555555"
+        else:
+            bg_color = "#ffffff"
+            text_color = "black"
+            border_color = "#cccccc"
+        
+        style = f"""
+            QLineEdit {{
+                background-color: {bg_color};
+                color: {text_color};
+                border: 1px solid {border_color};
+                border-radius: 4px;
+                padding: 10px;
+            }}
+            QLineEdit::placeholder {{
+                color: #999;
+            }}
+        """
+        self.setStyleSheet(style)
+
+
+class StoreButton(QPushButton):
+    """Reusable store button component with SVG icon"""
+    def __init__(self, svg_filename, store_url, parent=None):
+        super().__init__(parent)
+        self.store_url = store_url
+        self.setFixedSize(350, 65)
+        self.setFlat(False)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setStyleSheet(
+            "QPushButton { "
+            "border: 2px solid #ccc; "
+            "border-radius: 8px; "
+            "background-color: transparent; "
+            "} "
+            "QPushButton:hover { border: 2px solid #999; background-color: rgba(0, 0, 0, 0.05); }"
+        )
+        self.clicked.connect(self.open_store)
+        
+        # Load SVG icon with preserved aspect ratio
+        icon_path = os.path.join(os.path.dirname(__file__), "../assets/icons", svg_filename)
+        if os.path.exists(icon_path):
+            # Determine fill color based on dark mode
+            dark_mode = is_dark_mode()
+            fill_color = "white" if dark_mode else "black"
+            
+            # Read SVG and inject fill color
+            with open(icon_path, 'r') as f:
+                svg_content = f.read()
+            
+            # Replace all fill="..." with the desired color using regex
+            import re
+            svg_content = re.sub(r'fill="[^"]*"', f'fill="{fill_color}"', svg_content)
+            # Also replace fill='...' (single quotes)
+            svg_content = re.sub(r"fill='[^']*'", f"fill='{fill_color}'", svg_content)
+            # Handle fill without explicit color (add color to svg root if needed)
+            if 'fill=' not in svg_content:
+                svg_content = svg_content.replace('<svg', f'<svg fill="{fill_color}"', 1)
+            
+            # Create renderer from modified SVG content
+            renderer = QSvgRenderer(QByteArray(svg_content.encode()))
+            svg_size = renderer.defaultSize()
+            aspect = svg_size.width() / svg_size.height()
+            
+            # Calculate size maintaining aspect ratio (max width 225px, max height 38px = 75% of original)
+            if aspect > 6:  # Wide logo
+                pixmap = QPixmap(225, int(225 / aspect))
+            else:
+                pixmap = QPixmap(int(38 * aspect), 38)
+            
+            pixmap.fill(Qt.transparent)
+            painter = QPainter(pixmap)
+            renderer.render(painter)
+            painter.end()
+            
+            self.setIcon(QIcon(pixmap))
+            self.setIconSize(pixmap.size())
+    
+    def open_store(self):
+        """Open store URL in browser"""
+        import webbrowser
+        webbrowser.open(self.store_url)
+
+
+class LoginMessage(QWidget):
+    """Reusable message display widget that clears section and shows message"""
+    def __init__(self, title, subtitle="", is_dark=True, parent=None):
+        super().__init__(parent)
+        self.is_dark = is_dark
+        self.setFixedWidth(350)
+        
+        layout = QVBoxLayout()
+        layout.setSpacing(10)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Title
+        title_label = QLabel(title)
+        title_label.setFont(QFont(FONT_FAMILY, 13, QFont.Bold))
+        title_label.setAlignment(Qt.AlignCenter)
+        title_label.setWordWrap(True)
+        title_label.setFixedWidth(350)
+        title_color = "white" if is_dark else "#333333"
+        title_label.setStyleSheet(f"color: {title_color}; line-height: 1.4;")
+        layout.addWidget(title_label)
+        
+        # Subtitle (if provided)
+        if subtitle:
+            subtitle_label = QLabel(subtitle)
+            subtitle_label.setFont(QFont(FONT_FAMILY, 11))
+            subtitle_label.setAlignment(Qt.AlignCenter)
+            subtitle_label.setWordWrap(True)
+            subtitle_label.setFixedWidth(350)
+            subtitle_color = "#bbbbbb" if is_dark else "#777777"
+            subtitle_label.setStyleSheet(f"color: {subtitle_color}; line-height: 1.4;")
+            layout.addWidget(subtitle_label)
+        
+        self.setLayout(layout)
+    
+    def add_content(self, widget):
+        """Add custom content widget to the message"""
+        self.layout().addWidget(widget)
+    
+class ModernLoginWindow(QDialog):
+    """Modern login window with split layout"""
+    login_requested = pyqtSignal(str, str)  # email, license_key
+    trial_requested = pyqtSignal()
+    
+    def __init__(self):
+        super().__init__()
+        self.authenticated = False
+        self.is_trial = False
+        self.show_forgot_mode = False
+        self.drag_position = None
+        self.waiting_for_response = False
+        
+        self.setWindowTitle("ImgApp - Login")
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
+        self.setGeometry(100, 100, 1000, 750)
+        self.setMinimumSize(1000, 750)
+        self.setMaximumSize(1000, 750)
+        
+        # Center window on screen
+        self.center_on_screen()
+        
+        self.setup_ui()
+        self.apply_theme()
+        self.load_saved_credentials()
+        
+        # Connect Esc key
+        self.esc_timer = QTimer()
+
+        # Install global event filter to intercept Enter when messages are shown
+        try:
+            QApplication.instance().installEventFilter(self)
+        except:
+            pass
+
+        self.overlay_widget = None
+
+    def _remove_message_overlay(self):
+        try:
+            if hasattr(self, 'overlay_widget') and self.overlay_widget:
+                self.overlay_widget.setParent(None)
+                self.overlay_widget.deleteLater()
+                self.overlay_widget = None
+        except:
+            self.overlay_widget = None
+
+    def _show_centered_message(self, message_widget):
+        """Show a message centered within the login section using an overlay."""
+        self._remove_message_overlay()
+        overlay = QWidget(self.login_section)
+        overlay.setAttribute(Qt.WA_StyledBackground, True)
+        overlay.setStyleSheet("background: transparent;")
+        overlay.setGeometry(self.login_section.rect())
+        v = QVBoxLayout(overlay)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.addWidget(message_widget, 0, Qt.AlignCenter)
+        overlay.show()
+        self.overlay_widget = overlay
+    
+    def center_on_screen(self):
+        """Center the window on the screen"""
+        geometry = self.frameGeometry()
+        center_point = QDesktopWidget().availableGeometry().center()
+        geometry.moveCenter(center_point)
+        self.move(geometry.topLeft())
+        
+    def setup_ui(self):
+        """Setup the main UI layout"""
+        main_layout = QHBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # LEFT SECTION - Media Display (550x750)
+        self.media_section = QFrame()
+        self.media_section.setFixedSize(550, 750)
+        self.media_section.setStyleSheet("background-color: #000000;")
+        media_layout = QVBoxLayout(self.media_section)
+        media_layout.setAlignment(Qt.AlignCenter)
+        
+        media_placeholder = QLabel("Media Display")
+        media_placeholder.setFont(QFont(FONT_FAMILY, 24, QFont.Bold))
+        media_placeholder.setStyleSheet("color: #ffffff;")
+        media_placeholder.setAlignment(Qt.AlignCenter)
+        media_layout.addWidget(media_placeholder)
+        
+        main_layout.addWidget(self.media_section)
+        
+        # RIGHT SECTION - Login (450x750)
+        self.login_section = QFrame()
+        self.login_section.setFixedSize(450, 750)
+        login_layout = QVBoxLayout(self.login_section)
+        login_layout.setContentsMargins(30, 5, 30, 30)
+        login_layout.setSpacing(0)
+        
+        # Close button at top right corner
+        top_right_layout = QHBoxLayout()
+        top_right_layout.setContentsMargins(0, 0, 0, 0)
+        top_right_layout.addStretch()
+        close_btn = QPushButton("×")
+        close_btn.setFixedSize(30, 30)
+        close_btn.setFont(QFont(FONT_FAMILY, 18, QFont.Bold))
+        close_btn.setFlat(True)
+        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.setStyleSheet(
+            "QPushButton { color: #999; background: transparent; border: none; }"
+            "QPushButton:hover { color: #ccc; }"
+        )
+        close_btn.clicked.connect(self.reject)
+        top_right_layout.addWidget(close_btn)
+        login_layout.addLayout(top_right_layout)
+        login_layout.addSpacing(5)
+        
+        # App icon and name - fixed at top
+        app_header_layout = QHBoxLayout()
+        app_header_layout.setContentsMargins(0, 10, 0, 20)
+        app_header_layout.addStretch()
+        
+        try:
+            from client.utils.resource_path import get_app_icon_path
+            icon_path = get_app_icon_path()
+            if os.path.exists(icon_path):
+                app_icon_label = QLabel()
+                icon = QIcon(icon_path)
+                app_icon_label.setPixmap(icon.pixmap(64, 64))
+                app_header_layout.addWidget(app_icon_label)
+                app_header_layout.addSpacing(15)
+        except:
+            pass
+        
+        self.app_name_label = QLabel(APP_NAME)
+        self.app_name_label.setFont(QFont(FONT_FAMILY, 96, QFont.Bold))
+        app_header_layout.addWidget(self.app_name_label)
+        app_header_layout.addStretch()
+        
+        login_layout.addLayout(app_header_layout)
+        login_layout.addSpacing(20)
+        
+        # Email input using unified class
+        self.email_input = LoginLineEdit("e-mail")
+        self.email_input.returnPressed.connect(self.handle_login)
+        self.email_input.focusInEvent = lambda event: self.clear_message_display() or LoginLineEdit.focusInEvent(self.email_input, event)
+        email_container = QHBoxLayout()
+        email_container.addStretch()
+        email_container.addWidget(self.email_input)
+        email_container.addStretch()
+        login_layout.addLayout(email_container)
+        
+        # Spacing between input fields
+        login_layout.addSpacing(20)
+        
+        # License key input using unified class
+        self.license_input = LoginLineEdit("license key", is_password=False)
+        self.license_input.returnPressed.connect(self.handle_login)
+        self.license_input.focusInEvent = lambda event: self.clear_message_display() or LoginLineEdit.focusInEvent(self.license_input, event)
+        license_container = QHBoxLayout()
+        license_container.addStretch()
+        license_container.addWidget(self.license_input)
+        license_container.addStretch()
+        login_layout.addLayout(license_container)
+        
+        # Spacing before checkbox and forgot button
+        login_layout.addSpacing(20)
+        
+        # Checkbox and Forgot button on same line - aligned with input field width (350px)
+        controls_container = QHBoxLayout()
+        controls_container.addStretch()
+        
+        controls_layout = QHBoxLayout()
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.setSpacing(0)
+        
+        # Auto-login checkbox on left
+        self.auto_login_cb = QCheckBox("Auto-login")
+        self.auto_login_cb.setChecked(True)
+        self.auto_login_cb.setFont(QFont(FONT_FAMILY, 11))
+        # Custom toggle style with grey text
+        is_dark = self.is_dark_mode()
+        bg_color = "#2b2b2b" if is_dark else "#ffffff"
+        auto_login_style = (
+            f"QCheckBox {{ color: #999999; }} "
+            f"QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 8px;"
+            f" border: 2px solid #43a047; background: {bg_color}; }}"
+            "QCheckBox::indicator:checked { background: #43a047; border: 2px solid #2e7d32; }"
+            "QCheckBox::indicator:unchecked:hover { border: 2px solid #2e7d32; }"
+        )
+        self.auto_login_cb.setStyleSheet(auto_login_style)
+        controls_layout.addWidget(self.auto_login_cb)
+        
+        # Stretch between checkbox and forgot button
+        controls_layout.addStretch()
+        
+        # Forgot button on right
+        self.forgot_btn = QPushButton("Forgot license key?")
+        self.forgot_btn.setFlat(True)
+        self.forgot_btn.setFont(QFont(FONT_FAMILY, 11))
+        self.forgot_btn.setStyleSheet(
+            "QPushButton { color: #999999; text-decoration: underline; border: none; } "
+            "QPushButton:hover { color: #2196f3; text-decoration: underline; }"
+        )
+        self.forgot_btn.clicked.connect(self.show_forgot_mode_ui)
+        controls_layout.addWidget(self.forgot_btn)
+        
+        # Create fixed-width widget to match input field width (350px)
+        controls_widget = QWidget()
+        controls_widget.setFixedWidth(350)
+        controls_widget.setLayout(controls_layout)
+        controls_container.addWidget(controls_widget)
+        controls_container.addStretch()
+        
+        login_layout.addLayout(controls_container)
+        
+        # Spacing before login button
+        login_layout.addSpacing(20)
+        
+        # Login button
+        login_btn_layout = QHBoxLayout()
+        login_btn_layout.addStretch()
+        self.login_btn = QPushButton("Login")
+        self.login_btn.setFixedSize(350, 65)
+        self.login_btn.setFont(QFont(FONT_FAMILY, 14, QFont.Bold))
+        try:
+            self.login_btn.setAutoDefault(False)
+        except:
+            pass
+        self.login_btn.setStyleSheet(
+            "QPushButton { "
+            "background-color: transparent; "
+            "color: white; "
+            "border: 2px solid #43a047; "
+            "border-radius: 8px; "
+            "} "
+            "QPushButton:hover { background-color: #43a047; }"
+        )
+        self.login_btn.clicked.connect(self.handle_login)
+        login_btn_layout.addWidget(self.login_btn)
+        login_btn_layout.addStretch()
+        login_layout.addLayout(login_btn_layout)
+        
+        # Spacing between buttons
+        login_layout.addSpacing(20)
+        
+        # Trial button
+        trial_btn_layout = QHBoxLayout()
+        trial_btn_layout.addStretch()
+        self.trial_btn = QPushButton("Try Free Trial")
+        self.trial_btn.setFixedSize(350, 65)
+        self.trial_btn.setFont(QFont(FONT_FAMILY, 14, QFont.Bold))
+        self.trial_btn.setStyleSheet(
+            "QPushButton { "
+            "background-color: transparent; "
+            "color: white; "
+            "border: 2px solid #2196f3; "
+            "border-radius: 8px; "
+            "} "
+            "QPushButton:hover { background-color: rgba(33, 150, 243, 0.2); }"
+        )
+        self.trial_btn.clicked.connect(self.handle_trial)
+        trial_btn_layout.addWidget(self.trial_btn)
+        trial_btn_layout.addStretch()
+        login_layout.addLayout(trial_btn_layout)
+        
+        # Space to bottom
+        login_layout.addStretch()
+        
+        # Buy license section
+        self.buy_layout = QVBoxLayout()
+        # Replace label with a delicate grey divider bar, centered with even side margins
+        self.buy_label = QFrame()
+        self.buy_label.setFrameShape(QFrame.HLine)
+        self.buy_label.setFrameShadow(QFrame.Plain)
+        self.buy_label.setFixedHeight(2)
+        # Theme-aware subtle color
+        _is_dark = self.is_dark_mode()
+        divider_color = "#555555" if _is_dark else "#DDDDDD"
+        self.buy_label.setStyleSheet(f"QFrame {{ background-color: {divider_color}; border: none; }}")
+        # Container to apply compensating right margin so left/right appear equal
+        divider_container = QWidget()
+        divider_h = QHBoxLayout(divider_container)
+        divider_h.setContentsMargins(0, 0, 0, 0)
+        # Compute additional right padding to match left margin of the section
+        try:
+            m = login_layout.contentsMargins()
+            add_right = max(0, m.left() - m.right())
+        except:
+            add_right = 0
+        # Apply padding with stretches and a spacer on the right if needed
+        padded_h = QHBoxLayout()
+        padded_h.setContentsMargins(0, 0, add_right, 0)
+        padded_h.addWidget(self.buy_label)
+        divider_h.addLayout(padded_h)
+        # Add some vertical spacing around the divider and the container
+        self.buy_layout.addSpacing(10)
+        self.buy_layout.addWidget(divider_container)
+        self.buy_layout.addSpacing(10)
+        self.buy_layout.addSpacing(10)
+        
+        # Store buttons - using StoreButton component
+        store_buttons_layout = QVBoxLayout()
+        
+        # Microsoft Store button
+        self.msstore_btn = StoreButton("msstore.svg", "https://apps.microsoft.com/")
+        
+        # Store buttons container - CENTER BUTTONS PROPERLY
+        # Microsoft Store button - horizontally centered
+        msstore_h_layout = QHBoxLayout()
+        msstore_h_layout.addStretch()
+        msstore_h_layout.addWidget(self.msstore_btn)
+        msstore_h_layout.addStretch()
+        store_buttons_layout.addLayout(msstore_h_layout)
+        
+        # Spacing between store buttons
+        store_buttons_layout.addSpacing(20)
+        
+        # Gumroad button
+        self.gumroad_btn = StoreButton("gumroad.svg", "https://gumroad.com/")
+        
+        # Gumroad button - horizontally centered
+        gumroad_h_layout = QHBoxLayout()
+        gumroad_h_layout.addStretch()
+        gumroad_h_layout.addWidget(self.gumroad_btn)
+        gumroad_h_layout.addStretch()
+        store_buttons_layout.addLayout(gumroad_h_layout)
+        
+        self.buy_layout.addLayout(store_buttons_layout)
+        
+        login_layout.addLayout(self.buy_layout)
+        
+        main_layout.addWidget(self.login_section)
+        self.setLayout(main_layout)
+    
+    def apply_theme(self):
+        """Apply theme based on system dark mode"""
+        is_dark = self.is_dark_mode()
+        
+        if is_dark:
+            login_bg = "#2b2b2b"
+            text_color = "white"
+        else:
+            login_bg = "#ffffff"
+            text_color = "black"
+        
+        self.login_section.setStyleSheet(f"background-color: {login_bg};")
+        
+        # Update app name to white in dark mode
+        if hasattr(self, 'app_name_label'):
+            self.app_name_label.setStyleSheet(f"color: {text_color}; font-weight: bold; font-size: 18pt;")
+        
+        # Update input fields
+        input_style = f"""
+            QLineEdit {{
+                background-color: {login_bg};
+                color: {text_color};
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                padding: 10px;
+            }}
+            QLineEdit::placeholder {{
+                color: #999;
+            }}
+        """
+        self.email_input.setStyleSheet(input_style)
+        self.license_input.setStyleSheet(input_style)
+        
+        # Update buttons
+        if hasattr(self, 'remember_cb'):
+            self.remember_cb.setStyleSheet(f"color: {text_color};")
+        if hasattr(self, 'close_btn'):
+            self.close_btn.setStyleSheet(f"color: {text_color}; background-color: transparent; border: none;")
+        
+        login_btn_style = (
+            f"QPushButton {{ "
+            f"background-color: transparent; "
+            f"color: {text_color}; "
+            f"border: 2px solid #43a047; "
+            f"border-radius: 8px; "
+            f"}} "
+            f"QPushButton:hover {{ background-color: #43a047; color: white; }}"
+        )
+        if hasattr(self, 'login_btn'):
+            self.login_btn.setStyleSheet(login_btn_style)
+        
+        trial_btn_style = (
+            f"QPushButton {{ "
+            f"background-color: transparent; "
+            f"color: {text_color}; "
+            f"border: 2px solid #2196f3; "
+            f"border-radius: 8px; "
+            f"}} "
+            f"QPushButton:hover {{ background-color: rgba(33, 150, 243, 0.2); }}"
+        )
+        if hasattr(self, 'trial_btn'):
+            self.trial_btn.setStyleSheet(trial_btn_style)
+        
+        # Update store button icons for dark mode (set white fill)
+        if is_dark and hasattr(self, 'msstore_icon_path'):
+            pixmap = self._load_svg_with_color(self.msstore_icon_path, QColor("white"), 80)
+            if pixmap:
+                self.msstore_btn.setIcon(QIcon(pixmap))
+        if is_dark and hasattr(self, 'gumroad_icon_path'):
+            pixmap = self._load_svg_with_color(self.gumroad_icon_path, QColor("white"), 80)
+            if pixmap:
+                self.gumroad_btn.setIcon(QIcon(pixmap))
+        
+        # Update store buttons styling
+        if hasattr(self, 'msstore_btn'):
+            hover_bg = "rgba(255, 255, 255, 0.1)" if is_dark else "rgba(0, 0, 0, 0.05)"
+            self.msstore_btn.setStyleSheet(
+                f"QPushButton {{ "
+                f"border: 2px solid {'#555' if is_dark else '#ccc'}; "
+                f"border-radius: 8px; "
+                f"background-color: transparent; "
+                f"}} "
+                f"QPushButton:hover {{ border: 2px solid {'#777' if is_dark else '#999'}; background-color: {hover_bg}; }}"
+            )
+        if hasattr(self, 'gumroad_btn'):
+            hover_bg = "rgba(255, 255, 255, 0.1)" if is_dark else "rgba(0, 0, 0, 0.05)"
+            self.gumroad_btn.setStyleSheet(
+                f"QPushButton {{ "
+                f"border: 2px solid {'#555' if is_dark else '#ccc'}; "
+                f"border-radius: 8px; "
+                f"background-color: transparent; "
+                f"}} "
+                f"QPushButton:hover {{ border: 2px solid {'#777' if is_dark else '#999'}; background-color: {hover_bg}; }}"
+            )
+    
+    def _load_svg_with_color(self, svg_path, color, size):
+        """Load SVG and replace fill color"""
+        try:
+            with open(svg_path, 'r') as f:
+                svg_content = f.read()
+            
+            # Replace fill colors with the desired color
+            hex_color = color.name()
+            # Replace various fill patterns
+            svg_content = svg_content.replace('fill="black"', f'fill="{hex_color}"')
+            svg_content = svg_content.replace('fill="#000000"', f'fill="{hex_color}"')
+            svg_content = svg_content.replace('fill="#000"', f'fill="{hex_color}"')
+            # If no fill found, add fill to path elements
+            if 'fill=' not in svg_content:
+                svg_content = svg_content.replace('<path', f'<path fill="{hex_color}"')
+            
+            # Create pixmap from modified SVG
+            pixmap = QPixmap(size, size)
+            pixmap.fill(Qt.transparent)
+            
+            # Use QSvgWidget to render (alternative: use QPainter with QSvgRenderer)
+            from PyQt5.QtSvg import QSvgRenderer
+            renderer = QSvgRenderer()
+            
+            # Load from string
+            from PyQt5.QtCore import QByteArray
+            renderer.load(QByteArray(svg_content.encode('utf-8')))
+            
+            painter = QPainter(pixmap)
+            renderer.render(painter)
+            painter.end()
+            
+            return pixmap
+        except:
+            return None
+    def is_dark_mode(self):
+        """Check if Windows is in dark mode"""
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                               r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+            apps_use_light_theme, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+            winreg.CloseKey(key)
+            return apps_use_light_theme == 0
+        except:
+            return False
+    
+    def get_config_path(self):
+        """Get path for local user config"""
+        try:
+            if os.name == 'nt':
+                app_data = os.getenv('LOCALAPPDATA') or os.getenv('APPDATA')
+            else:
+                app_data = os.path.expanduser('~/.config')
+            config_dir = os.path.join(app_data, 'ImageWave', 'config')
+            os.makedirs(config_dir, exist_ok=True)
+            return os.path.join(config_dir, 'user_session.json')
+        except:
+            return None
+    
+    def load_saved_credentials(self):
+        """Pre-fill email if saved"""
+        try:
+            path = self.get_config_path()
+            if path and os.path.exists(path):
+                with open(path, 'r') as f:
+                    data = json.load(f)
+                    if 'email' in data:
+                        self.email_input.setText(data['email'])
+                    if 'license_key' in data:
+                        self.license_input.setText(data['license_key'])
+                    if data.get('remember', False):
+                        self.remember_cb.setChecked(True)
+        except:
+            pass
+    
+    def save_credentials(self, email, license_key):
+        """Save credentials locally if remember me is checked"""
+        if not hasattr(self, 'remember_cb') or not self.remember_cb.isChecked():
+            return
+        try:
+            path = self.get_config_path()
+            if not path:
+                return
+            data = {
+                'email': email,
+                'license_key': license_key,
+                'remember': True,
+                'last_login': datetime.now().isoformat()
+            }
+            with open(path, 'w') as f:
+                json.dump(data, f)
+        except:
+            pass
+    
+    def handle_login(self):
+        """Handle login"""
+        # Suppress Enter-triggered login briefly after trial success transition
+        try:
+            if hasattr(self, 'enter_suppressed_until') and self.enter_suppressed_until:
+                if datetime.now() < self.enter_suppressed_until:
+                    return
+        except:
+            pass
+        email = self.email_input.text().strip()
+        license_key = self.license_input.text().strip()
+        
+        if not email or not license_key:
+            # Highlight empty fields with red outline
+            if not email:
+                self.email_input.setStyleSheet(self.email_input.styleSheet() + "; border: 2px solid red;")
+            if not license_key:
+                self.license_input.setStyleSheet(self.license_input.styleSheet() + "; border: 2px solid red;")
+            
+            # Reset after 2 seconds
+            QTimer.singleShot(2000, self.reset_input_styles)
+            return
+        
+        # Development bypass
+        if DEVELOPMENT_MODE and email == "dev":
+            self.authenticated = True
+            self.is_trial = False
+            self.save_credentials(email, license_key)
+            self.accept()
+            return
+        
+        # TODO: Add server validation
+        self.authenticated = True
+        self.is_trial = False
+        self.save_credentials(email, license_key)
+        self.accept()
+
+    def accept(self):
+        """Override dialog accept to avoid closing when a transient message is shown."""
+        try:
+            has_inline = (
+                (hasattr(self, 'overlay_widget') and self.overlay_widget) or
+                (hasattr(self, 'message_container') and self.message_container) or
+                (hasattr(self, 'success_message_container') and self.success_message_container)
+            )
+            if has_inline:
+                # Dismiss message and restore login instead of closing the dialog
+                self.reset_trial_to_login_mode()
+                return
+        except:
+            pass
+        super().accept()
+    
+    def handle_trial(self):
+        """Show trial mode UI"""
+        self.show_trial_mode_ui()
+    
+    def reset_input_styles(self):
+        """Reset input field styles to normal"""
+        is_dark = self.is_dark_mode()
+        if is_dark:
+            login_bg = "#2b2b2b"
+            text_color = "white"
+        else:
+            login_bg = "#ffffff"
+            text_color = "black"
+        
+        input_style = f"""
+            QLineEdit {{
+                background-color: {login_bg};
+                color: {text_color};
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                padding: 10px;
+            }}
+            QLineEdit::placeholder {{
+                color: #999;
+            }}
+        """
+        self.email_input.setStyleSheet(input_style)
+        self.license_input.setStyleSheet(input_style)
+    
+    def show_forgot_mode_ui(self):
+        """Show forgot license key UI"""
+        self.show_forgot_mode = True
+        
+        # Store references to track what we add
+        self.forgot_inserted_indices = []
+        
+        # Hide original inputs and buttons
+        try:
+            self.email_input.hide()
+        except:
+            pass
+        try:
+            self.license_input.hide()
+        except:
+            pass
+        try:
+            self.auto_login_cb.hide()
+        except:
+            pass
+        try:
+            self.forgot_btn.hide()
+        except:
+            pass
+        try:
+            self.login_btn.hide()
+        except:
+            pass
+        try:
+            self.trial_btn.hide()
+        except:
+            pass
+        if hasattr(self, 'msstore_btn'):
+            try:
+                self.msstore_btn.hide()
+            except:
+                pass
+        if hasattr(self, 'gumroad_btn'):
+            try:
+                self.gumroad_btn.hide()
+            except:
+                pass
+        if hasattr(self, 'buy_label'):
+            try:
+                self.buy_label.hide()
+            except:
+                pass
+        
+        # Get the login layout
+        login_layout = self.login_section.layout()
+        
+        # Create resend input using unified class
+        self.resend_input = LoginLineEdit("send license key to the email")
+        self.resend_input.returnPressed.connect(self.handle_resend)
+
+        # Forgot block wrapper to keep spacing self-contained
+        self.forgot_block_widget = QWidget()
+        forgot_block_v = QVBoxLayout(self.forgot_block_widget)
+        forgot_block_v.setContentsMargins(0, 0, 0, 0)
+
+        # Centered resend input
+        self.resend_container = QHBoxLayout()
+        self.resend_container.addStretch()
+        self.resend_container.addWidget(self.resend_input)
+        self.resend_container.addStretch()
+        forgot_block_v.addLayout(self.resend_container)
+        forgot_block_v.addSpacing(20)
+
+        # Find the email input position and insert forgot block in the same place
+        email_index = None
+        for i in range(login_layout.count()):
+            item = login_layout.itemAt(i)
+            if item and item.widget() == self.email_input:
+                email_index = i
+                break
+        
+        if email_index is not None:
+            # Track the starting position for cleanup
+            self.forgot_start_index = email_index
+            # Insert whole forgot block widget at same index as email input
+            login_layout.insertWidget(email_index, self.forgot_block_widget)
+        else:
+            # Fallback: insert at position 4
+            self.forgot_start_index = 4
+            login_layout.insertWidget(4, self.forgot_block_widget)
+        
+        # Add send button
+        self.send_btn = QPushButton("Send")
+        self.send_btn.setFixedSize(350, 65)
+        self.send_btn.setFont(QFont(FONT_FAMILY, 14, QFont.Bold))
+        self.send_btn.setStyleSheet(
+            "QPushButton { "
+            "background-color: transparent; "
+            "color: white; "
+            "border: 2px solid #2196f3; "
+            "border-radius: 8px; "
+            "} "
+            "QPushButton:hover { background-color: #2196f3; color: white; }"
+        )
+        self.send_btn.clicked.connect(self.handle_resend)
+        
+        self.send_btn_layout = QHBoxLayout()
+        self.send_btn_layout.addStretch()
+        self.send_btn_layout.addWidget(self.send_btn)
+        self.send_btn_layout.addStretch()
+        # Add into block
+        forgot_block_v.addLayout(self.send_btn_layout)
+        forgot_block_v.addSpacing(20)
+        
+        # Add back button as proper button class under send button
+        self.back_btn = QPushButton("back")
+        self.back_btn.setFixedSize(350, 50)
+        self.back_btn.setFont(QFont(FONT_FAMILY, 14, QFont.Bold))
+        self.back_btn.setStyleSheet(
+            "QPushButton { "
+            "background-color: transparent; "
+            "color: #999999; "
+            "border: 2px solid #999999; "
+            "border-radius: 8px; "
+            "} "
+            "QPushButton:hover { "
+            "background-color: transparent; "
+            "color: #2196f3; "
+            "border: 2px solid #2196f3; "
+            "}"
+        )
+        self.back_btn.clicked.connect(self.reset_to_login_mode)
+        
+        self.back_btn_layout = QHBoxLayout()
+        self.back_btn_layout.addStretch()
+        self.back_btn_layout.addWidget(self.back_btn)
+        self.back_btn_layout.addStretch()
+        # Add into block
+        forgot_block_v.addLayout(self.back_btn_layout)
+    
+    def show_trial_mode_ui(self):
+        """Show trial mode UI"""
+        self.show_trial_mode = True
+        
+        # Get the login layout
+        login_layout = self.login_section.layout()
+        
+        # Store original layout item count before we add trial items
+        self.original_layout_count = login_layout.count()
+        
+        # Hide original inputs and buttons
+        self.email_input.hide()
+        self.license_input.hide()
+        self.auto_login_cb.hide()
+        self.forgot_btn.hide()
+        self.login_btn.hide()
+        self.trial_btn.hide()
+        if hasattr(self, 'msstore_btn'):
+            self.msstore_btn.hide()
+        if hasattr(self, 'gumroad_btn'):
+            self.gumroad_btn.hide()
+        if hasattr(self, 'buy_label'):
+            self.buy_label.hide()
+        
+        # Create trial email input using unified class
+        self.trial_email_input = LoginLineEdit("e-mail")
+        self.trial_email_input.returnPressed.connect(self.handle_trial_send)
+
+        # Trial block wrapper to keep spacing self-contained
+        self.trial_block_widget = QWidget()
+        trial_block_v = QVBoxLayout(self.trial_block_widget)
+        trial_block_v.setContentsMargins(0, 0, 0, 0)
+
+        # Centered trial email input
+        self.trial_email_container = QHBoxLayout()
+        self.trial_email_container.addStretch()
+        self.trial_email_container.addWidget(self.trial_email_input)
+        self.trial_email_container.addStretch()
+        trial_block_v.addLayout(self.trial_email_container)
+        trial_block_v.addSpacing(20)
+        
+        # Find the email input position and insert trial block in the same place
+        email_index = None
+        for i in range(self.original_layout_count):
+            item = login_layout.itemAt(i)
+            if item and item.widget() == self.email_input:
+                email_index = i
+                break
+        
+        if email_index is not None:
+            self.trial_start_index = email_index
+            login_layout.insertWidget(email_index, self.trial_block_widget)
+        else:
+            self.trial_start_index = 4
+            login_layout.insertWidget(4, self.trial_block_widget)
+        
+        # Add trial send button
+        self.trial_send_btn = QPushButton("enter trial mode")
+        self.trial_send_btn.setFixedSize(350, 65)
+        self.trial_send_btn.setFont(QFont(FONT_FAMILY, 14, QFont.Bold))
+        self.trial_send_btn.setStyleSheet(
+            "QPushButton { "
+            "background-color: transparent; "
+            "color: white; "
+            "border: 2px solid #2196f3; "
+            "border-radius: 8px; "
+            "} "
+            "QPushButton:hover { background-color: #2196f3; color: white; }"
+        )
+        self.trial_send_btn.clicked.connect(self.handle_trial_send)
+        
+        self.trial_send_btn_layout = QHBoxLayout()
+        self.trial_send_btn_layout.addStretch()
+        self.trial_send_btn_layout.addWidget(self.trial_send_btn)
+        self.trial_send_btn_layout.addStretch()
+        trial_block_v.addLayout(self.trial_send_btn_layout)
+        trial_block_v.addSpacing(20)
+        
+        # Add trial back button
+        self.trial_back_btn = QPushButton("back")
+        self.trial_back_btn.setFixedSize(350, 50)
+        self.trial_back_btn.setFont(QFont(FONT_FAMILY, 14, QFont.Bold))
+        self.trial_back_btn.setStyleSheet(
+            "QPushButton { "
+            "background-color: transparent; "
+            "color: #999999; "
+            "border: 2px solid #999999; "
+            "border-radius: 8px; "
+            "} "
+            "QPushButton:hover { "
+            "background-color: transparent; "
+            "color: #2196f3; "
+            "border: 2px solid #2196f3; "
+            "}"
+        )
+        self.trial_back_btn.clicked.connect(self.reset_to_login_mode)
+        
+        self.trial_back_btn_layout = QHBoxLayout()
+        self.trial_back_btn_layout.addStretch()
+        self.trial_back_btn_layout.addWidget(self.trial_back_btn)
+        self.trial_back_btn_layout.addStretch()
+        trial_block_v.addLayout(self.trial_back_btn_layout)
+    
+    def handle_trial_send(self):
+        """Handle trial mode email submission"""
+        email = self.trial_email_input.text().strip()
+        
+        if not email:
+            self.trial_email_input.setStyleSheet(self.trial_email_input.styleSheet() + "; border: 2px solid red;")
+            QTimer.singleShot(2000, lambda: self.reset_trial_input_styles())
+            return
+        
+        # Validate email format (except for dev mode test emails)
+        if email not in ['a@a.com', 'b@b.com', 'off']:
+            if '@' not in email or '.' not in email.split('@')[-1]:
+                self.show_trial_error_dialog("Invalid Email", "Please enter a valid email address")
+                return
+        
+        # Mark waiting state; disable button and show waiting style
+        self.waiting_for_response = True
+        self.trial_send_btn.setEnabled(False)
+        self.trial_send_btn.setText("Processing...")
+        self.trial_send_btn.setStyleSheet(
+            "QPushButton { background-color: transparent; color: #bbbbbb; border: 2px solid #666666; border-radius: 8px; }"
+        )
+        QApplication.processEvents()
+        
+        try:
+            # Dev mode simulation - ALWAYS short-circuit these test inputs, no server calls
+            email_norm = (email or "").strip().lower()
+            print(f"DEBUG: handle_trial_send called with email: {email_norm}")
+            if email_norm in ['a@a.com', 'b@b.com', 'off']:
+                print(f"DEBUG: Dev mode email detected: {email_norm}")
+                if email_norm == 'off':
+                    # Immediate offline message
+                    self.show_trial_warning_dialog(
+                        "No Internet Connection",
+                        "An internet connection is required to activate a trial.\n\nPlease check your connection and try again."
+                    )
+                    self.trial_send_btn.setEnabled(True)
+                    self.trial_send_btn.setText("enter trial mode")
+                    self.trial_send_btn.setStyleSheet(
+                        "QPushButton { background-color: transparent; color: white; border: 2px solid #2196f3; border-radius: 8px; }"
+                    )
+                    self.waiting_for_response = False
+                    return
+                # Simulate 2s server wait before showing message
+                def _finish_dev():
+                    if email_norm == 'a@a.com':
+                        self.show_trial_success_dialog(email_norm, 'x-x-x')
+                    else:
+                        self.show_trial_error_dialog(
+                            "Server Trial Failure",
+                            "The server reported a trial activation failure for this email/device."
+                        )
+                    # Re-enable button after message shown (reset happens in message cleanup)
+                    self.trial_send_btn.setEnabled(True)
+                    self.trial_send_btn.setText("enter trial mode")
+                    self.trial_send_btn.setStyleSheet(
+                        "QPushButton { background-color: transparent; color: white; border: 2px solid #2196f3; border-radius: 8px; }"
+                    )
+                    self.waiting_for_response = False
+                QTimer.singleShot(2000, _finish_dev)
+                return
+            
+            # Get hardware ID
+            hardware_id = self.get_hardware_id()
+            
+            # Check trial eligibility first
+            # Wait for server response: do not show messages until after checks complete
+            if not self.check_trial_eligibility(email, hardware_id):
+                self.trial_send_btn.setEnabled(True)
+                self.trial_send_btn.setText("enter trial mode")
+                self.trial_send_btn.setStyleSheet(
+                    "QPushButton { background-color: transparent; color: white; border: 2px solid #2196f3; border-radius: 8px; }"
+                )
+                self.waiting_for_response = False
+                return
+            
+            # Create trial license
+            trial_license = self.create_trial_license(email, hardware_id)
+            
+            if trial_license:
+                self.show_trial_success_dialog(email, trial_license)
+            else:
+                self.trial_send_btn.setEnabled(True)
+                self.trial_send_btn.setText("enter trial mode")
+                self.trial_send_btn.setStyleSheet(
+                    "QPushButton { background-color: transparent; color: white; border: 2px solid #2196f3; border-radius: 8px; }"
+                )
+                self.waiting_for_response = False
+                
+        except Exception as e:
+            # Immediate offline or error: display message now and restore button state
+            self.show_trial_error_dialog("Failed to activate trial", str(e))
+            self.trial_send_btn.setEnabled(True)
+            self.trial_send_btn.setText("enter trial mode")
+            self.trial_send_btn.setStyleSheet(
+                "QPushButton { background-color: transparent; color: white; border: 2px solid #2196f3; border-radius: 8px; }"
+            )
+            self.waiting_for_response = False
+    
+    def get_hardware_id(self):
+        """Get hardware ID for trial tracking"""
+        try:
+            import hashlib
+            machine_id = f"{socket.gethostname()}-{platform.platform()}"
+            return hashlib.sha256(machine_id.encode()).hexdigest()[:16]
+        except:
+            return "unknown"
+    
+    def check_trial_eligibility(self, email, hardware_id):
+        """Check if user is eligible for a trial"""
+        try:
+            from client.config.config import TRIAL_CHECK_ELIGIBILITY_URL
+            
+            response = requests.post(TRIAL_CHECK_ELIGIBILITY_URL, json={
+                'email': email,
+                'hardware_id': hardware_id
+            }, timeout=10)
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('eligible'):
+                    return True
+                else:
+                    reason = result.get('reason', 'unknown')
+                    message = result.get('message', 'You are not eligible for a trial')
+                    
+                    if reason == 'trial_already_used_email':
+                        self.show_trial_warning_dialog(
+                            "Trial Already Used",
+                            "You have already used your free trial with this email address."
+                        )
+                    elif reason == 'trial_already_used_hardware':
+                        self.show_trial_warning_dialog(
+                            "Trial Already Used",
+                            "This device has already been used for a free trial."
+                        )
+                    else:
+                        self.show_trial_warning_dialog("Not Eligible", message)
+                    return False
+            else:
+                self.show_trial_warning_dialog("Error", "Failed to check trial eligibility")
+                return False
+                
+        except requests.exceptions.ConnectionError:
+            self.show_trial_warning_dialog(
+                "No Internet Connection",
+                "An internet connection is required to activate a trial.\n\nPlease check your connection and try again."
+            )
+            return False
+        except Exception as e:
+            self.show_trial_error_dialog("Failed to check eligibility", str(e))
+            return False
+    
+    def create_trial_license(self, email, hardware_id):
+        """Create a trial license"""
+        try:
+            from client.config.config import TRIAL_CREATE_URL
+            
+            device_name = f"{platform.system()}-{socket.gethostname()}"
+            
+            response = requests.post(TRIAL_CREATE_URL, json={
+                'email': email,
+                'hardware_id': hardware_id,
+                'device_name': device_name
+            }, timeout=10)
+            
+            # Accept both 200 (OK) and 201 (Created)
+            if response.status_code in [200, 201]:
+                result = response.json()
+                if result.get('success'):
+                    license_key = result.get('license_key')
+                    return license_key
+                else:
+                    error = result.get('error', 'Unknown error')
+                    self.show_trial_warning_dialog("Error", f"Failed to create trial: {error}")
+                    return None
+            else:
+                error_msg = f"Server returned status {response.status_code}"
+                try:
+                    error_msg = response.json().get('error', error_msg)
+                except:
+                    pass
+                self.show_trial_warning_dialog("Error", f"Failed to create trial: {error_msg}")
+                return None
+                
+        except Exception as e:
+            self.show_trial_error_dialog("Error", f"Failed to create trial: {str(e)}")
+            return None
+    
+    def show_trial_success_dialog(self, email, license_key):
+        """Show success message inline in the login section"""
+        print(f"DEBUG: show_trial_success_dialog called with email={email}, license_key={license_key}")
+        # Remove any transient trial/forgot block widgets cleanly
+        try:
+            if hasattr(self, 'trial_block_widget') and self.trial_block_widget:
+                self.trial_block_widget.setParent(None)
+                self.trial_block_widget.deleteLater()
+                del self.trial_block_widget
+            if hasattr(self, 'forgot_block_widget') and self.forgot_block_widget:
+                self.forgot_block_widget.setParent(None)
+                self.forgot_block_widget.deleteLater()
+                del self.forgot_block_widget
+        except:
+            pass
+        
+        # Create success message using LoginMessage class
+        is_dark = self.is_dark_mode()
+        success_message = LoginMessage(
+            "trial version created.\nLet's webatchify!",
+            is_dark=is_dark
+        )
+        
+        # Add license key display
+        key_display = QLineEdit()
+        key_display.setText(license_key)
+        key_display.setReadOnly(True)
+        key_display.setFixedSize(350, 50)
+        key_display.setFont(QFont(FONT_FAMILY, 12, QFont.Bold))
+        key_display.setAlignment(Qt.AlignCenter)
+        success_message.add_content(key_display)
+        
+        # Show centered overlay message
+        self._show_centered_message(success_message)
+        self.success_message = success_message
+        
+        # Auto-transition after 3 seconds
+        QTimer.singleShot(3000, lambda: self.transition_trial_to_login(email, license_key))
+    
+    def show_trial_error_dialog(self, title, message):
+        """Show error message inline in the login section using LoginMessage"""
+        self._show_inline_message(title, message, message_type="error")
+    
+    def show_trial_warning_dialog(self, title, message):
+        """Show warning message inline in the login section using LoginMessage"""
+        self._show_inline_message(title, message, message_type="warning")
+    
+    def _show_inline_message(self, title, subtitle, message_type="info"):
+        """Display message inline in the login section using LoginMessage class"""
+        # Remove any transient trial/forgot block widgets cleanly
+        try:
+            if hasattr(self, 'trial_block_widget') and self.trial_block_widget:
+                self.trial_block_widget.setParent(None)
+                self.trial_block_widget.deleteLater()
+                del self.trial_block_widget
+            if hasattr(self, 'forgot_block_widget') and self.forgot_block_widget:
+                self.forgot_block_widget.setParent(None)
+                self.forgot_block_widget.deleteLater()
+                del self.forgot_block_widget
+        except:
+            pass
+        
+        # Create message using LoginMessage class
+        is_dark = self.is_dark_mode()
+        message_widget = LoginMessage(title, subtitle, is_dark=is_dark)
+        
+        # Add a back button below the message
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(10)
+        button_layout.addStretch()
+        
+        back_btn = QPushButton("back")
+        back_btn.setFixedSize(100, 40)
+        back_btn.setFont(QFont(FONT_FAMILY, 12, QFont.Bold))
+        back_btn.setStyleSheet(
+            "QPushButton { "
+            "background-color: transparent; "
+            "color: #999999; "
+            "border: 2px solid #999999; "
+            "border-radius: 8px; "
+            "} "
+            "QPushButton:hover { "
+            "background-color: transparent; "
+            "color: #2196f3; "
+            "border: 2px solid #2196f3; "
+            "}"
+        )
+        back_btn.clicked.connect(self.reset_trial_to_login_mode)
+        button_layout.addWidget(back_btn)
+        button_layout.addStretch()
+        
+        message_widget.add_content(QWidget())  # Add spacing
+        message_layout = message_widget.layout()
+        message_layout.addLayout(button_layout)
+        
+        # Show centered overlay
+        self._show_centered_message(message_widget)
+        self.message_widget = message_widget
+        
+        # Hide trial buttons if they exist
+        if hasattr(self, 'trial_send_btn'):
+            self.trial_send_btn.setEnabled(True)
+            self.trial_send_btn.setText("enter trial mode")
+
+        # Auto-clear message after 3 seconds and return to login window
+        QTimer.singleShot(3000, self.reset_trial_to_login_mode)
+    
+    
+    def transition_trial_to_login(self, email, trial_license):
+        """Transition from trial mode back to login with pre-filled credentials"""
+        # Clear any displayed messages first
+        self.clear_message_display()
+
+        # Reset to login mode (removes trial UI)
+        self.reset_trial_to_login_mode()
+        
+        # Pre-fill email and license key
+        # Pre-fill email and license key
+        if hasattr(self, 'email_input'):
+            self.email_input.setText(email)
+        if hasattr(self, 'license_input'):
+            self.license_input.setText(trial_license)
+        
+        # Highlight login button with green animation
+        self.highlight_login_button()
+
+        # Temporarily suppress Enter key login for 3 seconds to avoid accidental close
+        try:
+            self.enter_suppressed_until = datetime.now() + timedelta(seconds=3)
+            QTimer.singleShot(3100, lambda: setattr(self, 'enter_suppressed_until', None))
+        except:
+            pass
+    
+    def highlight_login_button(self):
+        """Highlight the login button"""
+        original_style = self.login_btn.styleSheet()
+        
+        # Change to highlighted state
+        self.login_btn.setStyleSheet(
+            "QPushButton { "
+            "background-color: #43a047; "
+            "color: white; "
+            "border: 2px solid #2e7d32; "
+            "border-radius: 8px; "
+            "} "
+            "QPushButton:hover { background-color: #2e7d32; }"
+        )
+        
+        # Restore after 2 seconds (with safety check)
+        def restore_style():
+            try:
+                if hasattr(self, 'login_btn') and self.login_btn:
+                    self.login_btn.setStyleSheet(original_style)
+            except:
+                pass  # Widget was destroyed, ignore
+        
+        QTimer.singleShot(2000, restore_style)
+    
+    def reset_trial_input_styles(self):
+        """Reset trial input field styles to normal"""
+        is_dark = self.is_dark_mode()
+        if is_dark:
+            login_bg = "#2b2b2b"
+            text_color = "white"
+        else:
+            login_bg = "#ffffff"
+            text_color = "black"
+        
+        input_style = f"""
+            QLineEdit {{
+                background-color: {login_bg};
+                color: {text_color};
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                padding: 10px;
+            }}
+            QLineEdit::placeholder {{
+                color: #999;
+            }}
+        """
+        self.trial_email_input.setStyleSheet(input_style)
+    
+    def clear_message_display(self):
+        """Clear any displayed message (success/error/warning)"""
+        # Remove overlay if present
+        self._remove_message_overlay()
+        if hasattr(self, 'message_widget'):
+            self.message_widget = None
+    
+    def reset_trial_to_login_mode(self):
+        """Reset UI from trial mode back to normal login mode"""
+        # Helper to remove a layout item safely
+        def _remove_item(item):
+            if not item:
+                return
+            w = item.widget()
+            if w:
+                w.setParent(None)
+                w.deleteLater()
+                return
+            lay = item.layout()
+            if lay:
+                while lay.count():
+                    nested = lay.takeAt(0)
+                    if nested and nested.widget():
+                        nw = nested.widget()
+                        nw.setParent(None)
+                        nw.deleteLater()
+                lay.setParent(None)
+
+        # Get the login layout
+        login_layout = self.login_section.layout()
+
+        # Remove overlay message if present
+        self._remove_message_overlay()
+
+        # Remove block widgets if present
+        for widget_attr in ['trial_block_widget', 'forgot_block_widget']:
+            if hasattr(self, widget_attr):
+                w = getattr(self, widget_attr)
+                if w:
+                    try:
+                        w.setParent(None)
+                        w.deleteLater()
+                    except:
+                        pass
+
+        # Do NOT remove arbitrary items near trial_start_index to avoid deleting original widgets.
+        
+        # Clean up all trial/forgot and message references
+        for attr in ['trial_email_container', 'trial_send_btn_layout', 'trial_back_btn_layout',
+                 'trial_email_input', 'trial_send_btn', 'trial_back_btn',
+                 'resend_container', 'send_btn_layout', 'back_btn_layout',
+                 'resend_input', 'send_btn', 'back_btn',
+                 'trial_block_widget', 'forgot_block_widget',
+                 'success_message', 'message_widget', 'trial_start_index', 'forgot_start_index',
+                 'original_layout_count']:
+            if hasattr(self, attr):
+                delattr(self, attr)
+        
+        self.show_trial_mode = False
+        self.show_forgot_mode = False
+        self.waiting_for_response = False
+        
+        # Show all original widgets (with safety checks)
+        if hasattr(self, 'email_input'):
+            try:
+                self.email_input.show()
+            except: pass
+        if hasattr(self, 'license_input'):
+            try:
+                self.license_input.show()
+            except: pass
+        if hasattr(self, 'auto_login_cb'):
+            try:
+                self.auto_login_cb.show()
+            except: pass
+        if hasattr(self, 'forgot_btn'):
+            try:
+                self.forgot_btn.show()
+            except: pass
+        if hasattr(self, 'login_btn'):
+            try:
+                self.login_btn.show()
+            except: pass
+        if hasattr(self, 'trial_btn'):
+            try:
+                self.trial_btn.show()
+            except: pass
+        if hasattr(self, 'msstore_btn'):
+            try:
+                self.msstore_btn.show()
+            except: pass
+        if hasattr(self, 'gumroad_btn'):
+            try:
+                self.gumroad_btn.show()
+            except: pass
+        if hasattr(self, 'buy_label'):
+            try:
+                self.buy_label.show()
+            except: pass
+
+    def handle_resend(self):
+        """Handle resend license key"""
+        email = self.resend_input.text().strip()
+        if not email:
+            self.resend_input.setStyleSheet(self.resend_input.styleSheet() + "; border: 2px solid red;")
+            QTimer.singleShot(2000, lambda: self.reset_input_styles())
+            return
+
+        # Grey out and disable send button while waiting
+        try:
+            self.waiting_for_response = True
+            self.send_btn.setEnabled(False)
+            self.send_btn.setText("Processing...")
+            self.send_btn.setStyleSheet(
+                "QPushButton { background-color: transparent; color: #bbbbbb; border: 2px solid #666666; border-radius: 8px; }"
+            )
+        except:
+            pass
+
+        # Development mode simulation: f@f.com success, n@n.com fail
+        email_norm = (email or "").strip().lower()
+        if email_norm in ["f@f.com", "n@n.com"]:
+            def _finish_dev_resend():
+                if email_norm == "f@f.com":
+                    self._show_inline_forgot_message(
+                        "Success! The license key has been sent to your mail.",
+                        "",
+                        message_type="success"
+                    )
+                else:
+                    self._show_inline_forgot_message(
+                        "License for the give mail hasn't been found in our database",
+                        "",
+                        message_type="error"
+                    )
+                try:
+                    self.send_btn.setEnabled(True)
+                    self.send_btn.setText("Send")
+                    # Restore original style
+                    self.send_btn.setStyleSheet(
+                        "QPushButton { background-color: transparent; color: white; border: 2px solid #2196f3; border-radius: 8px; }"
+                    )
+                except:
+                    pass
+                self.waiting_for_response = False
+            QTimer.singleShot(2000, _finish_dev_resend)
+            return
+
+        # TODO: Real server request: wait for response then show message
+        # Placeholder: simulate negative lookup after 2s
+        def _finish_real_resend():
+            self._show_inline_forgot_message(
+                "License for the give mail hasn't been found in our database",
+                "",
+                message_type="error"
+            )
+            try:
+                self.send_btn.setEnabled(True)
+                self.send_btn.setText("Send")
+                self.send_btn.setStyleSheet(
+                    "QPushButton { background-color: transparent; color: white; border: 2px solid #2196f3; border-radius: 8px; }"
+                )
+            except:
+                pass
+            self.waiting_for_response = False
+        QTimer.singleShot(2000, _finish_real_resend)
+
+    def _show_inline_forgot_message(self, title, subtitle, message_type="info"):
+        """Display message inline for Forgot flow, replacing Forgot UI and adding a back button."""
+        # Remove forgot/trial block widgets if they exist
+        try:
+            if hasattr(self, 'forgot_block_widget') and self.forgot_block_widget:
+                self.forgot_block_widget.setParent(None)
+                self.forgot_block_widget.deleteLater()
+                del self.forgot_block_widget
+            if hasattr(self, 'trial_block_widget') and self.trial_block_widget:
+                self.trial_block_widget.setParent(None)
+                self.trial_block_widget.deleteLater()
+                del self.trial_block_widget
+        except:
+            pass
+
+        # Create message widget
+        is_dark = self.is_dark_mode()
+        message_widget = LoginMessage(title, subtitle, is_dark=is_dark)
+
+        # Add a back button below the message that returns to login
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(10)
+        button_layout.addStretch()
+
+        back_btn = QPushButton("back")
+        back_btn.setFixedSize(100, 40)
+        back_btn.setFont(QFont(FONT_FAMILY, 12, QFont.Bold))
+        back_btn.setStyleSheet(
+            "QPushButton { "
+            "background-color: transparent; "
+            "color: #999999; "
+            "border: 2px solid #999999; "
+            "border-radius: 8px; "
+            "} "
+            "QPushButton:hover { "
+            "background-color: transparent; "
+            "color: #2196f3; "
+            "border: 2px solid #2196f3; "
+            "}"
+        )
+        back_btn.clicked.connect(self.reset_to_login_mode)
+        button_layout.addWidget(back_btn)
+        button_layout.addStretch()
+
+        message_widget.add_content(QWidget())
+        message_layout = message_widget.layout()
+        message_layout.addLayout(button_layout)
+
+        # Show centered overlay
+        self._show_centered_message(message_widget)
+        self.message_widget = message_widget
+    
+    def reset_to_login_mode(self):
+        """Reset UI to the initial login state reliably from any mode."""
+        self.reset_trial_to_login_mode()
+    
+    def close_window(self):
+        """Close the window"""
+        self.reject()
+    
+    def keyPressEvent(self, event):
+        """Handle key press events"""
+        if event.key() == Qt.Key_Escape:
+            self.close_window()
+            return
+        # Intercept Enter when a transient message is displayed
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            if hasattr(self, 'overlay_widget') and self.overlay_widget:
+                # Close message and return to login UI
+                self.reset_trial_to_login_mode()
+                return
+            if hasattr(self, 'success_message_container') and self.success_message_container:
+                # Close success and return to login UI
+                self.reset_trial_to_login_mode()
+                return
+        super().keyPressEvent(event)
+    
+    def mousePressEvent(self, event):
+        """Handle mouse press for dragging"""
+        # Only allow dragging from non-interactive areas (media section)
+        if event.button() == Qt.LeftButton:
+            self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+        super().mousePressEvent(event)
+    
+    def mouseMoveEvent(self, event):
+        """Handle mouse move for dragging"""
+        if event.buttons() == Qt.LeftButton and self.drag_position is not None:
+            self.move(event.globalPos() - self.drag_position)
+        super().mouseMoveEvent(event)
+    
+    def mouseReleaseEvent(self, event):
+        """Handle mouse release"""
+        self.drag_position = None
+        super().mouseReleaseEvent(event)
+
+    def resizeEvent(self, event):
+        """Ensure overlay always covers the login section for proper centering."""
+        try:
+            if hasattr(self, 'overlay_widget') and self.overlay_widget:
+                self.overlay_widget.setGeometry(self.login_section.rect())
+        except:
+            pass
+        super().resizeEvent(event)
+
+    def eventFilter(self, obj, event):
+        """Globally intercept Enter/Return while transient messages are visible."""
+        try:
+            from PyQt5.QtCore import QEvent
+            if event.type() == QEvent.KeyPress and event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                has_inline = (
+                    (hasattr(self, 'overlay_widget') and self.overlay_widget) or
+                    (hasattr(self, 'message_container') and self.message_container) or
+                    (hasattr(self, 'success_message_container') and self.success_message_container)
+                )
+                if has_inline:
+                    self.reset_trial_to_login_mode()
+                    return True  # consume event
+                # Also consume Enter while waiting for server response to avoid accidental close
+                if self.waiting_for_response:
+                    return True
+        except:
+            pass
+        return super().eventFilter(obj, event)
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = ModernLoginWindow()
+    window.show()
+    sys.exit(app.exec_())

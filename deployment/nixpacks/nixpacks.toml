@@ -1,0 +1,11 @@
+[phases.setup]
+nixPkgs = ['python310']
+
+[phases.install]
+cmds = ['pip install -r requirements-production.txt']
+
+[phases.build]
+cmds = []
+
+[start]
+cmd = 'gunicorn production_license_api:app --bind 0.0.0.0:$PORT'

@@ -1,0 +1,4 @@
+{
+    "max_files": 5,
+    "description": "Trial limits configuration. 'max_files' is the total number of output files allowed (including variants)."
+}

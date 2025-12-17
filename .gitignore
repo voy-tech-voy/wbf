@@ -1,0 +1,221 @@
+# ============================================================================
+# SENSITIVE DATA - NEVER COMMIT
+# ============================================================================
+
+# License and customer data (contains emails, hardware IDs, personal info)
+config/licenses*.json
+config/licenses_*.json
+server/data/licenses*.json
+server/data/purchases.jsonl
+server/data/trials.json
+
+# Backup files with sensitive data
+*_backup*.json
+licenses_backup*.json
+licenses_for_*.json
+
+# Environment variables and secrets
+.env
+.env.local
+.env.production
+*.env
+
+# ============================================================================
+# LOG FILES - CAN GROW VERY LARGE
+# ============================================================================
+
+# All log directories
+ImgApp_Logs/
+*/ImgApp_Logs/
+**/ImgApp_Logs/
+
+# Crash reports
+EMERGENCY_CRASH_REPORT_*.json
+EMERGENCY_CRASH_REPORT_*.txt
+diagnostic_report_*.json
+error_report_*.json
+
+# Webhook logs
+webhook_logs.jsonl
+webhook_debug.jsonl
+
+# Application logs
+*.log
+logs/
+server/logs/
+
+# ============================================================================
+# BUILD ARTIFACTS & EXECUTABLES (100+ MB FILES!)
+# ============================================================================
+
+# Built executables - DO NOT COMMIT (use GitHub Releases instead)
+*.exe
+*.app
+*.dmg
+*.msi
+*.pkg
+*.deb
+*.rpm
+
+# Release directories
+ImgApp_Releases/
+ImgApp_Releases_Lite/
+ImgApp_Personal_Release/
+dist_prod_lite/
+dist_prod/
+releases/
+docs/build/
+
+# PyInstaller build outputs
+build/
+!build/scripts/
+!build/specs/
+dist/
+*.spec
+!build/specs/*.spec
+
+# ============================================================================
+# BINARY TOOLS & MEDIA (LARGE FILES)
+# ============================================================================
+
+# FFmpeg tools (can be downloaded separately)
+tools/*.exe
+tools/*.dll
+tools/*.dylib
+tools/*.so
+!tools/checksums.json
+
+# Video/image test files
+*.mp4
+*.webm
+*.avi
+*.mov
+test_images/
+repro_*.mp4
+repro_*.webm
+
+# ============================================================================
+# PYTHON
+# ============================================================================
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+imgapp_venv/
+imgapp_env/
+
+# Distribution / packaging
+dist/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ============================================================================
+# IDEs and EDITORS
+# ============================================================================
+
+# VSCode
+.vscode/
+.history/
+
+# PyCharm
+.idea/
+*.iml
+*.iws
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# ============================================================================
+# OPERATING SYSTEM
+# ============================================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+.directory
+
+# ============================================================================
+# PROJECT SPECIFIC
+# ============================================================================
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.backup
+server.zip
+
+# Migration scripts (one-time use)
+migrate_structure.py
+ROLLBACK_MIGRATION.py
+migration_log.json
+
+# Debug/test files
+debug_routes.py
+repro_*.py
+test_server_crash.py
+
+# PyQt
+*.qrc
+
+# Local config
+client/config/local_config.json

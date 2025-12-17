@@ -1,0 +1,2 @@
+# Procfile for Heroku deployment
+web: gunicorn production_license_api:app --bind 0.0.0.0:$PORT --workers 2

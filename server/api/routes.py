@@ -1,0 +1,104 @@
+from flask import jsonify, request
+from . import api_bp
+from services.trial_manager import TrialManager
+from services.license_manager import LicenseManager
+
+trial_manager = TrialManager()
+license_manager = LicenseManager()
+
+@api_bp.route('/status', methods=['GET'])
+def status():
+    return jsonify({"status": "online", "version": "1.0.0"})
+
+@api_bp.route('/trial/check', methods=['POST'])
+def check_trial():
+    data = request.get_json()
+    if not data or 'hardware_id' not in data:
+        return jsonify({"error": "Missing hardware_id"}), 400
+        
+    result = trial_manager.check_trial(data['hardware_id'])
+    return jsonify(result)
+
+@api_bp.route('/trial/increment', methods=['POST'])
+def increment_trial():
+    data = request.get_json()
+    if not data or 'hardware_id' not in data:
+        return jsonify({"error": "Missing hardware_id"}), 400
+    
+    files_count = data.get('files_count', 1)
+    result = trial_manager.increment_trial(data['hardware_id'], files_count)
+    return jsonify(result)
+
+@api_bp.route('/trial/reset', methods=['POST'])
+def reset_trial():
+    data = request.get_json()
+    if not data or 'hardware_id' not in data:
+        return jsonify({"error": "Missing hardware_id"}), 400
+        
+    result = trial_manager.reset_trial(data['hardware_id'])
+    return jsonify(result)
+
+@api_bp.route('/license/validate', methods=['POST'])
+def validate_license():
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'no_data'}), 400
+    
+    email = data.get('email')
+    license_key = data.get('license_key')
+    hardware_id = data.get('hardware_id')
+    device_name = data.get('device_name', 'Unknown Device')
+    
+    if not all([email, license_key, hardware_id]):
+        return jsonify({'success': False, 'error': 'missing_parameters'}), 400
+    
+    result = license_manager.validate_license(email, license_key, hardware_id, device_name)
+    
+    status_code = 200 if result.get('success') else 400
+    return jsonify(result), status_code
+
+@api_bp.route('/license/transfer', methods=['POST'])
+def transfer_license():
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'no_data'}), 400
+    
+    email = data.get('email')
+    license_key = data.get('license_key')
+    new_hardware_id = data.get('new_hardware_id')
+    new_device_name = data.get('new_device_name', 'Unknown Device')
+    
+    if not all([email, license_key, new_hardware_id]):
+        return jsonify({'success': False, 'error': 'missing_parameters'}), 400
+    
+    result = license_manager.transfer_license(email, license_key, new_hardware_id, new_device_name)
+    
+    status_code = 200 if result.get('success') else 400
+    return jsonify(result), status_code
+
+@api_bp.route('/license/create', methods=['POST'])
+def create_license():
+    # Simple admin check - in production use proper auth
+    # For now, we'll just allow it or check a header if we had one configured
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'no_data'}), 400
+    
+    email = data.get('email')
+    customer_name = data.get('customer_name', '')
+    expires_days = data.get('expires_days', 365)
+    
+    if not email:
+        return jsonify({'success': False, 'error': 'email_required'}), 400
+    
+    license_key = license_manager.create_license(email, customer_name, expires_days)
+    
+    if license_key:
+        return jsonify({
+            'success': True,
+            'license_key': license_key,
+            'email': email,
+            'expires_days': expires_days
+        })
+    else:
+        return jsonify({'success': False, 'error': 'creation_failed'}), 500

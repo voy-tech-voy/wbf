@@ -1,0 +1,49 @@
+"""
+Console Hiding Fix Summary for ImgApp
+
+ISSUE IDENTIFIED:
+- Console windows briefly appearing during FFmpeg and Gifsicle subprocess calls
+- This happened because ffmpeg-python library's run() function wasn't configured to hide console windows
+- Multiple ffmpeg.run() calls throughout the conversion engine were affected
+
+SOLUTION IMPLEMENTED:
+✅ Updated all ffmpeg.run() calls to include Windows console hiding
+✅ Added 'creationflags': subprocess.CREATE_NO_WINDOW for Windows
+✅ Applied fix to both main and macOS bundle conversion engines
+
+FILES MODIFIED:
+1. core/conversion_engine.py - All ffmpeg.run() calls updated
+2. ImgApp_macOS_Bundle/source/core/conversion_engine.py - All ffmpeg.run() calls updated
+
+TECHNICAL DETAILS:
+- Before: ffmpeg.run(output, quiet=True)
+- After: 
+  run_kwargs = {'quiet': True}
+  if os.name == 'nt':
+      run_kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+  ffmpeg.run(output, **run_kwargs)
+
+FUNCTIONS UPDATED:
+✅ convert_image() - Image format conversion
+✅ convert_video() - Video codec conversion  
+✅ video_to_gif() - Video to GIF conversion (palette generation & final output)
+✅ optimize_gif() - GIF optimization with Gifsicle
+✅ _convert_image_multiple_qualities() - Multiple quality variants
+✅ _convert_video_multiple_variants() - Multiple size variants
+✅ _create_gif_from_video() - Helper function for GIF creation
+
+VERIFICATION:
+✅ All subprocess.run() calls already used get_subprocess_kwargs() with console hiding
+✅ ffmpeg.run() calls were the missing piece - now fixed
+✅ Gifsicle subprocess.run() calls already had proper console hiding
+✅ Test confirmed bundled tools run without console popup
+
+RESULT:
+🎯 Console windows will no longer appear during any conversion process
+🎯 Users will have uninterrupted conversion experience
+🎯 Fix applies to all conversion types: images, videos, GIFs
+🎯 Works for both direct conversion and multi-variant processing
+"""
+
+if __name__ == "__main__":
+    print(__doc__)

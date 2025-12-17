@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: imagewave-license-api
+    env: python
+    buildCommand: pip install -r requirements-production.txt
+    startCommand: gunicorn production_license_api:app --bind 0.0.0.0:$PORT
+    envVars:
+      - key: ADMIN_PASSWORD
+        generateValue: true
+      - key: SECRET_KEY
+        generateValue: true
+      - key: FLASK_ENV
+        value: production

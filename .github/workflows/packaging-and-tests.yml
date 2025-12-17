@@ -1,0 +1,66 @@
+name: Packaging + Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  tests:
+    name: Run unit tests (Linux + Windows)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.11]
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt || true
+
+      - name: Run lightweight tests (works without pytest)
+        run: |
+          python -m tests.run_tests_no_pytest
+
+  build_windows:
+    name: Build one-file artifact on Windows (smoke test)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Create venv
+        run: |
+          python -m venv imgapp_venv
+          imgapp_venv\Scripts\python.exe -m pip install --upgrade pip
+          imgapp_venv\Scripts\pip.exe install -r requirements.txt
+
+      - name: Run Windows build script (non-interactive)
+        run: |
+          # Call the build main function via import so we avoid interactive prompt
+          imgapp_venv\Scripts\python.exe -c "import build_production_windows as bp; bp.main()"
+
+      - name: Check build artifact exists
+        run: |
+          if not exist dist\ImgApp-v1.2.1.exe (
+            echo "Executable not found" & exit 1
+          ) else (
+            echo "Build artifact present: dist\ImgApp-v1.2.1.exe"
+          )
+      - name: Run packaged EXE verification
+        run: |
+          echo Running runtime verification from packaged EXE
+          .\dist\ImgApp-v1.2.1.exe --verify-bundled-tools
+        shell: powershell

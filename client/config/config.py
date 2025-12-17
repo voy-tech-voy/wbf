@@ -1,0 +1,75 @@
+"""
+Configuration settings for ImageWave Converter
+"""
+
+import os
+import sys
+
+class Config:
+    """Base configuration"""
+    
+    # API Configuration
+    API_BASE_URL = "https://wavyvoy.pythonanywhere.com"  # Your PythonAnywhere API
+    API_TIMEOUT = 30
+    
+    # API Version Prefix
+    API_PREFIX = "/api/v1"
+    
+    # License Configuration
+    LICENSE_VALIDATION_ENDPOINT = f"{API_PREFIX}/license/validate"
+    LICENSE_TRANSFER_ENDPOINT = f"{API_PREFIX}/license/transfer"
+    
+    # Trial Configuration (New System)
+    TRIAL_CHECK_ELIGIBILITY_ENDPOINT = f"{API_PREFIX}/webhooks/trial/check-eligibility"
+    TRIAL_CREATE_ENDPOINT = f"{API_PREFIX}/webhooks/trial/create"
+    TRIAL_STATUS_ENDPOINT = f"{API_PREFIX}/webhooks/trial/status"
+    LICENSE_OFFLINE_CHECK_ENDPOINT = f"{API_PREFIX}/webhooks/license/offline-check"
+    
+    # Application Configuration
+    APP_NAME = "ImageWave Converter"
+    APP_VERSION = "1.1.0"
+    
+    # Development mode detection
+    # Production mode when frozen (PyInstaller build)
+    DEVELOPMENT_MODE = (
+        not getattr(sys, 'frozen', False) and
+        (getattr(sys, '_called_from_test', False) or __debug__)
+    )
+
+class DevelopmentConfig(Config):
+    """Development configuration"""
+    API_BASE_URL = "http://127.0.0.1:5005"
+    DEBUG = True
+
+class ProductionConfig(Config):
+    """Production configuration"""
+    API_BASE_URL = "https://wavyvoy.pythonanywhere.com"  # Your PythonAnywhere API
+    DEBUG = False
+
+# Configuration selection
+if Config.DEVELOPMENT_MODE:
+    current_config = DevelopmentConfig()
+else:
+    current_config = ProductionConfig()
+
+# Check for local override file
+try:
+    import local_config
+    if hasattr(local_config, 'API_BASE_URL'):
+        current_config.API_BASE_URL = local_config.API_BASE_URL
+    if hasattr(local_config, 'DEVELOPMENT_MODE') and local_config.DEVELOPMENT_MODE:
+        current_config.DEBUG = True
+        print("Using local development server override")
+except ImportError:
+    pass  # No local config file
+
+# Export commonly used values
+API_BASE_URL = current_config.API_BASE_URL
+VALIDATE_URL = f"{API_BASE_URL}{current_config.LICENSE_VALIDATION_ENDPOINT}"
+TRANSFER_URL = f"{API_BASE_URL}{current_config.LICENSE_TRANSFER_ENDPOINT}"
+
+# New Trial System URLs
+TRIAL_CHECK_ELIGIBILITY_URL = f"{API_BASE_URL}{current_config.TRIAL_CHECK_ELIGIBILITY_ENDPOINT}"
+TRIAL_CREATE_URL = f"{API_BASE_URL}{current_config.TRIAL_CREATE_ENDPOINT}"
+TRIAL_STATUS_URL = f"{API_BASE_URL}{current_config.TRIAL_STATUS_ENDPOINT}"
+LICENSE_OFFLINE_CHECK_URL = f"{API_BASE_URL}{current_config.LICENSE_OFFLINE_CHECK_ENDPOINT}"

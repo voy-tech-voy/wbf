@@ -1,0 +1,12 @@
+# Production Deployment Requirements
+flask>=2.3.0
+gunicorn>=21.2.0
+python-dotenv>=1.0.0
+
+# For PostgreSQL (if using database instead of JSON)
+# psycopg2-binary>=2.9.0
+
+# For enhanced security
+cryptography>=41.0.0
+
+# Note: logging is built into Python, no need to install
