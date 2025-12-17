@@ -18,12 +18,11 @@ class Config:
     # License Configuration
     LICENSE_VALIDATION_ENDPOINT = f"{API_PREFIX}/license/validate"
     LICENSE_TRANSFER_ENDPOINT = f"{API_PREFIX}/license/transfer"
+    LICENSE_FORGOT_ENDPOINT = f"{API_PREFIX}/license/forgot"
     
-    # Trial Configuration (New System)
-    TRIAL_CHECK_ELIGIBILITY_ENDPOINT = f"{API_PREFIX}/webhooks/trial/check-eligibility"
-    TRIAL_CREATE_ENDPOINT = f"{API_PREFIX}/webhooks/trial/create"
-    TRIAL_STATUS_ENDPOINT = f"{API_PREFIX}/webhooks/trial/status"
-    LICENSE_OFFLINE_CHECK_ENDPOINT = f"{API_PREFIX}/webhooks/license/offline-check"
+    # Trial Configuration
+    TRIAL_CHECK_ELIGIBILITY_ENDPOINT = f"{API_PREFIX}/trial/check-eligibility"
+    TRIAL_CREATE_ENDPOINT = f"{API_PREFIX}/trial/create"
     
     # Application Configuration
     APP_NAME = "ImageWave Converter"
@@ -67,9 +66,8 @@ except ImportError:
 API_BASE_URL = current_config.API_BASE_URL
 VALIDATE_URL = f"{API_BASE_URL}{current_config.LICENSE_VALIDATION_ENDPOINT}"
 TRANSFER_URL = f"{API_BASE_URL}{current_config.LICENSE_TRANSFER_ENDPOINT}"
+FORGOT_LICENSE_URL = f"{API_BASE_URL}{current_config.LICENSE_FORGOT_ENDPOINT}"
 
-# New Trial System URLs
+# Trial System URLs
 TRIAL_CHECK_ELIGIBILITY_URL = f"{API_BASE_URL}{current_config.TRIAL_CHECK_ELIGIBILITY_ENDPOINT}"
 TRIAL_CREATE_URL = f"{API_BASE_URL}{current_config.TRIAL_CREATE_ENDPOINT}"
-TRIAL_STATUS_URL = f"{API_BASE_URL}{current_config.TRIAL_STATUS_ENDPOINT}"
-LICENSE_OFFLINE_CHECK_URL = f"{API_BASE_URL}{current_config.LICENSE_OFFLINE_CHECK_ENDPOINT}"

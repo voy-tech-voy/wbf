@@ -102,3 +102,56 @@ def create_license():
         })
     else:
         return jsonify({'success': False, 'error': 'creation_failed'}), 500
+@api_bp.route('/license/forgot', methods=['POST'])
+def forgot_license():
+    """Find and return a license key for a user who forgot it"""
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'no_data'}), 400
+    
+    email = data.get('email')
+    
+    if not email:
+        return jsonify({'success': False, 'error': 'email_required'}), 400
+    
+    result = license_manager.find_license_by_email(email)
+    
+    status_code = 200 if result.get('success') else 404 if result.get('error') == 'no_license_found' else 400
+    return jsonify(result), status_code
+
+@api_bp.route('/trial/create', methods=['POST'])
+def create_trial():
+    """Create a trial license for a user"""
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'no_data'}), 400
+    
+    email = data.get('email')
+    hardware_id = data.get('hardware_id')
+    device_name = data.get('device_name', 'Unknown Device')
+    
+    if not all([email, hardware_id]):
+        return jsonify({'success': False, 'error': 'missing_parameters'}), 400
+    
+    result = license_manager.create_trial_license(email, hardware_id, device_name)
+    
+    status_code = 201 if result.get('success') else 400
+    return jsonify(result), status_code
+
+@api_bp.route('/trial/check-eligibility', methods=['POST'])
+def check_trial_eligibility():
+    """Check if a user is eligible for a trial"""
+    data = request.get_json()
+    if not data:
+        return jsonify({'eligible': False, 'error': 'no_data'}), 400
+    
+    email = data.get('email')
+    hardware_id = data.get('hardware_id')
+    
+    if not all([email, hardware_id]):
+        return jsonify({'eligible': False, 'error': 'missing_parameters'}), 400
+    
+    result = license_manager.check_trial_eligibility(email, hardware_id)
+    
+    status_code = 200
+    return jsonify(result), status_code

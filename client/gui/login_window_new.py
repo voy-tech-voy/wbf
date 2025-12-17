@@ -716,7 +716,7 @@ class ModernLoginWindow(QDialog):
             pass
     
     def handle_login(self):
-        """Handle login"""
+        """Handle login with server validation"""
         # Suppress Enter-triggered login briefly after trial success transition
         try:
             if hasattr(self, 'enter_suppressed_until') and self.enter_suppressed_until:
@@ -746,11 +746,74 @@ class ModernLoginWindow(QDialog):
             self.accept()
             return
         
-        # TODO: Add server validation
-        self.authenticated = True
-        self.is_trial = False
-        self.save_credentials(email, license_key)
-        self.accept()
+        # Validate with server
+        self.validate_login_with_server(email, license_key)
+    
+    def validate_login_with_server(self, email, license_key):
+        """Validate login credentials with the server"""
+        try:
+            from client.config.config import VALIDATE_URL
+            
+            # Get hardware ID for validation
+            hardware_id = self.get_hardware_id()
+            device_name = f"{platform.system()}-{socket.gethostname()}"
+            
+            # Show loading state
+            self.login_btn.setEnabled(False)
+            self.login_btn.setText("Validating...")
+            QApplication.processEvents()
+            
+            # Send validation request to server
+            response = requests.post(VALIDATE_URL, json={
+                'email': email,
+                'license_key': license_key,
+                'hardware_id': hardware_id,
+                'device_name': device_name
+            }, timeout=10)
+            
+            result = response.json()
+            
+            if result.get('success'):
+                # Login successful
+                self.authenticated = True
+                self.is_trial = result.get('is_trial', False)
+                self.save_credentials(email, license_key)
+                self.accept()
+            else:
+                # Login failed - show error message
+                error = result.get('error', 'Unknown error')
+                message = result.get('message', f'License validation failed: {error}')
+                
+                if error == 'email_mismatch':
+                    message = 'Email does not match the license key'
+                elif error == 'license_expired':
+                    message = 'This license has expired'
+                elif error == 'license_deactivated':
+                    message = 'This license has been deactivated'
+                elif error == 'bound_to_other_device':
+                    bound_device = result.get('bound_device', 'another device')
+                    message = f'This license is bound to {bound_device}. Please use that device or contact support'
+                elif error == 'invalid_license':
+                    message = 'Invalid license key'
+                
+                self._show_inline_message("Login Failed", message, message_type="error")
+                
+                # Reset button
+                self.login_btn.setEnabled(True)
+                self.login_btn.setText("Login")
+                
+        except requests.exceptions.Timeout:
+            self._show_inline_message("Connection Timeout", "The server took too long to respond. Please check your internet connection and try again.", message_type="error")
+            self.login_btn.setEnabled(True)
+            self.login_btn.setText("Login")
+        except requests.exceptions.ConnectionError:
+            self._show_inline_message("No Internet Connection", "Unable to connect to the server. Please check your internet connection and try again.", message_type="error")
+            self.login_btn.setEnabled(True)
+            self.login_btn.setText("Login")
+        except Exception as e:
+            self._show_inline_message("Login Error", f"An error occurred: {str(e)}", message_type="error")
+            self.login_btn.setEnabled(True)
+            self.login_btn.setText("Login")
 
     def accept(self):
         """Override dialog accept to avoid closing when a transient message is shown."""
@@ -1507,11 +1570,20 @@ class ModernLoginWindow(QDialog):
             except: pass
 
     def handle_resend(self):
-        """Handle resend license key"""
+        """Handle forgot license - retrieve license key from server"""
         email = self.resend_input.text().strip()
         if not email:
             self.resend_input.setStyleSheet(self.resend_input.styleSheet() + "; border: 2px solid red;")
             QTimer.singleShot(2000, lambda: self.reset_input_styles())
+            return
+        
+        # Validate email format
+        if '@' not in email or '.' not in email.split('@')[-1]:
+            self._show_inline_forgot_message(
+                "Invalid Email",
+                "Please enter a valid email address",
+                message_type="error"
+            )
             return
 
         # Grey out and disable send button while waiting
@@ -1531,14 +1603,14 @@ class ModernLoginWindow(QDialog):
             def _finish_dev_resend():
                 if email_norm == "f@f.com":
                     self._show_inline_forgot_message(
-                        "Success! The license key has been sent to your mail.",
-                        "",
+                        "License Found",
+                        "IW-123456-ABCDEF12",
                         message_type="success"
                     )
                 else:
                     self._show_inline_forgot_message(
-                        "License for the give mail hasn't been found in our database",
-                        "",
+                        "License Not Found",
+                        "No license found for this email address",
                         message_type="error"
                     )
                 try:
@@ -1554,7 +1626,93 @@ class ModernLoginWindow(QDialog):
             QTimer.singleShot(2000, _finish_dev_resend)
             return
 
-        # TODO: Real server request: wait for response then show message
+        # Real server request
+        self.request_forgot_license(email)
+    
+    def request_forgot_license(self, email):
+        """Request forgot license from server"""
+        try:
+            from client.config.config import FORGOT_LICENSE_URL
+            
+            response = requests.post(FORGOT_LICENSE_URL, json={
+                'email': email
+            }, timeout=10)
+            
+            result = response.json()
+            
+            if result.get('success'):
+                # License found
+                license_key = result.get('license_key', 'Unknown')
+                expiry_date = result.get('expiry_date', 'Unknown')
+                
+                # Show license key to user
+                display_text = f"Your License Key:\n\n{license_key}"
+                if expiry_date and expiry_date != 'Unknown':
+                    display_text += f"\n\nExpires: {expiry_date[:10]}"
+                
+                self._show_inline_forgot_message(
+                    "License Found!",
+                    display_text,
+                    message_type="success"
+                )
+            else:
+                # License not found
+                error = result.get('error', 'unknown')
+                message = result.get('message', 'Failed to find license')
+                
+                if error == 'no_license_found':
+                    message = 'No license found for this email address'
+                
+                self._show_inline_forgot_message(
+                    "License Not Found",
+                    message,
+                    message_type="error"
+                )
+            
+            # Re-enable button
+            self.send_btn.setEnabled(True)
+            self.send_btn.setText("Send")
+            self.send_btn.setStyleSheet(
+                "QPushButton { background-color: transparent; color: white; border: 2px solid #2196f3; border-radius: 8px; }"
+            )
+            self.waiting_for_response = False
+            
+        except requests.exceptions.Timeout:
+            self._show_inline_forgot_message(
+                "Connection Timeout",
+                "The server took too long to respond. Please try again.",
+                message_type="error"
+            )
+            self.send_btn.setEnabled(True)
+            self.send_btn.setText("Send")
+            self.send_btn.setStyleSheet(
+                "QPushButton { background-color: transparent; color: white; border: 2px solid #2196f3; border-radius: 8px; }"
+            )
+            self.waiting_for_response = False
+        except requests.exceptions.ConnectionError:
+            self._show_inline_forgot_message(
+                "No Internet Connection",
+                "Unable to connect to the server. Please check your internet connection and try again.",
+                message_type="error"
+            )
+            self.send_btn.setEnabled(True)
+            self.send_btn.setText("Send")
+            self.send_btn.setStyleSheet(
+                "QPushButton { background-color: transparent; color: white; border: 2px solid #2196f3; border-radius: 8px; }"
+            )
+            self.waiting_for_response = False
+        except Exception as e:
+            self._show_inline_forgot_message(
+                "Error",
+                f"An error occurred: {str(e)}",
+                message_type="error"
+            )
+            self.send_btn.setEnabled(True)
+            self.send_btn.setText("Send")
+            self.send_btn.setStyleSheet(
+                "QPushButton { background-color: transparent; color: white; border: 2px solid #2196f3; border-radius: 8px; }"
+            )
+            self.waiting_for_response = False
         # Placeholder: simulate negative lookup after 2s
         def _finish_real_resend():
             self._show_inline_forgot_message(

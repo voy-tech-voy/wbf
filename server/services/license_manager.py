@@ -576,4 +576,64 @@ class LicenseManager:
             
         except Exception as e:
             logger.error(f"Failed to get license info: {e}")
-            return {'success': False, 'error': 'lookup_failed'}
+            return {'success': False, 'error': 'lookup_failed'}    
+    def find_license_by_email(self, email):
+        """Find and return a license key for a given email
+        
+        Args:
+            email: Customer email address
+        
+        Returns:
+            dict: {'success': bool, 'license_key': str, 'error': str, 'message': str}
+        """
+        try:
+            if not email or '@' not in email:
+                return {
+                    'success': False,
+                    'error': 'invalid_email',
+                    'message': 'Please provide a valid email address'
+                }
+            
+            licenses = self.load_licenses()
+            email_lower = email.lower().strip()
+            
+            # Search for licenses matching this email
+            found_licenses = []
+            for license_key, license_data in licenses.items():
+                if license_data.get('email', '').lower() == email_lower:
+                    found_licenses.append({
+                        'license_key': license_key,
+                        'is_active': license_data.get('is_active', False),
+                        'created_date': license_data.get('created_date'),
+                        'expiry_date': license_data.get('expiry_date'),
+                        'device_name': license_data.get('device_name')
+                    })
+            
+            if not found_licenses:
+                return {
+                    'success': False,
+                    'error': 'no_license_found',
+                    'message': 'No license found for this email address'
+                }
+            
+            # Return the most recent active license, or if none active, the most recent one
+            active_licenses = [lic for lic in found_licenses if lic['is_active']]
+            target_license = active_licenses[0] if active_licenses else found_licenses[0]
+            
+            logger.info(f"Found license {target_license['license_key']} for email {email}")
+            
+            return {
+                'success': True,
+                'license_key': target_license['license_key'],
+                'is_active': target_license['is_active'],
+                'expiry_date': target_license['expiry_date'],
+                'message': 'License found successfully'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error finding license by email: {e}")
+            return {
+                'success': False,
+                'error': 'lookup_failed',
+                'message': 'Failed to lookup license'
+            }
