@@ -4,6 +4,9 @@ from services.trial_manager import TrialManager
 from services.license_manager import LicenseManager
 from services.email_service import EmailService
 from services.rate_limiter import rate_limiter
+import logging
+
+logger = logging.getLogger(__name__)
 
 trial_manager = TrialManager()
 license_manager = LicenseManager()
@@ -134,7 +137,14 @@ def forgot_license():
     if result.get('success'):
         # Send email with recovered license key
         license_key = result.get('license_key')
-        email_service.send_forgot_license_email(email, license_key)
+        try:
+            email_sent = email_service.send_forgot_license_email(email, license_key)
+            if not email_sent:
+                logger.warning(f"Failed to send forgot license email to {email} - check SMTP configuration")
+            else:
+                logger.info(f"Forgot license email successfully sent to {email}")
+        except Exception as e:
+            logger.error(f"Exception sending forgot license email to {email}: {e}")
     
     status_code = 200 if result.get('success') else 404 if result.get('error') == 'no_license_found' else 400
     return jsonify(result), status_code
@@ -169,7 +179,14 @@ def create_trial():
     if result.get('success'):
         # Send trial email to user
         license_key = result.get('license_key')
-        email_service.send_trial_email(email, license_key)
+        try:
+            email_sent = email_service.send_trial_email(email, license_key)
+            if not email_sent:
+                logger.warning(f"Failed to send trial email to {email} - check SMTP configuration")
+            else:
+                logger.info(f"Trial email successfully sent to {email}")
+        except Exception as e:
+            logger.error(f"Exception sending trial email to {email}: {e}")
     
     status_code = 201 if result.get('success') else 400
     return jsonify(result), status_code

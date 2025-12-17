@@ -845,37 +845,37 @@ class ModernLoginWindow(QDialog):
                 self.save_credentials(email, license_key)
                 self.accept()
             else:
-                # Login failed - show error message
+                # Login failed - show visual feedback only (no popup)
                 error = result.get('error', 'Unknown error')
-                message = result.get('message', f'License validation failed: {error}')
                 
+                # Determine placeholder text based on error
+                placeholder_text = "Invalid login or password"
                 if error == 'email_mismatch':
-                    message = 'Email does not match the license key'
+                    placeholder_text = "Email doesn't match license"
                 elif error == 'license_expired':
-                    message = 'This license has expired'
+                    placeholder_text = "License expired"
                 elif error == 'license_deactivated':
-                    message = 'This license has been deactivated'
+                    placeholder_text = "License deactivated"
                 elif error == 'bound_to_other_device':
-                    bound_device = result.get('bound_device', 'another device')
-                    message = f'This license is bound to {bound_device}. Please use that device or contact support'
+                    placeholder_text = "Bound to another device"
                 elif error == 'invalid_license':
-                    message = 'Invalid license key'
+                    placeholder_text = "Invalid license key"
                 
                 # Visual feedback: Red outline and placeholder text
-                self._show_login_error_visual()
-                
-                self._show_inline_message("Login Failed", message, message_type="error")
+                self._show_login_error_visual(placeholder_text)
                 
                 # Reset button
                 self.login_btn.setEnabled(True)
                 self.login_btn.setText("Login")
                 
         except requests.exceptions.Timeout:
-            self._show_inline_message("Connection Timeout", "The server took too long to respond. Please check your internet connection and try again.", message_type="error")
+            # Visual feedback for timeout
+            self._show_login_error_visual("Connection timeout")
             self.login_btn.setEnabled(True)
             self.login_btn.setText("Login")
         except requests.exceptions.ConnectionError:
-            self._show_inline_message("No Internet Connection", "Unable to connect to the server. Please check your internet connection and try again.", message_type="error")
+            # Visual feedback for connection error
+            self._show_login_error_visual("No internet connection")
             self.login_btn.setEnabled(True)
             self.login_btn.setText("Login")
         except Exception as e:
@@ -903,7 +903,7 @@ class ModernLoginWindow(QDialog):
         """Show trial mode UI"""
         self.show_trial_mode_ui()
     
-    def _show_login_error_visual(self):
+    def _show_login_error_visual(self, error_message="Invalid login or password"):
         """Show visual feedback for failed login - red outline and placeholder"""
         # Store original placeholders
         original_email_placeholder = self.email_input.placeholderText()
@@ -933,10 +933,10 @@ class ModernLoginWindow(QDialog):
         """
         
         self.email_input.setStyleSheet(error_style)
-        self.email_input.setPlaceholderText("Incorrect login")
+        self.email_input.setPlaceholderText(error_message)
         
         self.license_input.setStyleSheet(error_style)
-        self.license_input.setPlaceholderText("Incorrect login")
+        self.license_input.setPlaceholderText(error_message)
         
         # Reset after 2 seconds
         def restore_original():
