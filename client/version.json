@@ -1,10 +1,11 @@
 {
-  "version": "7.4",
-  "build": 1,
-  "last_build": "2025-01-17T00:00:00Z",
+  "version": "7.5",
+  "build": 2,
+  "last_build": "2025-12-17T17:01:59.414897Z",
   "changelog": {
     "7.4": "Phase 1 enterprise implementation (backup system, trial conversion, server health)",
     "7.3": "Login error UX improvements (inline errors, removed popups)",
-    "7.2": "Enterprise-grade security (rate limiting, circuit breaker pattern)"
+    "7.2": "Enterprise-grade security (rate limiting, circuit breaker pattern)",
+    "7.5": "Build 2025-12-17"
   }
 }

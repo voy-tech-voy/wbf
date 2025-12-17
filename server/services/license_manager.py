@@ -351,11 +351,20 @@ class LicenseManager:
         """
         try:
             licenses = self.load_licenses()
+            trials = self.load_trials()
             
-            if license_key not in licenses:
+            # Check both licenses.json and trials.json
+            license_data = None
+            is_trial = False
+            
+            if license_key in licenses:
+                license_data = licenses[license_key]
+                is_trial = False
+            elif license_key in trials:
+                license_data = trials[license_key]
+                is_trial = True
+            else:
                 return {'success': False, 'error': 'invalid_license'}
-            
-            license_data = licenses[license_key]
             
             # Check if this is a converted trial
             if license_data.get('converted_to_full'):
@@ -371,7 +380,7 @@ class LicenseManager:
                 return {'success': False, 'error': 'license_deactivated'}
             
             # If this is a full license (not trial), deactivate any active trials for this email
-            if not self.is_trial_license(license_key):
+            if not is_trial:
                 self._deactivate_trial_for_email(email)
             
             # Check email match
@@ -384,7 +393,7 @@ class LicenseManager:
                 return {'success': False, 'error': 'license_expired'}
             
             # TRIAL RESTRICTION: No offline validation for trials
-            if is_offline and self.is_trial_license(license_key):
+            if is_offline and is_trial:
                 return {
                     'success': False,
                     'error': 'trial_requires_online',
@@ -431,14 +440,19 @@ class LicenseManager:
                 license_data['last_validation'] = datetime.now().isoformat()
                 license_data['validation_count'] = license_data.get('validation_count', 0) + 1
                 
-                licenses[license_key] = license_data
-                self.save_licenses(licenses)
+                # Save to correct file based on license type
+                if is_trial:
+                    trials[license_key] = license_data
+                    self.save_trials(trials)
+                else:
+                    licenses[license_key] = license_data
+                    self.save_licenses(licenses)
             
             return {
                 'success': True,
                 'message': 'License validated successfully',
                 'expires': license_data['expiry_date'],
-                'is_trial': self.is_trial_license(license_key)
+                'is_trial': is_trial
             }
             
         except Exception as e:
