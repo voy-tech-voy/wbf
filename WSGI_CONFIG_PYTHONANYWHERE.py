@@ -62,7 +62,7 @@ os.environ['SMTP_USERNAME'] = os.environ.get(
 )
 os.environ['SMTP_PASSWORD'] = os.environ.get(
     'SMTP_PASSWORD',
-    'uobq jkdv gxvg jvzx'  # CHANGE THIS to your actual password
+    'smpt pass word text'  # CHANGE THIS to your actual password
 )
 os.environ['FROM_EMAIL'] = os.environ.get(
     'FROM_EMAIL',

@@ -55,6 +55,243 @@ def get_toggle_style(is_dark=None):
     )
 
 
+class EmailInput(QLineEdit):
+    """Specialized input with validation and error display - shows placeholder even when focused"""
+    def __init__(self, placeholder_text="Enter your email", validate_as_email=True, error_message="required", parent=None):
+        super().__init__(parent)
+        self.original_placeholder = placeholder_text
+        self.validate_as_email = validate_as_email  # If False, only checks if empty (for license keys)
+        self.empty_error_message = error_message  # Error message for empty field
+        self.setPlaceholderText(placeholder_text)
+        self.setFixedSize(350, 50)
+        self.setFont(QFont(FONT_FAMILY, 14))
+        self.setAlignment(Qt.AlignCenter)
+        self.error_timer = QTimer()
+        self.error_timer.setSingleShot(True)
+        self.error_timer.timeout.connect(self._reset_error_state)
+        self.validation_handler = None  # Will be set to handle validation
+        self.bypass_validation_for = []  # List of emails that bypass validation (for dev mode)
+        
+        # Apply styling with visible placeholder
+        self.apply_theme_style(is_dark_mode())
+        
+        # Ensure text is empty so placeholder shows
+        self.setText("")
+    
+    def paintEvent(self, event):
+        """Override to draw placeholder even when focused"""
+        super().paintEvent(event)
+        
+        # Draw placeholder text when field is empty, even if focused
+        if not self.text() and self.placeholderText():
+            from PyQt5.QtGui import QPainter, QColor
+            
+            painter = QPainter(self)
+            
+            # Get placeholder color based on theme - darker in dark mode, brighter in light mode
+            is_dark = is_dark_mode()
+            placeholder_color = QColor("#dddddd" if is_dark else "#444444")
+            
+            # Set font and color
+            painter.setPen(placeholder_color)
+            painter.setFont(self.font())
+            
+            # Draw centered placeholder text
+            rect = self.rect()
+            painter.drawText(rect, Qt.AlignCenter, self.placeholderText())
+            
+            painter.end()
+    
+    def keyPressEvent(self, event):
+        """Override to handle Enter key with validation"""
+        print(f"🔵 DEBUG [EmailInput.keyPressEvent]: Key pressed: {event.key()}")
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            email = self.text().strip()
+            print(f"🔵 DEBUG [EmailInput.keyPressEvent]: Enter pressed with email='{email}'")
+            print(f"🔵 DEBUG [EmailInput.keyPressEvent]: bypass_validation_for list: {self.bypass_validation_for}")
+            
+            # Check if empty - DON'T call handler, just show error
+            if not email:
+                print(f"🔵 DEBUG [EmailInput.keyPressEvent]: Empty field, calling show_error('{self.empty_error_message}')")
+                self.show_error(self.empty_error_message)
+                print(f"🔵 DEBUG [EmailInput.keyPressEvent]: show_error() returned, accepting event")
+                event.accept()  # Consume the event - don't propagate
+                print(f"🔵 DEBUG [EmailInput.keyPressEvent]: Event accepted, returning WITHOUT calling handler")
+                return
+            
+            # Check if this value bypasses validation (dev mode test values)
+            if email.lower() in self.bypass_validation_for:
+                print(f"🔵 DEBUG [EmailInput.keyPressEvent]: Value '{email}' bypasses validation (dev mode)")
+                if self.validation_handler:
+                    print(f"🔵 DEBUG [EmailInput.keyPressEvent]: Calling validation_handler")
+                    self.validation_handler()
+                event.accept()
+                return
+            
+            # Validate format before calling handler (only if validate_as_email is True)
+            if self.validate_as_email:
+                print(f"🔵 DEBUG [EmailInput.keyPressEvent]: Calling validate_email() for '{email}'")
+                is_valid = self.validate_email()
+                print(f"🔵 DEBUG [EmailInput.keyPressEvent]: validate_email() returned: {is_valid}")
+                
+                if not is_valid:
+                    print(f"🔵 DEBUG [EmailInput.keyPressEvent]: Invalid format, calling show_error('incorrect mail format')")
+                    self.show_error("incorrect mail format")
+                    print(f"🔵 DEBUG [EmailInput.keyPressEvent]: show_error() returned, accepting event")
+                    event.accept()  # Consume the event
+                    print(f"🔵 DEBUG [EmailInput.keyPressEvent]: Event accepted, returning")
+                    return
+            
+            # Value is valid - call handler
+            if self.validation_handler:
+                print(f"🔵 DEBUG [EmailInput.keyPressEvent]: Value valid, calling validation_handler")
+                self.validation_handler()
+                event.accept()  # Always consume the event - handler will decide what to do
+                return
+        
+        # For other keys, use default behavior
+        super().keyPressEvent(event)
+    
+    def validate_email(self):
+        """
+        Validate email format: {text}@{text}.{domain}
+        Returns True if valid, False if invalid
+        """
+        email = self.text().strip()
+        
+        if not email:
+            return False
+        
+        # Check basic structure: must have @ and .
+        if '@' not in email:
+            return False
+        
+        # Split by @
+        parts = email.split('@')
+        if len(parts) != 2:
+            return False
+        
+        local_part, domain_part = parts
+        
+        # Local part must not be empty
+        if not local_part:
+            return False
+        
+        # Domain must have at least one dot
+        if '.' not in domain_part:
+            return False
+        
+        # Split domain by last dot to get domain name and TLD
+        domain_parts = domain_part.rsplit('.', 1)
+        if len(domain_parts) != 2:
+            return False
+        
+        domain_name, tld = domain_parts
+        
+        # Domain name and TLD must not be empty
+        if not domain_name or not tld:
+            return False
+        
+        return True
+    
+    def show_error(self, message="incorrect mail format"):
+        """Show error state with red border and error message as placeholder"""
+        print(f"🔴 DEBUG [EmailInput.show_error]: CALLED with message='{message}'")
+        print(f"🔴 DEBUG [EmailInput.show_error]: Has focus: {self.hasFocus()}")
+        
+        # Clear focus first so placeholder will be visible
+        if self.hasFocus():
+            print(f"🔴 DEBUG [EmailInput.show_error]: Clearing focus to show placeholder")
+            self.clearFocus()
+        
+        # Clear text
+        self.setText("")
+        print(f"🔴 DEBUG [EmailInput.show_error]: Text cleared")
+        
+        # Set error styling with visible placeholder
+        is_dark = is_dark_mode()
+        self.setStyleSheet(
+            f"QLineEdit {{"
+            f"  border: 2px solid #ff0000;"
+            f"  border-radius: 8px;"
+            f"  padding: 10px;"
+            f"  background-color: {'#2b2b2b' if is_dark else '#ffffff'};"
+            f"  color: {'white' if is_dark else 'black'};"
+            f"}}"
+            f"QLineEdit::placeholder {{"
+            f"  color: {'#ff8888' if is_dark else '#ff4444'};"
+            f"}}"
+        )
+        print(f"🔴 DEBUG [EmailInput.show_error]: Red border applied")
+        
+        self.setPlaceholderText(message)
+        print(f"🔴 DEBUG [EmailInput.show_error]: Placeholder set to: '{message}'")
+        
+        self.setReadOnly(True)  # Disable input
+        print(f"🔴 DEBUG [EmailInput.show_error]: ReadOnly set to True")
+        
+        # Process events to ensure UI updates
+        QApplication.processEvents()
+        print(f"🔴 DEBUG [EmailInput.show_error]: UI processed")
+        
+        self.error_timer.start(2000)  # Reset after 2 seconds
+        print(f"🔴 DEBUG [EmailInput.show_error]: Timer started, COMPLETED")
+    
+    def _reset_error_state(self):
+        """Reset to normal state after error display"""
+        print(f"🟢 DEBUG [EmailInput._reset_error_state]: CALLED - resetting after error")
+        
+        # Re-enable input
+        self.setReadOnly(False)
+        print(f"🟢 DEBUG [EmailInput._reset_error_state]: ReadOnly set to False")
+        
+        # Restore normal styling
+        self.apply_theme_style(is_dark_mode())
+        print(f"🟢 DEBUG [EmailInput._reset_error_state]: Theme style applied")
+        
+        # Restore original placeholder
+        self.setPlaceholderText(self.original_placeholder)
+        print(f"🟢 DEBUG [EmailInput._reset_error_state]: Placeholder reset to: '{self.original_placeholder}'")
+        
+        # Return focus to input so user can type again
+        self.setFocus()
+        print(f"🟢 DEBUG [EmailInput._reset_error_state]: Focus restored, COMPLETED")
+    
+    def apply_theme_style(self, is_dark):
+        """Apply theme-aware styling - placeholder stays visible until typing"""
+        
+        if is_dark:
+            bg_color = "#2b2b2b"
+            text_color = "white"
+            border_color = "#555555"
+            placeholder_color = "#dddddd"  # Darker/brighter in dark mode (more visible)
+        else:
+            bg_color = "#ffffff"
+            text_color = "black"
+            border_color = "#cccccc"
+            placeholder_color = "#444444"  # Brighter/darker in light mode (more visible)
+        
+        # Use stylesheet with explicit placeholder styling
+        self.setStyleSheet(
+            f"QLineEdit {{"
+            f"  border: 2px solid {border_color};"
+            f"  border-radius: 8px;"
+            f"  padding: 10px;"
+            f"  background-color: {bg_color};"
+            f"  color: {text_color};"
+            f"  selection-background-color: transparent;"
+            f"  selection-color: {text_color};"
+            f"}}"
+            f"QLineEdit:focus {{"
+            f"  border: 2px solid #2196f3;"
+            f"}}"
+            f"QLineEdit[text=\"\"]::placeholder {{"
+            f"  color: {placeholder_color};"
+            f"  opacity: 1;"
+            f"}}"
+        )
+
+
 class LoginLineEdit(QLineEdit):
     """Unified line edit for login window inputs"""
     def __init__(self, placeholder_text="", is_password=False, parent=None):
@@ -171,7 +408,7 @@ class LoginMessage(QWidget):
         
         # Title
         title_label = QLabel(title)
-        title_label.setFont(QFont(FONT_FAMILY, 13, QFont.Bold))
+        title_label.setFont(QFont(FONT_FAMILY, 14, QFont.Bold))  # Unified size with subtitle
         title_label.setAlignment(Qt.AlignCenter)
         title_label.setWordWrap(True)
         title_label.setFixedWidth(350)
@@ -182,7 +419,7 @@ class LoginMessage(QWidget):
         # Subtitle (if provided)
         if subtitle:
             subtitle_label = QLabel(subtitle)
-            subtitle_label.setFont(QFont(FONT_FAMILY, 11))
+            subtitle_label.setFont(QFont(FONT_FAMILY, 14))  # Same size as title for consistency
             subtitle_label.setAlignment(Qt.AlignCenter)
             subtitle_label.setWordWrap(True)
             subtitle_label.setFixedWidth(350)
@@ -208,6 +445,7 @@ class ModernLoginWindow(QDialog):
         self.show_forgot_mode = False
         self.drag_position = None
         self.waiting_for_response = False
+        self.message_stable = True  # Flag to prevent premature Enter resets
         self.server_health_checker = ServerHealthChecker()
         
         self.setWindowTitle("ImgApp - Login")
@@ -240,6 +478,7 @@ class ModernLoginWindow(QDialog):
                 self.overlay_widget.setParent(None)
                 self.overlay_widget.deleteLater()
                 self.overlay_widget = None
+            # DON'T reset message_stable here - let the new message control it
         except:
             self.overlay_widget = None
 
@@ -250,6 +489,10 @@ class ModernLoginWindow(QDialog):
         overlay.setAttribute(Qt.WA_StyledBackground, True)
         overlay.setStyleSheet("background: transparent;")
         overlay.setGeometry(self.login_section.rect())
+        
+        # Make overlay clickable to dismiss
+        overlay.mousePressEvent = lambda event: self.reset_trial_to_login_mode()
+        
         v = QVBoxLayout(overlay)
         v.setContentsMargins(0, 0, 0, 0)
         v.addWidget(message_widget, 0, Qt.AlignCenter)
@@ -334,10 +577,11 @@ class ModernLoginWindow(QDialog):
         login_layout.addLayout(app_header_layout)
         login_layout.addSpacing(20)
         
-        # Email input using unified class
-        self.email_input = LoginLineEdit("e-mail")
-        self.email_input.returnPressed.connect(self.handle_login)
-        self.email_input.focusInEvent = lambda event: self.clear_message_display() or LoginLineEdit.focusInEvent(self.email_input, event)
+        # Email input using unified EmailInput class
+        self.email_input = EmailInput("e-mail", validate_as_email=True, error_message="email required")
+        self.email_input.validation_handler = self.handle_login
+        self.email_input.bypass_validation_for = ['dev']  # Dev mode bypass
+        self.email_input.focusInEvent = lambda event: self.clear_message_display() or EmailInput.focusInEvent(self.email_input, event)
         email_container = QHBoxLayout()
         email_container.addStretch()
         email_container.addWidget(self.email_input)
@@ -347,10 +591,10 @@ class ModernLoginWindow(QDialog):
         # Spacing between input fields
         login_layout.addSpacing(20)
         
-        # License key input using unified class
-        self.license_input = LoginLineEdit("license key", is_password=False)
-        self.license_input.returnPressed.connect(self.handle_login)
-        self.license_input.focusInEvent = lambda event: self.clear_message_display() or LoginLineEdit.focusInEvent(self.license_input, event)
+        # License key input using same EmailInput class but without email validation
+        self.license_input = EmailInput("license key", validate_as_email=False, error_message="license key required")
+        self.license_input.validation_handler = self.handle_login
+        self.license_input.focusInEvent = lambda event: self.clear_message_display() or EmailInput.focusInEvent(self.license_input, event)
         license_container = QHBoxLayout()
         license_container.addStretch()
         license_container.addWidget(self.license_input)
@@ -419,10 +663,8 @@ class ModernLoginWindow(QDialog):
         self.login_btn = QPushButton("Login")
         self.login_btn.setFixedSize(350, 65)
         self.login_btn.setFont(QFont(FONT_FAMILY, 14, QFont.Bold))
-        try:
-            self.login_btn.setAutoDefault(False)
-        except:
-            pass
+        self.login_btn.setAutoDefault(False)  # Prevent Enter from triggering this button
+        self.login_btn.setDefault(False)  # Explicitly set not default
         self.login_btn.setStyleSheet(
             "QPushButton { "
             "background-color: transparent; "
@@ -528,6 +770,12 @@ class ModernLoginWindow(QDialog):
         
         main_layout.addWidget(self.login_section)
         self.setLayout(main_layout)
+        
+        # Set focus to email input by default so Enter always has a target
+        QTimer.singleShot(0, lambda: self.email_input.setFocus())
+        
+        # Set focus to email input by default so Enter has a target
+        QTimer.singleShot(0, lambda: self.email_input.setFocus())
     
     def apply_theme(self):
         """Apply theme based on system dark mode"""
@@ -753,19 +1001,11 @@ class ModernLoginWindow(QDialog):
                     return
         except:
             pass
+        
+        # EmailInput class now handles validation automatically
+        # Only called if both fields are valid
         email = self.email_input.text().strip()
         license_key = self.license_input.text().strip()
-        
-        if not email or not license_key:
-            # Highlight empty fields with red outline
-            if not email:
-                self.email_input.setStyleSheet(self.email_input.styleSheet() + "; border: 2px solid red;")
-            if not license_key:
-                self.license_input.setStyleSheet(self.license_input.styleSheet() + "; border: 2px solid red;")
-            
-            # Reset after 2 seconds
-            QTimer.singleShot(2000, self.reset_input_styles)
-            return
         
         # Development bypass
         if DEVELOPMENT_MODE and email == "dev":
@@ -1052,14 +1292,18 @@ class ModernLoginWindow(QDialog):
         # Get the login layout
         login_layout = self.login_section.layout()
         
-        # Create resend input using unified class
-        self.resend_input = LoginLineEdit("send license key to the email")
-        self.resend_input.returnPressed.connect(self.handle_resend)
+        # Create resend input using EmailInput class for validation
+        self.resend_input = EmailInput("send license key to the email", validate_as_email=True, error_message="email required")
+        self.resend_input.validation_handler = self.handle_resend
+        self.resend_input.bypass_validation_for = ['f@f.com', 'n@n.com', 'invalid']  # Dev mode test emails
 
         # Forgot block wrapper to keep spacing self-contained
         self.forgot_block_widget = QWidget()
         forgot_block_v = QVBoxLayout(self.forgot_block_widget)
         forgot_block_v.setContentsMargins(0, 0, 0, 0)
+        
+        # Set focus to input field after a short delay (with safety check)
+        QTimer.singleShot(100, lambda: self.resend_input.setFocus() if hasattr(self, 'resend_input') else None)
 
         # Centered resend input
         self.resend_container = QHBoxLayout()
@@ -1160,9 +1404,13 @@ class ModernLoginWindow(QDialog):
         if hasattr(self, 'buy_label'):
             self.buy_label.hide()
         
-        # Create trial email input using unified class
-        self.trial_email_input = LoginLineEdit("e-mail")
-        self.trial_email_input.returnPressed.connect(self.handle_trial_send)
+        # Create trial email input using EmailInput class for validation
+        self.trial_email_input = EmailInput("e-mail", validate_as_email=True, error_message="email required")
+        self.trial_email_input.validation_handler = self.handle_trial_send
+        self.trial_email_input.bypass_validation_for = ['a@a.com', 'b@b.com', 'off']  # Dev mode test emails
+        
+        # Set focus to input field after a short delay (with safety check)
+        QTimer.singleShot(100, lambda: self.trial_email_input.setFocus() if hasattr(self, 'trial_email_input') else None)
 
         # Trial block wrapper to keep spacing self-contained
         self.trial_block_widget = QWidget()
@@ -1241,18 +1489,24 @@ class ModernLoginWindow(QDialog):
     
     def handle_trial_send(self):
         """Handle trial mode email submission"""
-        email = self.trial_email_input.text().strip()
-        
-        if not email:
-            self.trial_email_input.setStyleSheet(self.trial_email_input.styleSheet() + "; border: 2px solid red;")
-            QTimer.singleShot(2000, lambda: self.reset_trial_input_styles())
-            return
-        
-        # Validate email format (except for dev mode test emails)
-        if email not in ['a@a.com', 'b@b.com', 'off']:
-            if '@' not in email or '.' not in email.split('@')[-1]:
-                self.show_trial_error_dialog("Invalid Email", "Please enter a valid email address")
+        try:
+            email = self.trial_email_input.text().strip()
+            
+            if not email:
+                self.trial_email_input.show_error("email required")
                 return
+            
+            # Validate email format using EmailInput validation (except for dev mode test emails)
+            if email not in ['a@a.com', 'b@b.com', 'off']:
+                if not self.trial_email_input.validate_email():
+                    print(f"🔍 DEBUG [handle_trial_send]: Invalid email format, showing error")
+                    self.trial_email_input.show_error("incorrect mail format")
+                    return
+        except Exception as e:
+            print(f"🔍 DEBUG [handle_trial_send]: Exception during validation: {e}")
+            import traceback
+            traceback.print_exc()
+            return
         
         # Mark waiting state; disable button and show waiting style
         self.waiting_for_response = True
@@ -1268,9 +1522,10 @@ class ModernLoginWindow(QDialog):
             email_norm = (email or "").strip().lower()
             print(f"DEBUG: handle_trial_send called with email: {email_norm}")
             if email_norm in ['a@a.com', 'b@b.com', 'off']:
-                print(f"DEBUG: Dev mode email detected: {email_norm}")
+                print(f"🔍 DEBUG [handle_trial_send]: Dev mode detected for '{email_norm}', simulating delay")
                 if email_norm == 'off':
                     # Immediate offline message
+                    print(f"🔍 DEBUG [handle_trial_send]: Showing offline message immediately")
                     self.show_trial_warning_dialog(
                         "No Internet Connection",
                         "An internet connection is required to activate a trial.\n\nPlease check your connection and try again."
@@ -1280,10 +1535,13 @@ class ModernLoginWindow(QDialog):
                     self.trial_send_btn.setStyleSheet(
                         "QPushButton { background-color: transparent; color: white; border: 2px solid #2196f3; border-radius: 8px; }"
                     )
+                    print(f"🔍 DEBUG [handle_trial_send]: Setting waiting_for_response=False (offline)")
                     self.waiting_for_response = False
                     return
                 # Simulate 2s server wait before showing message
+                print(f"🔍 DEBUG [handle_trial_send]: Scheduling 2s delay for '{email_norm}'")
                 def _finish_dev():
+                    print(f"🔍 DEBUG [_finish_dev]: Delay complete for '{email_norm}', showing dialog")
                     if email_norm == 'a@a.com':
                         self.show_trial_success_dialog(email_norm, 'x-x-x')
                     else:
@@ -1292,11 +1550,13 @@ class ModernLoginWindow(QDialog):
                             "The server reported a trial activation failure for this email/device."
                         )
                     # Re-enable button after message shown (reset happens in message cleanup)
+                    print(f"🔍 DEBUG [_finish_dev]: Re-enabling trial button")
                     self.trial_send_btn.setEnabled(True)
                     self.trial_send_btn.setText("enter trial mode")
                     self.trial_send_btn.setStyleSheet(
                         "QPushButton { background-color: transparent; color: white; border: 2px solid #2196f3; border-radius: 8px; }"
                     )
+                    print(f"🔍 DEBUG [_finish_dev]: Setting waiting_for_response=False")
                     self.waiting_for_response = False
                 QTimer.singleShot(2000, _finish_dev)
                 return
@@ -1430,7 +1690,7 @@ class ModernLoginWindow(QDialog):
     
     def show_trial_success_dialog(self, email, license_key):
         """Show success message inline in the login section"""
-        print(f"DEBUG: show_trial_success_dialog called with email={email}, license_key={license_key}")
+        print(f"DEBUG: show_trial_success_dialog called with email={email}")
         # Remove any transient trial/forgot block widgets cleanly
         try:
             if hasattr(self, 'trial_block_widget') and self.trial_block_widget:
@@ -1450,15 +1710,6 @@ class ModernLoginWindow(QDialog):
             "trial version created.\nLet's webatchify!",
             is_dark=is_dark
         )
-        
-        # Add license key display
-        key_display = QLineEdit()
-        key_display.setText(license_key)
-        key_display.setReadOnly(True)
-        key_display.setFixedSize(350, 50)
-        key_display.setFont(QFont(FONT_FAMILY, 12, QFont.Bold))
-        key_display.setAlignment(Qt.AlignCenter)
-        success_message.add_content(key_display)
         
         # Show centered overlay message
         self._show_centered_message(success_message)
@@ -1709,29 +1960,41 @@ class ModernLoginWindow(QDialog):
             try:
                 self.buy_label.show()
             except: pass
+        
+        # Set focus to email input when returning to login
+        if hasattr(self, 'email_input'):
+            QTimer.singleShot(100, lambda: self.email_input.setFocus() if hasattr(self, 'email_input') else None)
 
     def handle_resend(self):
         """Handle forgot license - retrieve license key from server"""
-        # Clear any existing messages/overlays first to ensure consistent behavior
-        self._remove_message_overlay()
-        
-        email = self.resend_input.text().strip()
-        if not email:
-            self.resend_input.setStyleSheet(self.resend_input.styleSheet() + "; border: 2px solid red;")
-            QTimer.singleShot(2000, lambda: self.reset_input_styles())
-            return
-        
-        # Validate email format
-        if '@' not in email or '.' not in email.split('@')[-1]:
-            self._show_inline_forgot_message(
-                "Invalid Email",
-                "Please enter a valid email address",
-                message_type="error"
-            )
+        try:
+            print(f"🔍 DEBUG [handle_resend]: START - waiting_for_response={getattr(self, 'waiting_for_response', False)}")
+            
+            # Clear any existing messages/overlays first to ensure consistent behavior
+            self._remove_message_overlay()
+            
+            email = self.resend_input.text().strip()
+            print(f"🔍 DEBUG [handle_resend]: Email entered: '{email}'")
+            
+            if not email:
+                print(f"🔍 DEBUG [handle_resend]: Empty email, showing error")
+                self.resend_input.show_error("email required")
+                return
+            
+            # Validate email format using EmailInput validation
+            if not self.resend_input.validate_email():
+                print(f"🔍 DEBUG [handle_resend]: Invalid email format, showing error")
+                self.resend_input.show_error("incorrect mail format")
+                return
+        except Exception as e:
+            print(f"🔍 DEBUG [handle_resend]: Exception during validation: {e}")
+            import traceback
+            traceback.print_exc()
             return
 
         # Grey out and disable send button while waiting
         try:
+            print(f"🔍 DEBUG [handle_resend]: Setting waiting_for_response=True")
             self.waiting_for_response = True
             self.send_btn.setEnabled(False)
             self.send_btn.setText("Processing...")
@@ -1741,23 +2004,32 @@ class ModernLoginWindow(QDialog):
         except:
             pass
 
-        # Development mode simulation: f@f.com success, n@n.com fail
+        # Development mode simulation: f@f.com success, n@n.com fail, invalid = error
         email_norm = (email or "").strip().lower()
-        if email_norm in ["f@f.com", "n@n.com"]:
+        if email_norm in ["f@f.com", "n@n.com", "invalid"]:
+            print(f"🔍 DEBUG [handle_resend]: Dev mode detected for '{email_norm}', simulating 2s delay")
             def _finish_dev_resend():
+                print(f"🔍 DEBUG [_finish_dev_resend]: Delay complete, showing message for '{email_norm}'")
                 if email_norm == "f@f.com":
                     self._show_inline_forgot_message(
-                        "License Found",
-                        "license_key_12345",
+                        "License key sent! ✉️",
+                        "Check your mail box.",
                         message_type="success"
                     )
-                else:
+                elif email_norm == "n@n.com":
                     self._show_inline_forgot_message(
                         "License Not Found",
                         "No license found for this email address",
                         message_type="error"
                     )
+                else:  # invalid
+                    self._show_inline_forgot_message(
+                        "Error",
+                        "An error occurred processing your request",
+                        message_type="error"
+                    )
                 try:
+                    print(f"🔍 DEBUG [_finish_dev_resend]: Re-enabling send button")
                     self.send_btn.setEnabled(True)
                     self.send_btn.setText("Send")
                     # Restore original style
@@ -1766,6 +2038,7 @@ class ModernLoginWindow(QDialog):
                     )
                 except:
                     pass
+                print(f"🔍 DEBUG [_finish_dev_resend]: Setting waiting_for_response=False")
                 self.waiting_for_response = False
             QTimer.singleShot(2000, _finish_dev_resend)
             return
@@ -1792,18 +2065,9 @@ class ModernLoginWindow(QDialog):
             
             if result.get('success'):
                 # License found and email sent
-                license_key = result.get('license_key', 'Unknown')
-                expiry_date = result.get('expiry_date', 'Unknown')
-                
-                # Show license key to user
-                display_text = f"Your License Key has been found!"
-                if expiry_date and expiry_date != 'Unknown':
-                    display_text += f"\n\nExpires: {expiry_date[:10]}"
-                display_text += f"\n\nAn email with your license key \n has been sent to:\n{email}"
-                
                 self._show_inline_forgot_message(
-                    "License Found!",
-                    display_text,
+                    "License key sent! ✉️",
+                    "Check your mail box.",
                     message_type="success"
                 )
             else:
@@ -1872,6 +2136,12 @@ class ModernLoginWindow(QDialog):
 
     def _show_inline_forgot_message(self, title, subtitle, message_type="info"):
         """Display message inline for Forgot flow, replacing Forgot UI and adding a back button."""
+        print(f"🔍 DEBUG [_show_inline_forgot_message]: Showing message - title='{title}', type={message_type}")
+        
+        # Mark message as not yet stable (prevents premature Enter reset)
+        self.message_stable = False
+        print(f"🔍 DEBUG [_show_inline_forgot_message]: Set message_stable=False")
+        
         # Clear any existing overlays/messages first
         self._remove_message_overlay()
         
@@ -1892,38 +2162,21 @@ class ModernLoginWindow(QDialog):
         is_dark = self.is_dark_mode()
         message_widget = LoginMessage(title, subtitle, is_dark=is_dark)
 
-        # Add a back button below the message that returns to login
-        button_layout = QHBoxLayout()
-        button_layout.setSpacing(10)
-        button_layout.addStretch()
-
-        back_btn = QPushButton("back")
-        back_btn.setFixedSize(100, 40)
-        back_btn.setFont(QFont(FONT_FAMILY, 12, QFont.Bold))
-        back_btn.setStyleSheet(
-            "QPushButton { "
-            "background-color: transparent; "
-            "color: #999999; "
-            "border: 2px solid #999999; "
-            "border-radius: 8px; "
-            "} "
-            "QPushButton:hover { "
-            "background-color: transparent; "
-            "color: #2196f3; "
-            "border: 2px solid #2196f3; "
-            "}"
-        )
-        back_btn.clicked.connect(self.reset_to_login_mode)
-        button_layout.addWidget(back_btn)
-        button_layout.addStretch()
-
-        message_widget.add_content(QWidget())
-        message_layout = message_widget.layout()
-        message_layout.addLayout(button_layout)
+        # No back button needed - message auto-closes with Enter key
 
         # Show centered overlay
         self._show_centered_message(message_widget)
         self.message_widget = message_widget
+        
+        # Mark message as stable after a short delay (500ms) to prevent premature reset
+        def _mark_stable():
+            self.message_stable = True
+            print(f"🔍 DEBUG [_show_inline_forgot_message]: Message now stable, Enter key will reset")
+        QTimer.singleShot(500, _mark_stable)
+        
+        # Auto-dismiss success messages after 3 seconds
+        if message_type == "success":
+            QTimer.singleShot(3000, lambda: self.reset_trial_to_login_mode() if hasattr(self, 'overlay_widget') and self.overlay_widget else None)
     
     def reset_to_login_mode(self):
         """Reset UI to the initial login state reliably from any mode."""
@@ -1934,20 +2187,34 @@ class ModernLoginWindow(QDialog):
         self.reject()
     
     def keyPressEvent(self, event):
-        """Handle key press events"""
+        """Handle key press events - prevent Enter from closing dialog"""
         if event.key() == Qt.Key_Escape:
             self.close_window()
+            event.accept()
             return
-        # Intercept Enter when a transient message is displayed
+        
+        # Intercept Enter/Return key - NEVER let it reach QDialog's default handler
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            print(f"🔍 DEBUG [keyPressEvent]: Enter pressed at dialog level")
+            
+            # If there's a message overlay, close it
             if hasattr(self, 'overlay_widget') and self.overlay_widget:
-                # Close message and return to login UI
+                print(f"🔍 DEBUG [keyPressEvent]: Closing overlay")
                 self.reset_trial_to_login_mode()
+                event.accept()
                 return
             if hasattr(self, 'success_message_container') and self.success_message_container:
-                # Close success and return to login UI
+                print(f"🔍 DEBUG [keyPressEvent]: Closing success message")
                 self.reset_trial_to_login_mode()
+                event.accept()
                 return
+            
+            # Otherwise, just consume the Enter - do NOT close the dialog
+            print(f"🔍 DEBUG [keyPressEvent]: Consuming Enter to prevent dialog close")
+            event.accept()  # Accept and return - do NOT call super()
+            return
+        
+        # For all other keys, use default behavior
         super().keyPressEvent(event)
     
     def mousePressEvent(self, event):
@@ -1982,23 +2249,35 @@ class ModernLoginWindow(QDialog):
         try:
             from PyQt5.QtCore import QEvent
             if event.type() == QEvent.KeyPress and event.key() in (Qt.Key_Return, Qt.Key_Enter):
-                # Also consume Enter while waiting for server response to avoid accidental close
-                if self.waiting_for_response:
-                    print(f"🔍 DEBUG: Enter key pressed while waiting_for_response=True, consuming event")
+                # Check waiting state
+                is_waiting = getattr(self, 'waiting_for_response', False)
+                
+                # Check inline state
+                has_overlay = hasattr(self, 'overlay_widget') and self.overlay_widget
+                has_message = hasattr(self, 'message_container') and self.message_container
+                has_success = hasattr(self, 'success_message_container') and self.success_message_container
+                has_inline = has_overlay or has_message or has_success
+                
+                # Check message stability (prevents reset during message creation)
+                message_stable = getattr(self, 'message_stable', True)  # Default True for backward compat
+                
+                print(f"🔍 DEBUG [eventFilter]: Enter pressed - waiting={is_waiting}, has_inline={has_inline}, message_stable={message_stable}")
+                
+                # Consume Enter while waiting for server response to avoid accidental actions
+                if is_waiting:
+                    print(f"🔍 DEBUG [eventFilter]: Consuming Enter (still waiting for server)")
                     return True
                 
-                # Only reset to login if there's an inline message AND not waiting for response
-                has_inline = (
-                    (hasattr(self, 'overlay_widget') and self.overlay_widget) or
-                    (hasattr(self, 'message_container') and self.message_container) or
-                    (hasattr(self, 'success_message_container') and self.success_message_container)
-                )
-                if has_inline:
-                    print(f"🔍 DEBUG: Enter key pressed with inline message, resetting to login")
+                # Only reset to login if message is stable AND not waiting
+                if has_inline and message_stable:
+                    print(f"🔍 DEBUG [eventFilter]: Message stable, resetting to login")
                     self.reset_trial_to_login_mode()
                     return True  # consume event
-        except:
-            pass
+                elif has_inline and not message_stable:
+                    print(f"🔍 DEBUG [eventFilter]: Message not yet stable, consuming Enter")
+                    return True  # consume but don't reset
+        except Exception as e:
+            print(f"🔍 DEBUG [eventFilter]: Exception: {e}")
         return super().eventFilter(obj, event)
 
 

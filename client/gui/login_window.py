@@ -728,7 +728,7 @@ class LoginWindow(QDialog):
                 result = response.json()
                 if result.get('success'):
                     license_key = result.get('license_key')
-                    print(f"Trial license created: {license_key}")
+                    print(f"Trial license created successfully")
                     return license_key
                 else:
                     error = result.get('error', 'Unknown error')

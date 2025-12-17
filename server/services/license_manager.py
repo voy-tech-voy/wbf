@@ -10,14 +10,23 @@ logger = logging.getLogger(__name__)
 class LicenseManager:
     def __init__(self):
         self.license_file = Config.LICENSES_FILE
+        self.trials_file = Config.TRIALS_FILE
         self.purchases_file = os.path.join(os.path.dirname(self.license_file), 'purchases.jsonl')
         self.ensure_license_file()
+        self.ensure_trials_file()
     
     def ensure_license_file(self):
         """Ensure license file exists"""
         if not os.path.exists(self.license_file):
             os.makedirs(os.path.dirname(self.license_file), exist_ok=True)
             with open(self.license_file, 'w') as f:
+                json.dump({}, f)
+    
+    def ensure_trials_file(self):
+        """Ensure trials.json file exists"""
+        if not os.path.exists(self.trials_file):
+            os.makedirs(os.path.dirname(self.trials_file), exist_ok=True)
+            with open(self.trials_file, 'w') as f:
                 json.dump({}, f)
     
     def load_licenses(self):
@@ -37,6 +46,25 @@ class LicenseManager:
             return True
         except Exception as e:
             logger.error(f"Failed to save licenses: {e}")
+            return False
+    
+    def load_trials(self):
+        """Load trials from file"""
+        try:
+            with open(self.trials_file, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Failed to load trials: {e}")
+            return {}
+    
+    def save_trials(self, trials):
+        """Save trials to file"""
+        try:
+            with open(self.trials_file, 'w') as f:
+                json.dump(trials, f, indent=2)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save trials: {e}")
             return False
     
     def generate_license_key(self):
@@ -143,17 +171,15 @@ class LicenseManager:
             dict: {'eligible': bool, 'reason': str}
         """
         try:
-            licenses = self.load_licenses()
+            # Check trials.json for existing trials
+            trials = self.load_trials()
             
             # Check if trial already exists for this email
-            for license_key, license_data in licenses.items():
-                if license_data.get('email') == email:
-                    # Check if it's a trial (1-day expiry from creation)
-                    created = datetime.fromisoformat(license_data['created_date'])
-                    expiry = datetime.fromisoformat(license_data['expiry_date'])
-                    days_diff = (expiry - created).days
-                    
-                    if days_diff <= 1:  # It's a trial
+            for trial_key, trial_data in trials.items():
+                if trial_data.get('email') == email:
+                    # Check if trial is still active (not expired)
+                    expiry = datetime.fromisoformat(trial_data['expiry_date'])
+                    if datetime.now() < expiry:
                         return {
                             'eligible': False,
                             'reason': 'trial_already_used_email',
@@ -161,18 +187,31 @@ class LicenseManager:
                         }
             
             # Check if trial already exists for this hardware_id
-            for license_key, license_data in licenses.items():
-                if license_data.get('hardware_id') == hardware_id:
-                    # Check if it's a trial
-                    created = datetime.fromisoformat(license_data['created_date'])
-                    expiry = datetime.fromisoformat(license_data['expiry_date'])
-                    days_diff = (expiry - created).days
-                    
-                    if days_diff <= 1:  # It's a trial
+            for trial_key, trial_data in trials.items():
+                if trial_data.get('hardware_id') == hardware_id:
+                    # Check if trial is still active (not expired)
+                    expiry = datetime.fromisoformat(trial_data['expiry_date'])
+                    if datetime.now() < expiry:
                         return {
                             'eligible': False,
                             'reason': 'trial_already_used_device',
                             'message': 'This device has already been used for a free trial'
+                        }
+            
+            # Also check if user already has a full license
+            licenses = self.load_licenses()
+            for license_key, license_data in licenses.items():
+                if license_data.get('email') == email and license_data.get('is_active'):
+                    # Check if it's NOT a trial (full license)
+                    created = datetime.fromisoformat(license_data['created_date'])
+                    expiry = datetime.fromisoformat(license_data['expiry_date'])
+                    days_diff = (expiry - created).days
+                    
+                    if days_diff > 1:  # It's a full license, not a trial
+                        return {
+                            'eligible': False,
+                            'reason': 'already_has_license',
+                            'message': 'You already have a full license. Please log in with your license key.'
                         }
             
             return {
@@ -190,6 +229,8 @@ class LicenseManager:
     
     def create_trial_license(self, email, hardware_id, device_name="Unknown"):
         """Create a 1-day trial license (immediately bound to device)
+        
+        Saves to trials.json (NOT licenses.json)
         
         Args:
             email: User's email address
@@ -209,14 +250,15 @@ class LicenseManager:
                     'message': eligibility['message']
                 }
             
-            licenses = self.load_licenses()
+            # Load trials from trials.json (NOT licenses.json)
+            trials = self.load_trials()
             license_key = self.generate_license_key()
             
             # Trial expires in 1 day
             expiry_date = datetime.now() + timedelta(days=1)
             
             # Create trial license (immediately bound to device)
-            license_data = {
+            trial_data = {
                 'email': email,
                 'created_date': datetime.now().isoformat(),
                 'expiry_date': expiry_date.isoformat(),
@@ -225,13 +267,16 @@ class LicenseManager:
                 'device_name': device_name,
                 'last_validation': datetime.now().isoformat(),
                 'validation_count': 0,
-                'source_license_key': None  # Trials don't have external source
+                'source_license_key': None,  # Trials don't have external source
+                'converted_to_full': False
             }
             
-            licenses[license_key] = license_data
+            # Save to trials.json
+            trials[license_key] = trial_data
             
-            if self.save_licenses(licenses):
-                logger.info(f"Created trial license {license_key} for {email} on device {hardware_id}")
+            if self.save_trials(trials):
+                logger.info(f"✅ Created trial license {license_key[:8]}... for {email} on device {hardware_id}")
+                logger.info(f"   Trial saved to trials.json (expires: {expiry_date.isoformat()})")
                 
                 # Log trial creation to audit trail
                 trial_info = {
@@ -260,7 +305,7 @@ class LicenseManager:
                 }
                 
         except Exception as e:
-            logger.error(f"Failed to create trial license: {e}")
+            logger.error(f"❌ Failed to create trial license: {e}")
             return {
                 'success': False,
                 'error': 'creation_failed',
@@ -595,7 +640,7 @@ class LicenseManager:
         Convert trial license to full license (industry standard flow)
         
         Best Practice Flow:
-        1. Find existing trial in licenses.json
+        1. Find existing trial in trials.json
         2. Archive trial data (keep for analytics/audit)
         3. Create full license with trial history
         4. Mark trial as converted (don't delete - audit trail)
@@ -609,15 +654,16 @@ class LicenseManager:
             Full license dictionary
         """
         try:
+            trials = self.load_trials()
             licenses = self.load_licenses()
             
-            # Find trial license by email
+            # Find trial license by email in trials.json
             trial_key = None
             trial_data = None
-            for lic_key, lic_data in licenses.items():
-                if lic_data.get('email', '').lower() == email.lower() and self.is_trial_license(lic_key):
-                    trial_key = lic_key
-                    trial_data = lic_data
+            for t_key, t_data in trials.items():
+                if t_data.get('email', '').lower() == email.lower():
+                    trial_key = t_key
+                    trial_data = t_data
                     break
             
             if trial_data:
@@ -632,8 +678,9 @@ class LicenseManager:
                 trial_data['is_active'] = False  # Deactivate trial
                 trial_data['trial_duration_days'] = trial_duration_days
                 
-                # Update trial in licenses
-                licenses[trial_key] = trial_data
+                # Update trial in trials.json
+                trials[trial_key] = trial_data
+                self.save_trials(trials)
                 
                 logger.info(
                     f"✅ Trial converted to full license\n"
@@ -662,7 +709,7 @@ class LicenseManager:
                 'trial_duration_days': trial_data.get('trial_duration_days', 0) if trial_data else 0
             }
             
-            # Save full license
+            # Save full license to licenses.json
             licenses[new_license_key] = full_license
             self.save_licenses(licenses)
             

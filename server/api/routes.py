@@ -145,6 +145,13 @@ def forgot_license():
                 logger.info(f"Forgot license email successfully sent to {email}")
         except Exception as e:
             logger.error(f"Exception sending forgot license email to {email}: {e}")
+        
+        # Remove license_key from response - only send via email
+        result = {
+            'success': True,
+            'message': 'License key sent to your email',
+            'email_sent': email_sent if 'email_sent' in locals() else False
+        }
     
     status_code = 200 if result.get('success') else 404 if result.get('error') == 'no_license_found' else 400
     return jsonify(result), status_code
