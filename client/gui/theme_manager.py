@@ -358,23 +358,28 @@ class ThemeManager(QObject):
                     border-radius: 4px;
                     padding: 4px;
                 }
+                QComboBox {
+                    padding-right: 24px;
+                }
                 QComboBox:hover, QSpinBox:hover, QLineEdit:hover {
                     border-color: #4CAF50;
                 }
                 QComboBox::drop-down {
-                    background-color: transparent;
                     border: none;
-                    width: 20px;
-                    padding-right: 4px;
+                    background: transparent;
+                    width: 0px;
+                    subcontrol-position: right;
+                    subcontrol-origin: padding;
+                    padding-right: 8px;
                 }
                 QComboBox::down-arrow {
                     image: none;
-                    border: 2px solid #ffffff;
-                    border-top: 2px solid #ffffff;
-                    border-left: 2px solid transparent;
-                    border-right: 2px solid transparent;
-                    width: 6px;
-                    height: 4px;
+                    width: 8px;
+                    height: 8px;
+                    background: transparent;
+                    border-left: 4px solid transparent;
+                    border-right: 4px solid transparent;
+                    border-top: 5px solid #ffffff;
                 }
                 QSlider::groove:horizontal {
                     background-color: #555555;
@@ -519,23 +524,28 @@ class ThemeManager(QObject):
                     border-radius: 4px;
                     padding: 4px;
                 }
+                QComboBox {
+                    padding-right: 24px;
+                }
                 QComboBox:hover, QSpinBox:hover, QLineEdit:hover {
                     border-color: #4CAF50;
                 }
                 QComboBox::drop-down {
-                    background-color: transparent;
                     border: none;
-                    width: 20px;
-                    padding-right: 4px;
+                    background: transparent;
+                    width: 0px;
+                    subcontrol-position: right;
+                    subcontrol-origin: padding;
+                    padding-right: 8px;
                 }
                 QComboBox::down-arrow {
                     image: none;
-                    border: 2px solid #333333;
-                    border-top: 2px solid #333333;
-                    border-left: 2px solid transparent;
-                    border-right: 2px solid transparent;
-                    width: 6px;
-                    height: 4px;
+                    width: 8px;
+                    height: 8px;
+                    background: transparent;
+                    border-left: 4px solid transparent;
+                    border-right: 4px solid transparent;
+                    border-top: 5px solid #333333;
                 }
                 QSlider::groove:horizontal {
                     background-color: #dddddd;
