@@ -158,8 +158,15 @@ class TimeRangeSlider(QWidget):
             print(f"Error in TimeRangeSlider.paintEvent: {e}")
     
     def mousePressEvent(self, event):
-        """Handle mouse press events"""
-        if event.button() == Qt.MouseButton.LeftButton:
+        """Handle mouse press events with proper error handling"""
+        try:
+            if event.button() != Qt.MouseButton.LeftButton:
+                return
+            
+            # Validate widget dimensions
+            if self.width() <= 2 * self.handle_radius or self.height() == 0:
+                return
+            
             pos = event.pos()
             
             # Check if clicking on start handle
@@ -176,33 +183,61 @@ class TimeRangeSlider(QWidget):
                 self.active_handle = 'end'
                 return
             
-            # Check if clicking on range bar
+            # Check if clicking on range bar (with tolerance for narrow ranges)
             start_pixel = self.valueToPixel(self.start_value)
             end_pixel = self.valueToPixel(self.end_value)
-            if start_pixel <= pos.x() <= end_pixel and abs(pos.y() - self.height() // 2) <= 10:
+            vertical_tolerance = max(10, self.height() // 2)
+            
+            if start_pixel <= pos.x() <= end_pixel and abs(pos.y() - self.height() // 2) <= vertical_tolerance:
                 # Move the closer handle
                 start_dist = abs(pos.x() - start_pixel)
                 end_dist = abs(pos.x() - end_pixel)
                 self.active_handle = 'start' if start_dist <= end_dist else 'end'
+                # Trigger move immediately
                 self.mouseMoveEvent(event)
+        except Exception as e:
+            print(f"Error in TimeRangeSlider.mousePressEvent: {e}")
+            self.active_handle = None
     
     def mouseMoveEvent(self, event):
-        """Handle mouse move events"""
-        if self.active_handle and event.buttons() & Qt.MouseButton.LeftButton:
-            try:
-                value = self.pixelToValue(event.pos().x())
-                
-                if self.active_handle == 'start':
-                    self.setStartValue(value)
-                elif self.active_handle == 'end':
-                    self.setEndValue(value)
-            except Exception as e:
-                print(f"Error in TimeRangeSlider.mouseMoveEvent: {e}")
+        """Handle mouse move events with validation"""
+        if not self.active_handle:
+            return
+        
+        if not (event.buttons() & Qt.MouseButton.LeftButton):
+            self.active_handle = None
+            return
+        
+        try:
+            # Validate position
+            pos_x = event.pos().x()
+            if pos_x < 0 or pos_x > self.width():
+                return
+            
+            value = self.pixelToValue(pos_x)
+            
+            if self.active_handle == 'start':
+                self.setStartValue(value)
+            elif self.active_handle == 'end':
+                self.setEndValue(value)
+        except Exception as e:
+            print(f"Error in TimeRangeSlider.mouseMoveEvent: {e}")
     
     def mouseReleaseEvent(self, event):
         """Handle mouse release events"""
-        if event.button() == Qt.MouseButton.LeftButton:
+        try:
+            if event.button() == Qt.MouseButton.LeftButton:
+                self.active_handle = None
+        except Exception as e:
+            print(f"Error in TimeRangeSlider.mouseReleaseEvent: {e}")
             self.active_handle = None
+    
+    def leaveEvent(self, event):
+        """Handle mouse leave events - reset active handle"""
+        try:
+            self.active_handle = None
+        except Exception as e:
+            print(f"Error in TimeRangeSlider.leaveEvent: {e}")
 
 
 class ResizeFolder(QGroupBox):
