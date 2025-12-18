@@ -69,7 +69,7 @@ class ToolLoadingWindow(QWidget):
             "border-radius: 15px;"
             "border: 2px solid #333333;"
         )
-        self.content_label.setAlignment(Qt.AlignCenter)
+        self.content_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Try to load splash image
         from client.utils.resource_path import get_resource_path
