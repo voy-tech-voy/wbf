@@ -1251,21 +1251,39 @@ class CommandPanel(QWidget):
     
     def toggle_time_cutting(self, checked):
         """Toggle time cutting controls visibility"""
-        self.time_range_slider.setVisible(checked)
+        try:
+            if hasattr(self, 'time_range_slider'):
+                self.time_range_slider.setVisible(checked)
+        except Exception as e:
+            print(f"Error toggling time cutting: {e}")
 
     def toggle_retime(self, checked):
         """Toggle retime slider visibility"""
-        self.retime_slider.setVisible(checked)
-        self.retime_value_label.setVisible(checked)
+        try:
+            if hasattr(self, 'retime_slider'):
+                self.retime_slider.setVisible(checked)
+            if hasattr(self, 'retime_value_label'):
+                self.retime_value_label.setVisible(checked)
+        except Exception as e:
+            print(f"Error toggling retime: {e}")
     
     def toggle_gif_time_cutting(self, checked):
         """Toggle GIF time cutting controls visibility"""
-        self.gif_time_range_slider.setVisible(checked)
+        try:
+            if hasattr(self, 'gif_time_range_slider'):
+                self.gif_time_range_slider.setVisible(checked)
+        except Exception as e:
+            print(f"Error toggling GIF time cutting: {e}")
 
     def toggle_gif_retime(self, checked):
         """Toggle GIF retime slider visibility"""
-        self.gif_retime_slider.setVisible(checked)
-        self.gif_retime_value_label.setVisible(checked)
+        try:
+            if hasattr(self, 'gif_retime_slider'):
+                self.gif_retime_slider.setVisible(checked)
+            if hasattr(self, 'gif_retime_value_label'):
+                self.gif_retime_value_label.setVisible(checked)
+        except Exception as e:
+            print(f"Error toggling GIF retime: {e}")
     
     def on_video_codec_changed(self, codec):
         """Handle video codec change to show/hide bitrate and quality controls"""

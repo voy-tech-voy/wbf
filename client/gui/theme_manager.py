@@ -362,19 +362,19 @@ class ThemeManager(QObject):
                     border-color: #4CAF50;
                 }
                 QComboBox::drop-down {
-                    background-color: #404040;
+                    background-color: transparent;
                     border: none;
-                    border-left: 1px solid #555555;
-                    border-radius: 0 4px 4px 0;
+                    width: 20px;
+                    padding-right: 4px;
                 }
                 QComboBox::down-arrow {
                     image: none;
                     border: 2px solid #ffffff;
-                    border-top: none;
+                    border-top: 2px solid #ffffff;
                     border-left: 2px solid transparent;
                     border-right: 2px solid transparent;
-                    width: 0;
-                    height: 0;
+                    width: 6px;
+                    height: 4px;
                 }
                 QSlider::groove:horizontal {
                     background-color: #555555;
@@ -512,8 +512,30 @@ class ThemeManager(QObject):
                     background-color: #4CAF50;
                     border-radius: 4px;
                 }
+                QComboBox, QSpinBox, QLineEdit {
+                    background-color: white;
+                    color: #333333;
+                    border: 1px solid #cccccc;
+                    border-radius: 4px;
+                    padding: 4px;
+                }
                 QComboBox:hover, QSpinBox:hover, QLineEdit:hover {
                     border-color: #4CAF50;
+                }
+                QComboBox::drop-down {
+                    background-color: transparent;
+                    border: none;
+                    width: 20px;
+                    padding-right: 4px;
+                }
+                QComboBox::down-arrow {
+                    image: none;
+                    border: 2px solid #333333;
+                    border-top: 2px solid #333333;
+                    border-left: 2px solid transparent;
+                    border-right: 2px solid transparent;
+                    width: 6px;
+                    height: 4px;
                 }
                 QSlider::groove:horizontal {
                     background-color: #dddddd;
