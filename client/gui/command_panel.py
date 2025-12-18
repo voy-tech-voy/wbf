@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QGroupBox, QFormLayout, QTabWidget, QTextEdit, QSlider, QRadioButton, QSizePolicy
 )
 from client.utils.font_manager import AppFonts, FONT_FAMILY, FONT_SIZE_BUTTON
+from client.gui.custom_widgets import TimeRangeSlider, ResizeFolder, RotationOptions
 from PyQt6.QtCore import Qt, pyqtSignal, QRect, QPoint, QTimer
 from PyQt6.QtGui import QPainter, QPen, QColor, QBrush
 import json
@@ -147,167 +148,8 @@ def get_combobox_style(is_dark):
 COMBOBOX_STYLE = get_combobox_style(is_dark_mode())
 
 
-class QRangeSlider(QWidget):
-    """Custom range slider with two handles for selecting a range of values"""
-    
-    # Signals emitted when values change
-    rangeChanged = pyqtSignal(float, float)  # start_value, end_value
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setMinimumHeight(50)
-        self.setMaximumHeight(60)
-        
-        # Range settings
-        self.min_value = 0.0
-        self.max_value = 1.0
-        self.start_value = 0.0
-        self.end_value = 1.0
-        
-        # Handle settings
-        self.handle_radius = 8
-        self.active_handle = None  # None, 'start', or 'end'
-        
-        # Colors
-        self.track_color = QColor(200, 200, 200)
-        self.range_color = QColor(33, 150, 243)  # Blue
-        self.handle_color = QColor(33, 150, 243)
-        self.handle_border_color = QColor(21, 101, 192)
-        
-        self.setMouseTracking(True)
-    
-    def setRange(self, min_val, max_val):
-        """Set the minimum and maximum values"""
-        self.min_value = min_val
-        self.max_value = max_val
-        self.update()
-    
-    def setStartValue(self, value):
-        """Set the start value"""
-        self.start_value = max(self.min_value, min(value, self.end_value))
-        self.update()
-        self.rangeChanged.emit(self.start_value, self.end_value)
-    
-    def setEndValue(self, value):
-        """Set the end value"""
-        self.end_value = max(self.start_value, min(value, self.max_value))
-        self.update()
-        self.rangeChanged.emit(self.start_value, self.end_value)
-    
-    def getStartValue(self):
-        """Get the start value"""
-        return self.start_value
-    
-    def getEndValue(self):
-        """Get the end value"""
-        return self.end_value
-    
-    def valueToPixel(self, value):
-        """Convert value to pixel position"""
-        width = self.width() - 2 * self.handle_radius
-        if self.max_value == self.min_value:
-            return self.handle_radius
-        ratio = (value - self.min_value) / (self.max_value - self.min_value)
-        return self.handle_radius + int(ratio * width)
-    
-    def pixelToValue(self, pixel):
-        """Convert pixel position to value"""
-        width = self.width() - 2 * self.handle_radius
-        if width == 0:
-            return self.min_value
-        ratio = (pixel - self.handle_radius) / width
-        ratio = max(0.0, min(1.0, ratio))
-        return self.min_value + ratio * (self.max_value - self.min_value)
-    
-    def paintEvent(self, event):
-        """Paint the range slider"""
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        
-        # Draw track
-        track_rect = QRect(self.handle_radius, self.height() // 2 - 2, 
-                          self.width() - 2 * self.handle_radius, 4)
-        painter.fillRect(track_rect, self.track_color)
-        
-        # Draw range
-        start_pixel = self.valueToPixel(self.start_value)
-        end_pixel = self.valueToPixel(self.end_value)
-        range_rect = QRect(start_pixel, self.height() // 2 - 2, 
-                          end_pixel - start_pixel, 4)
-        painter.fillRect(range_rect, self.range_color)
-        
-        # Draw handles
-        start_center = QPoint(start_pixel, self.height() // 2)
-        end_center = QPoint(end_pixel, self.height() // 2)
-        
-        # Start handle
-        painter.setPen(QPen(self.handle_border_color, 2))
-        painter.setBrush(QBrush(self.handle_color))
-        painter.drawEllipse(start_center, self.handle_radius, self.handle_radius)
-        
-        # End handle
-        painter.drawEllipse(end_center, self.handle_radius, self.handle_radius)
-        
-        # Draw value labels
-        painter.setPen(QPen(Qt.black))
-        font = AppFonts.get_custom_font(8)  # 8pt font for labels
-        painter.setFont(font)
-        
-        start_text = f"{self.start_value * 100:.0f}"
-        end_text = f"{self.end_value * 100:.0f}"
-        
-        # Position labels below handles
-        start_text_rect = painter.boundingRect(0, 0, 100, 20, Qt.AlignmentFlag.AlignCenter, start_text)
-        start_text_rect.moveCenter(QPoint(start_pixel, self.height() // 2 + self.handle_radius + 10))
-        painter.drawText(start_text_rect, Qt.AlignmentFlag.AlignCenter, start_text)
-        
-        end_text_rect = painter.boundingRect(0, 0, 100, 20, Qt.AlignmentFlag.AlignCenter, end_text)
-        end_text_rect.moveCenter(QPoint(end_pixel, self.height() // 2 + self.handle_radius + 10))
-        painter.drawText(end_text_rect, Qt.AlignmentFlag.AlignCenter, end_text)
-    
-    def mousePressEvent(self, event):
-        """Handle mouse press events"""
-        if event.button() == Qt.LeftButton:
-            pos = event.pos()
-            
-            # Check if clicking on start handle
-            start_pixel = self.valueToPixel(self.start_value)
-            start_center = QPoint(start_pixel, self.height() // 2)
-            if (pos - start_center).manhattanLength() <= self.handle_radius:
-                self.active_handle = 'start'
-                return
-            
-            # Check if clicking on end handle
-            end_pixel = self.valueToPixel(self.end_value)
-            end_center = QPoint(end_pixel, self.height() // 2)
-            if (pos - end_center).manhattanLength() <= self.handle_radius:
-                self.active_handle = 'end'
-                return
-            
-            # Check if clicking on range bar
-            start_pixel = self.valueToPixel(self.start_value)
-            end_pixel = self.valueToPixel(self.end_value)
-            if start_pixel <= pos.x() <= end_pixel and abs(pos.y() - self.height() // 2) <= 10:
-                # Move the closer handle
-                start_dist = abs(pos.x() - start_pixel)
-                end_dist = abs(pos.x() - end_pixel)
-                self.active_handle = 'start' if start_dist <= end_dist else 'end'
-                self.mouseMoveEvent(event)
-    
-    def mouseMoveEvent(self, event):
-        """Handle mouse move events"""
-        if self.active_handle and event.buttons() & Qt.LeftButton:
-            value = self.pixelToValue(event.x())
-            
-            if self.active_handle == 'start':
-                self.setStartValue(value)
-            elif self.active_handle == 'end':
-                self.setEndValue(value)
-    
-    def mouseReleaseEvent(self, event):
-        """Handle mouse release events"""
-        if event.button() == Qt.LeftButton:
-            self.active_handle = None
+# Keep QRangeSlider as an alias for backwards compatibility
+QRangeSlider = TimeRangeSlider
 
 
 class CommandPanel(QWidget):
@@ -316,12 +158,14 @@ class CommandPanel(QWidget):
     
     def __init__(self):
         super().__init__()
+        self.is_dark_mode = is_dark_mode()
         self.setup_ui()
         # Ensure the convert button starts in the blue (idle) style before first use
         self.set_conversion_state(False)
         
     def update_theme(self, is_dark):
         """Update theme-dependent styles"""
+        self.is_dark_mode = is_dark
         style = get_toggle_style(is_dark)
         combobox_style = get_combobox_style(is_dark)
         
@@ -350,6 +194,18 @@ class CommandPanel(QWidget):
         comboboxes = self.findChildren(QComboBox)
         for combobox in comboboxes:
             combobox.setStyleSheet(combobox_style)
+        
+        # Update custom widgets
+        if hasattr(self, 'time_range_slider'):
+            self.time_range_slider.update_theme_colors(is_dark)
+        
+        resize_folders = self.findChildren(ResizeFolder)
+        for rf in resize_folders:
+            rf.update_theme(is_dark, combobox_style)
+        
+        rotation_options = self.findChildren(RotationOptions)
+        for ro in rotation_options:
+            ro.update_theme(is_dark, combobox_style)
 
     def setup_ui(self):
         """Setup the command panel interface"""
@@ -592,8 +448,8 @@ class CommandPanel(QWidget):
         self.enable_time_cutting.toggled.connect(self.toggle_time_cutting)
         time_layout.addRow(self.enable_time_cutting)
         
-        # Time range slider
-        self.time_range_slider = QRangeSlider()
+        # Time range slider with dark mode support
+        self.time_range_slider = TimeRangeSlider(is_dark_mode=self.is_dark_mode)
         self.time_range_slider.setRange(0.0, 1.0)
         self.time_range_slider.setStartValue(0.0)
         self.time_range_slider.setEndValue(1.0)
@@ -777,8 +633,8 @@ class CommandPanel(QWidget):
         self.gif_enable_time_cutting.toggled.connect(self.toggle_gif_time_cutting)
         gif_time_layout.addRow(self.gif_enable_time_cutting)
         
-        # Time range slider
-        self.gif_time_range_slider = QRangeSlider()
+        # Time range slider with dark mode support
+        self.gif_time_range_slider = TimeRangeSlider(is_dark_mode=self.is_dark_mode)
         self.gif_time_range_slider.setRange(0.0, 1.0)
         self.gif_time_range_slider.setStartValue(0.0)
         self.gif_time_range_slider.setEndValue(1.0)
