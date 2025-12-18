@@ -356,21 +356,16 @@ class ThemeManager(QObject):
                     color: #ffffff;
                     border: 1px solid #555555;
                     border-radius: 4px;
-                    padding: 4px;
-                }
-                QComboBox {
-                    padding-right: 24px;
+                    padding: 4px 24px 4px 4px;
                 }
                 QComboBox:hover, QSpinBox:hover, QLineEdit:hover {
                     border-color: #4CAF50;
                 }
                 QComboBox::drop-down {
                     border: none;
-                    background: transparent;
+                    background: none;
                     width: 0px;
-                    subcontrol-position: right;
-                    subcontrol-origin: padding;
-                    padding-right: 8px;
+                    border: 0px;
                 }
                 QComboBox::down-arrow {
                     image: none;
@@ -380,6 +375,7 @@ class ThemeManager(QObject):
                     border-left: 4px solid transparent;
                     border-right: 4px solid transparent;
                     border-top: 5px solid #ffffff;
+                    margin-right: 8px;
                 }
                 QSlider::groove:horizontal {
                     background-color: #555555;
@@ -522,21 +518,16 @@ class ThemeManager(QObject):
                     color: #333333;
                     border: 1px solid #cccccc;
                     border-radius: 4px;
-                    padding: 4px;
-                }
-                QComboBox {
-                    padding-right: 24px;
+                    padding: 4px 24px 4px 4px;
                 }
                 QComboBox:hover, QSpinBox:hover, QLineEdit:hover {
                     border-color: #4CAF50;
                 }
                 QComboBox::drop-down {
                     border: none;
-                    background: transparent;
+                    background: none;
                     width: 0px;
-                    subcontrol-position: right;
-                    subcontrol-origin: padding;
-                    padding-right: 8px;
+                    border: 0px;
                 }
                 QComboBox::down-arrow {
                     image: none;
@@ -546,6 +537,7 @@ class ThemeManager(QObject):
                     border-left: 4px solid transparent;
                     border-right: 4px solid transparent;
                     border-top: 5px solid #333333;
+                    margin-right: 8px;
                 }
                 QSlider::groove:horizontal {
                     background-color: #dddddd;
