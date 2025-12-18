@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QFileDialog, QMessageBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QPixmap, QIcon, QAction
+from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QPixmap, QIcon, QAction, QPainter, QColor
 import os
 from pathlib import Path
 
@@ -72,10 +72,10 @@ class DragDropArea(QWidget):
         self.file_list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.file_list_widget.customContextMenuRequested.connect(self.show_context_menu)
         
-        # Add placeholder text when empty
-        self.update_placeholder_text()
-        
         layout.addWidget(self.file_list_widget)
+        
+        # Initialize with cleared state
+        self.file_list_widget.clear()
         
     def dragEnterEvent(self, event: QDragEnterEvent):
         """Handle drag enter events"""
@@ -190,7 +190,8 @@ class DragDropArea(QWidget):
         """Handle drag enter visual feedback"""
         if self.theme_manager:
             styles = self.theme_manager.get_drag_drop_styles()
-            self.file_list_widget.setStyleSheet(styles['drag_over'])
+            full_style = styles['drag_over'] + self._get_scrollbar_style()
+            self.file_list_widget.setStyleSheet(full_style)
         
     def on_drag_leave(self):
         """Handle drag leave visual feedback"""
@@ -200,11 +201,14 @@ class DragDropArea(QWidget):
         """Reset the list widget to default style"""
         if self.theme_manager:
             styles = self.theme_manager.get_drag_drop_styles()
-            self.file_list_widget.setStyleSheet(styles['normal'])
+            base_style = styles['normal']
+            # Append scrollbar styling
+            full_style = base_style + self._get_scrollbar_style()
+            self.file_list_widget.setStyleSheet(full_style)
         else:
             # Fallback to light theme
             self.file_list_widget.setStyleSheet("""
-                QListWidget {
+                DragDropArea {
                     border: 3px dashed #aaa;
                     border-radius: 10px;
                     background-color: #f9f9f9;
@@ -212,30 +216,74 @@ class DragDropArea(QWidget):
                     font-size: 14px;
                     padding: 10px;
                 }
-                QListWidget:hover {
+                DragDropArea:hover {
                     border-color: #4CAF50;
                     background-color: #f0f8f0;
                 }
-                QListWidget::item {
-                    padding: 8px;
-                    margin: 2px;
-                    border: 1px solid #ddd;
-                    border-radius: 5px;
-                    background-color: white;
-                }
-                QListWidget::item:selected {
-                    background-color: #e3f2fd;
-                    border-color: #2196f3;
-                }
-                QListWidget::item:hover {
-                    background-color: #f5f5f5;
-                }
             """)
             
+    def _get_scrollbar_style(self):
+        """Get modern minimalistic scrollbar styling"""
+        is_dark = self.theme_manager and self.theme_manager.current_theme == 'dark'
+        
+        if is_dark:
+            return """
+                QScrollBar:vertical {
+                    background: #1a1a1a;
+                    width: 10px;
+                    border: none;
+                    border-radius: 5px;
+                }
+                QScrollBar::handle:vertical {
+                    background: #404040;
+                    border-radius: 5px;
+                    min-height: 30px;
+                }
+                QScrollBar::handle:vertical:hover {
+                    background: #505050;
+                }
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                    height: 0px;
+                }
+                QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                    background: none;
+                }
+            """
+        else:
+            return """
+                QScrollBar:vertical {
+                    background: #f0f0f0;
+                    width: 10px;
+                    border: none;
+                    border-radius: 5px;
+                }
+                QScrollBar::handle:vertical {
+                    background: #c0c0c0;
+                    border-radius: 5px;
+                    min-height: 30px;
+                }
+                QScrollBar::handle:vertical:hover {
+                    background: #a0a0a0;
+                }
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                    height: 0px;
+                }
+                QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                    background: none;
+                }
+            """
+    
+    def _apply_scrollbar_style(self):
+        """Apply scrollbar styling to the file list widget"""
+        self.reset_list_style()
+    
     def set_theme_manager(self, theme_manager):
         """Set the theme manager and apply current theme"""
         self.theme_manager = theme_manager
-        self.reset_list_style()
+        # Clear and rebuild with proper theme
+        self.file_list_widget.clear()
+        self.file_list.clear()
+        self.update_placeholder_text()
         
         # Apply specific styling to the clear button (red outline)
         if self.theme_manager:
@@ -448,28 +496,120 @@ class DragDropArea(QWidget):
         self.update_placeholder_text()
         
     def update_placeholder_text(self):
-        """Update placeholder text when list is empty or add instruction overlay"""
+        """Update placeholder - show centered red container when empty"""
         if len(self.file_list) == 0:
-            # Add a placeholder item when empty
-            placeholder_item = QListWidgetItem("📁 Drag and drop files here, click 'Add Files...' or 'Browse Folder...'\n\n📋 Supported formats:\n• Images: JPG, PNG, GIF, WEBP, TIFF, BMP\n• Videos: MP4, AVI, MOV, MKV, WEBM\n\n📂 Use 'Browse Folder...' to process entire directories")
-            placeholder_item.setFlags(Qt.ItemFlag.NoItemFlags)  # Make it non-selectable
-            placeholder_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            # Clear all items first to avoid duplicates
+            self.file_list_widget.clear()
             
-            # Style the placeholder differently
-            font = placeholder_item.font()
-            font.setItalic(True)
+            # Create a transparent wrapper
+            wrapper = QWidget()
+            wrapper.setStyleSheet("background-color: transparent; border: none;")
+            wrapper_layout = QVBoxLayout(wrapper)
+            wrapper_layout.setContentsMargins(0, 0, 0, 0)
+            wrapper_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
             
-            self.file_list_widget.addItem(placeholder_item)
+            # Create small centered container with transparent background
+            container = QWidget()
+            container.setFixedSize(200, 200)
+            container.setStyleSheet("background-color: transparent;")
+            container_layout = QVBoxLayout(container)
+            container_layout.setContentsMargins(0, 0, 0, 0)
+            container_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            
+            # Load SVG icon with grey color
+            svg_label = QLabel()
+            svg_label.setStyleSheet("background-color: transparent;")
+            svg_path = Path(__file__).parent.parent / "assets" / "icons" / "drag_drop.svg"
+            if svg_path.exists():
+                # Apply grey color effect to the icon
+                from PyQt6.QtGui import QPainter, QColor
+                from PyQt6.QtWidgets import QGraphicsColorizeEffect
+                
+                pixmap = QPixmap(str(svg_path))
+                # Scale to fit container
+                pixmap = pixmap.scaledToWidth(150, Qt.TransformationMode.SmoothTransformation)
+                svg_label.setPixmap(pixmap)
+                
+                # Apply grey colorize effect
+                colorize_effect = QGraphicsColorizeEffect()
+                colorize_effect.setColor(QColor(128, 128, 128))  # Grey color
+                colorize_effect.setStrength(1.0)
+                svg_label.setGraphicsEffect(colorize_effect)
+            
+            svg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            container_layout.addWidget(svg_label, alignment=Qt.AlignmentFlag.AlignCenter)
+            
+            # Add text label below the icon
+            text_label = QLabel("drag and drop media files here")
+            text_label.setStyleSheet("""
+                background-color: transparent;
+                color: #888888;
+                font-size: 14px;
+                padding-top: 10px;
+            """)
+            text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            container_layout.addWidget(text_label, alignment=Qt.AlignmentFlag.AlignCenter)
+            
+            wrapper_layout.addWidget(container, alignment=Qt.AlignmentFlag.AlignCenter)
+            
+            # Get current style and completely override item styling
+            if self.theme_manager:
+                styles = self.theme_manager.get_drag_drop_styles()
+                base_style = styles['normal']
+            else:
+                base_style = ""
+            
+            # Replace ALL item styling to be transparent with no borders/padding
+            modified_style = base_style.replace(
+                'background-color: #3c3c3c;', 
+                'background-color: transparent;'
+            ).replace(
+                'background-color: white;',
+                'background-color: transparent;'
+            ).replace(
+                'border: 1px solid #444;',
+                'border: none;'
+            ).replace(
+                'border: 1px solid #ddd;',
+                'border: none;'
+            ).replace(
+                'margin: 2px;',
+                'margin: 0px;'
+            ).replace(
+                'padding: 8px;',
+                'padding: 0px;'
+            )
+            # Add scrollbar styling
+            modified_style += self._get_scrollbar_style()
+            self.file_list_widget.setStyleSheet(modified_style)
+            
+            # Add wrapper to list widget with full vertical height
+            item = QListWidgetItem()
+            # Use a large enough size to fill the area
+            viewport_size = self.file_list_widget.viewport().size()
+            if viewport_size.height() < 100:  # If not properly sized yet
+                item.setSizeHint(self.file_list_widget.size())
+            else:
+                item.setSizeHint(viewport_size)
+            item.setBackground(Qt.GlobalColor.transparent)
+            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            self.file_list_widget.addItem(item)
+            self.file_list_widget.setItemWidget(item, wrapper)
         else:
-            # Remove placeholder if files are present
-            if self.file_list_widget.count() > 0:
+            # Remove any placeholder items if files are present
+            while self.file_list_widget.count() > 0:
                 first_item = self.file_list_widget.item(0)
-                if first_item and first_item.text().startswith("📁"):
+                if first_item and self.file_list_widget.itemWidget(first_item):
                     self.file_list_widget.takeItem(0)
+                else:
+                    break
+            # Restore original list widget styling
+            self.reset_list_style()
                     
     def remove_file_item(self, item):
         """Remove a file item when double-clicked"""
-        if item and not item.text().startswith("📁"):  # Don't remove placeholder
+        # Don't remove placeholder (which has a widget set)
+        if item and not self.file_list_widget.itemWidget(item):
             row = self.file_list_widget.row(item)
             file_path = self.file_list[row]
             

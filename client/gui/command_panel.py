@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QGroupBox, QFormLayout, QTabWidget, QTextEdit, QSlider, QRadioButton, QSizePolicy
 )
 from client.utils.font_manager import AppFonts, FONT_FAMILY, FONT_SIZE_BUTTON
-from client.gui.custom_widgets import TimeRangeSlider, ResizeFolder, RotationOptions
+from client.gui.custom_widgets import TimeRangeSlider, ResizeFolder, RotationOptions, CustomComboBox
 from PyQt6.QtCore import Qt, pyqtSignal, QRect, QPoint, QTimer
 from PyQt6.QtGui import QPainter, QPen, QColor, QBrush
 import json
@@ -17,13 +17,9 @@ import winreg
 
 
 class DynamicFontButton(QPushButton):
-    """Custom button that always uses the latest font from AppFonts and font_manager variables"""
+    """Custom button that uses the latest font from AppFonts and font_manager variables"""
     def __init__(self, text=""):
         super().__init__(text)
-        # Timer to periodically refresh stylesheet with current font values
-        self.font_timer = QTimer()
-        self.font_timer.timeout.connect(self.update_stylesheet_with_current_font)
-        self.font_timer.start(500)  # Update every 500ms
         
         # Store the base style (without font properties)
         self.base_style = {
@@ -34,7 +30,6 @@ class DynamicFontButton(QPushButton):
                 "border-radius: 8px; "
                 "padding: 12px 0px; "
                 "font-weight: bold; "
-                "width: 100%; "
             ),
             "hover": "background-color: #43a047; color: white; border-color: #43a047;",
             "pressed": "background-color: #388e3c; color: white; border-color: #2e7d32;",
@@ -46,16 +41,18 @@ class DynamicFontButton(QPushButton):
                 "border-radius: 8px; "
                 "padding: 12px 0px; "
                 "font-weight: bold; "
-                "width: 100%; "
             ),
             "stop_hover": "background-color: #c62828; color: white; border-color: #b71c1c;",
             "stop_pressed": "background-color: #b71c1c; color: white; border-color: #9c0d0d;",
         }
         
-        # Initial update
-        self.update_stylesheet_with_current_font()
+        # Cache stylesheet to avoid constant updates
+        self._cached_stylesheet = None
         
-    def update_stylesheet_with_current_font(self):
+        # Initial update
+        self.update_stylesheet()
+        
+    def update_stylesheet(self):
         """Build stylesheet with CURRENT font values from font_manager"""
         # Get current font values
         font_family = FONT_FAMILY
@@ -85,7 +82,10 @@ class DynamicFontButton(QPushButton):
                 f"QPushButton:disabled {{ {self.base_style['disabled']} }}"
             )
         
-        self.setStyleSheet(stylesheet)
+        # Only update if stylesheet has changed
+        if stylesheet != self._cached_stylesheet:
+            self._cached_stylesheet = stylesheet
+            self.setStyleSheet(stylesheet)
 
 def is_dark_mode():
     """Check if Windows is in dark mode"""
@@ -186,14 +186,18 @@ class CommandPanel(QWidget):
                 getattr(self, 'gif_ffmpeg_variants', None),
                 getattr(self, 'ffmpeg_gif_blur', None),
                 getattr(self, 'output_mode_same', None),
-                getattr(self, 'output_mode_nested', None)
+                getattr(self, 'output_mode_nested', None),
+                getattr(self, 'output_mode_custom', None)
             ]:
                 toggle.setStyleSheet(style)
         
         # Update all ComboBox controls
         comboboxes = self.findChildren(QComboBox)
         for combobox in comboboxes:
-            combobox.setStyleSheet(combobox_style)
+            if isinstance(combobox, CustomComboBox):
+                combobox.update_theme(is_dark)
+            else:
+                combobox.setStyleSheet(combobox_style)
         
         # Update custom widgets
         if hasattr(self, 'time_range_slider'):
@@ -206,6 +210,62 @@ class CommandPanel(QWidget):
         rotation_options = self.findChildren(RotationOptions)
         for ro in rotation_options:
             ro.update_theme(is_dark, combobox_style)
+        
+        # Update nested output name styling
+        self._update_nested_output_style()
+        
+        # Update custom output directory field styling
+        self._update_custom_output_style()
+    
+    def _update_nested_output_style(self):
+        """Update nested output name field styling based on enabled state and theme"""
+        is_enabled = self.nested_output_name.isEnabled()
+        
+        if self.is_dark_mode:
+            if is_enabled:
+                text_color = "#ffffff"
+            else:
+                text_color = "#666666"  # Grey for disabled
+            bg_color = "#2b2b2b"
+        else:
+            if is_enabled:
+                text_color = "#333333"
+            else:
+                text_color = "#999999"  # Grey for disabled
+            bg_color = "white"
+        
+        style = f"""
+            QLineEdit {{
+                color: {text_color};
+                background-color: {bg_color};
+                border: 1px solid #555555;
+                border-radius: 3px;
+                padding: 4px;
+            }}
+        """
+        self.nested_output_name.setStyleSheet(style)
+    
+    def _update_custom_output_style(self):
+        """Update custom output directory field styling based on theme"""
+        if self.is_dark_mode:
+            text_color = "#ffffff"
+            bg_color = "#2b2b2b"
+            border_color = "#555555"
+        else:
+            text_color = "#333333"
+            bg_color = "white"
+            border_color = "#cccccc"
+        
+        style = f"""
+            QLineEdit {{
+                color: {text_color};
+                background-color: {bg_color};
+                border: 1px solid {border_color};
+                border-radius: 3px;
+                padding: 4px;
+            }}
+        """
+        self.output_dir.setStyleSheet(style)
 
     def setup_ui(self):
         """Setup the command panel interface"""
@@ -229,6 +289,24 @@ class CommandPanel(QWidget):
         # Make tab buttons fill available width
         tab_bar = self.tabs.tabBar()
         tab_bar.setExpanding(True)
+        tab_bar.setDocumentMode(True)
+        # Force tabs to use equal sizes
+        from PyQt6.QtWidgets import QTabBar
+        tab_bar.setUsesScrollButtons(False)
+        self.tabs.setStyleSheet("""
+            QTabBar::tab {
+                min-width: 0px;
+                max-width: 16777215px;
+                padding: 8px 16px;
+                min-height: 32px;
+                margin-bottom: 2px;
+            }
+            QTabWidget::pane {
+                border-top: 2px solid palette(mid);
+                margin-top: 0px;
+                padding-top: 2px;
+            }
+        """)
         
         layout.addWidget(self.tabs)
         
@@ -244,15 +322,16 @@ class CommandPanel(QWidget):
         """Create image conversion options tab"""
         tab = QWidget()
         layout = QVBoxLayout(tab)
+        layout.setContentsMargins(0, 0, 0, 0)
         
         # Output format selection
         format_group = QGroupBox("Output Format")
+        format_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         format_layout = QFormLayout(format_group)
         
         # Format dropdown - FIRST
-        self.image_format = QComboBox()
+        self.image_format = CustomComboBox()
         self.image_format.addItems(["WebP", "JPG", "PNG", "TIFF", "BMP"])
-        self.image_format.setStyleSheet(COMBOBOX_STYLE)
         format_layout.addRow("Format:", self.image_format)
         
         # Multiple qualities option - SECOND
@@ -286,12 +365,12 @@ class CommandPanel(QWidget):
         
         # Resize options
         resize_group = QGroupBox("Resize Options")
+        resize_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         resize_layout = QFormLayout(resize_group)
         
         # Resize mode selection - FIRST
-        self.resize_mode = QComboBox()
+        self.resize_mode = CustomComboBox()
         self.resize_mode.addItems(["No resize", "By width (pixels)", "By ratio (percent)"])
-        self.resize_mode.setStyleSheet(COMBOBOX_STYLE)
         self.resize_mode.currentTextChanged.connect(self.on_resize_mode_changed)
         resize_layout.addRow("Resize mode:", self.resize_mode)
         
@@ -326,9 +405,8 @@ class CommandPanel(QWidget):
         rotation_group.setSizePolicy(rotation_group.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Maximum)
         rotation_layout = QFormLayout(rotation_group)
         
-        self.rotation_angle = QComboBox()
+        self.rotation_angle = CustomComboBox()
         self.rotation_angle.addItems(["No rotation", "90° clockwise", "180°", "270° clockwise"])
-        self.rotation_angle.setStyleSheet(COMBOBOX_STYLE)
         rotation_layout.addRow("Rotation:", self.rotation_angle)
         
         layout.addWidget(rotation_group)
@@ -339,14 +417,15 @@ class CommandPanel(QWidget):
         """Create video conversion options tab"""
         tab = QWidget()
         layout = QVBoxLayout(tab)
+        layout.setContentsMargins(0, 0, 0, 0)
         
         # Video codec selection
         codec_group = QGroupBox("Video Settings")
+        codec_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         codec_layout = QFormLayout(codec_group)
         
-        self.video_codec = QComboBox()
+        self.video_codec = CustomComboBox()
         self.video_codec.addItems(["WebM (VP9, faster)", "WebM (AV1, slower)", "MP4 (H.264)", "MP4 (H.265)", "MP4 (AV1)"])
-        self.video_codec.setStyleSheet(COMBOBOX_STYLE)
         self.video_codec.currentTextChanged.connect(self.on_video_codec_changed)
         codec_layout.addRow("Format:", self.video_codec)
         
@@ -395,9 +474,8 @@ class CommandPanel(QWidget):
         filter_layout = QFormLayout(filter_group)
         
         # Resize mode selection
-        self.video_resize_mode = QComboBox()
+        self.video_resize_mode = CustomComboBox()
         self.video_resize_mode.addItems(["No resize", "By width (pixels)", "By ratio (percent)"])
-        self.video_resize_mode.setStyleSheet(COMBOBOX_STYLE)
         self.video_resize_mode.currentTextChanged.connect(self.on_video_resize_mode_changed)
         filter_layout.addRow("Resize mode:", self.video_resize_mode)
         
@@ -431,9 +509,8 @@ class CommandPanel(QWidget):
         rotation_group = QGroupBox("Rotation Options")
         rotation_layout = QFormLayout(rotation_group)
         
-        self.video_rotation_angle = QComboBox()
+        self.video_rotation_angle = CustomComboBox()
         self.video_rotation_angle.addItems(["No rotation", "90° clockwise", "180°", "270° clockwise"])
-        self.video_rotation_angle.setStyleSheet(COMBOBOX_STYLE)
         rotation_layout.addRow("Rotation:", self.video_rotation_angle)
         
         layout.addWidget(rotation_group)
@@ -485,9 +562,11 @@ class CommandPanel(QWidget):
         """Create GIF conversion options tab"""
         tab = QWidget()
         layout = QVBoxLayout(tab)
+        layout.setContentsMargins(0, 0, 0, 0)
         
         # --- FFmpeg Export Options ---
         self.ffmpeg_group = QGroupBox("GIF Export Options")
+        self.ffmpeg_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         ffmpeg_layout = QFormLayout(self.ffmpeg_group)
 
         # Multiple variants toggle
@@ -497,10 +576,9 @@ class CommandPanel(QWidget):
         ffmpeg_layout.addRow(self.gif_ffmpeg_variants)
 
         # FPS
-        self.ffmpeg_gif_fps = QComboBox()
+        self.ffmpeg_gif_fps = CustomComboBox()
         self.ffmpeg_gif_fps.addItems(["10", "12", "15", "18", "24"])
         self.ffmpeg_gif_fps.setCurrentText("15")
-        self.ffmpeg_gif_fps.setStyleSheet(COMBOBOX_STYLE)
         self.ffmpeg_gif_fps_label = QLabel("FPS:")
         ffmpeg_layout.addRow(self.ffmpeg_gif_fps_label, self.ffmpeg_gif_fps)
 
@@ -513,10 +591,9 @@ class CommandPanel(QWidget):
         ffmpeg_layout.addRow(self.ffmpeg_gif_fps_variants_label, self.ffmpeg_gif_fps_variants)
 
         # Colors
-        self.ffmpeg_gif_colors = QComboBox()
+        self.ffmpeg_gif_colors = CustomComboBox()
         self.ffmpeg_gif_colors.addItems(["8", "16", "32", "64", "128", "256"])
         self.ffmpeg_gif_colors.setCurrentText("256")
-        self.ffmpeg_gif_colors.setStyleSheet(COMBOBOX_STYLE)
         self.ffmpeg_gif_colors_label = QLabel("Colors:")
         ffmpeg_layout.addRow(self.ffmpeg_gif_colors_label, self.ffmpeg_gif_colors)
 
@@ -529,7 +606,7 @@ class CommandPanel(QWidget):
         ffmpeg_layout.addRow(self.ffmpeg_gif_colors_variants_label, self.ffmpeg_gif_colors_variants)
 
         # Dither
-        # self.ffmpeg_gif_dither = QComboBox()
+        # self.ffmpeg_gif_dither = CustomComboBox()
         # self.ffmpeg_gif_dither.addItems([
         #     "sierra2_4a", 
         #     "sierra2", 
@@ -578,7 +655,7 @@ class CommandPanel(QWidget):
         resize_layout = QFormLayout(resize_group)
         
         # Resize mode selection - FIRST
-        self.gif_resize_mode = QComboBox()
+        self.gif_resize_mode = CustomComboBox()
         self.gif_resize_mode.addItems(["No resize", "By width (pixels)", "By ratio (percent)"])
         self.gif_resize_mode.setStyleSheet(COMBOBOX_STYLE)
         self.gif_resize_mode.currentTextChanged.connect(self.on_gif_resize_mode_changed)
@@ -615,7 +692,7 @@ class CommandPanel(QWidget):
         rotation_group.setSizePolicy(rotation_group.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Maximum)
         rotation_layout = QFormLayout(rotation_group)
         
-        self.gif_rotation_angle = QComboBox()
+        self.gif_rotation_angle = CustomComboBox()
         self.gif_rotation_angle.addItems(["No rotation", "90° clockwise", "180°", "270° clockwise"])
         self.gif_rotation_angle.setStyleSheet(COMBOBOX_STYLE)
         rotation_layout.addRow("Rotation:", self.gif_rotation_angle)
@@ -682,6 +759,12 @@ class CommandPanel(QWidget):
 
         self.nested_output_name = QLineEdit("output")
         self.nested_output_name.setPlaceholderText("output")
+        self.nested_output_name.setEnabled(False)  # Disabled by default
+        
+        # Connect toggle to enable/disable nested output name
+        self.output_mode_nested.toggled.connect(self.nested_output_name.setEnabled)
+        self.output_mode_nested.toggled.connect(self._update_nested_output_style)
+        
         nested_layout = QHBoxLayout()
         nested_layout.addWidget(self.output_mode_nested)
         nested_layout.addWidget(self.nested_output_name)
@@ -742,11 +825,11 @@ class CommandPanel(QWidget):
         if is_converting:
             self.convert_btn.setText("Stop Conversion")
             # Trigger stylesheet update with current font values
-            self.convert_btn.update_stylesheet_with_current_font()
+            self.convert_btn.update_stylesheet()
         else:
             self.convert_btn.setText("Start Conversion")
             # Trigger stylesheet update with current font values
-            self.convert_btn.update_stylesheet_with_current_font()
+            self.convert_btn.update_stylesheet()
     
     def stop_conversion(self):
         """Request to stop the current conversion"""
@@ -1786,6 +1869,7 @@ class CommandPanel(QWidget):
         except ValueError:
             # Ignore non-numeric input during typing
             pass
+
 
 
 
