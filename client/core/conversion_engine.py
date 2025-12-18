@@ -228,7 +228,7 @@ def init_bundled_tools() -> str:
 import ffmpeg
 from pathlib import Path
 from typing import List, Dict, Optional, Callable
-from PyQt5.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QThread, pyqtSignal
 import tempfile
 
 # Hide subprocess consoles on Windows without altering ffmpeg-python signatures
@@ -2233,3 +2233,4 @@ def verify_bundled_tools(timeout: int = 5) -> Dict[str, Dict[str, Optional[str]]
             results[t] = {'path': path, 'returncode': None, 'stdout': None, 'stderr': str(e)}
 
     return results
+

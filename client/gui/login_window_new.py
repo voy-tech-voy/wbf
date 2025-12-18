@@ -10,13 +10,14 @@ import socket
 import platform
 from datetime import datetime
 from datetime import timedelta
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QFrame, QCheckBox, QMessageBox, QApplication, QDesktopWidget, QWidget
+    QFrame, QCheckBox, QMessageBox, QApplication, QWidget
 )
-from PyQt5.QtCore import Qt, QSize, QTimer, pyqtSignal, QPoint, QByteArray
-from PyQt5.QtGui import QFont, QIcon, QPixmap, QColor, QPainter, QPalette
-from PyQt5.QtSvg import QSvgWidget, QSvgRenderer
+from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal, QPoint, QByteArray
+from PyQt6.QtGui import QFont, QIcon, QPixmap, QColor, QPainter, QPalette
+from PyQt6.QtSvgWidgets import QSvgWidget
+from PyQt6.QtSvg import QSvgRenderer
 from client.utils.font_manager import AppFonts, FONT_FAMILY
 from client.utils.server_health import ServerHealthChecker
 from client.version import APP_NAME
@@ -65,7 +66,7 @@ class EmailInput(QLineEdit):
         self.setPlaceholderText(placeholder_text)
         self.setFixedSize(350, 50)
         self.setFont(QFont(FONT_FAMILY, 14))
-        self.setAlignment(Qt.AlignCenter)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.error_timer = QTimer()
         self.error_timer.setSingleShot(True)
         self.error_timer.timeout.connect(self._reset_error_state)
@@ -84,7 +85,7 @@ class EmailInput(QLineEdit):
         
         # Draw placeholder text when field is empty, even if focused
         if not self.text() and self.placeholderText():
-            from PyQt5.QtGui import QPainter, QColor
+            from PyQt6.QtGui import QPainter, QColor
             
             painter = QPainter(self)
             
@@ -98,14 +99,14 @@ class EmailInput(QLineEdit):
             
             # Draw centered placeholder text
             rect = self.rect()
-            painter.drawText(rect, Qt.AlignCenter, self.placeholderText())
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, self.placeholderText())
             
             painter.end()
     
     def keyPressEvent(self, event):
         """Override to handle Enter key with validation"""
         print(f"🔵 DEBUG [EmailInput.keyPressEvent]: Key pressed: {event.key()}")
-        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             email = self.text().strip()
             print(f"🔵 DEBUG [EmailInput.keyPressEvent]: Enter pressed with email='{email}'")
             print(f"🔵 DEBUG [EmailInput.keyPressEvent]: bypass_validation_for list: {self.bypass_validation_for}")
@@ -299,7 +300,7 @@ class LoginLineEdit(QLineEdit):
         self.setPlaceholderText(placeholder_text)
         self.setFixedSize(350, 50)
         self.setFont(QFont(FONT_FAMILY, 14))
-        self.setAlignment(Qt.AlignCenter)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if is_password:
             self.setEchoMode(QLineEdit.Password)
         
@@ -340,7 +341,7 @@ class StoreButton(QPushButton):
         self.store_url = store_url
         self.setFixedSize(350, 65)
         self.setFlat(False)
-        self.setCursor(Qt.PointingHandCursor)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setStyleSheet(
             "QPushButton { "
             "border: 2px solid #ccc; "
@@ -394,7 +395,7 @@ class StoreButton(QPushButton):
                 else:
                     pixmap = QPixmap(int(38 * aspect), 38)
                 
-                pixmap.fill(Qt.transparent)
+                pixmap.fill(Qt.GlobalColor.transparent)
                 painter = QPainter(pixmap)
                 renderer.render(painter)
                 painter.end()
@@ -428,8 +429,8 @@ class LoginMessage(QWidget):
         
         # Title
         title_label = QLabel(title)
-        title_label.setFont(QFont(FONT_FAMILY, 14, QFont.Bold))  # Unified size with subtitle
-        title_label.setAlignment(Qt.AlignCenter)
+        title_label.setFont(QFont(FONT_FAMILY, 14, QFont.Weight.Bold))  # Unified size with subtitle
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title_label.setWordWrap(True)
         title_label.setFixedWidth(350)
         title_color = "white" if is_dark else "#333333"
@@ -440,7 +441,7 @@ class LoginMessage(QWidget):
         if subtitle:
             subtitle_label = QLabel(subtitle)
             subtitle_label.setFont(QFont(FONT_FAMILY, 14))  # Same size as title for consistency
-            subtitle_label.setAlignment(Qt.AlignCenter)
+            subtitle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             subtitle_label.setWordWrap(True)
             subtitle_label.setFixedWidth(350)
             subtitle_color = "#bbbbbb" if is_dark else "#777777"
@@ -469,7 +470,7 @@ class ModernLoginWindow(QDialog):
         self.server_health_checker = ServerHealthChecker()
         
         self.setWindowTitle("ImgApp - Login")
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
         self.setGeometry(100, 100, 1000, 750)
         self.setMinimumSize(1000, 750)
         self.setMaximumSize(1000, 750)
@@ -506,7 +507,7 @@ class ModernLoginWindow(QDialog):
         """Show a message centered within the login section using an overlay."""
         self._remove_message_overlay()
         overlay = QWidget(self.login_section)
-        overlay.setAttribute(Qt.WA_StyledBackground, True)
+        overlay.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         overlay.setStyleSheet("background: transparent;")
         overlay.setGeometry(self.login_section.rect())
         
@@ -515,14 +516,15 @@ class ModernLoginWindow(QDialog):
         
         v = QVBoxLayout(overlay)
         v.setContentsMargins(0, 0, 0, 0)
-        v.addWidget(message_widget, 0, Qt.AlignCenter)
+        v.addWidget(message_widget, 0, Qt.AlignmentFlag.AlignCenter)
         overlay.show()
         self.overlay_widget = overlay
     
     def center_on_screen(self):
         """Center the window on the screen, shifted to the right"""
         geometry = self.frameGeometry()
-        center_point = QDesktopWidget().availableGeometry().center()
+        screen = QApplication.primaryScreen().availableGeometry()
+        center_point = screen.center()
         geometry.moveCenter(center_point)
         # Shift 150px to the right
         self.move(geometry.topLeft().x() + 150, geometry.topLeft().y())
@@ -538,12 +540,12 @@ class ModernLoginWindow(QDialog):
         self.media_section.setFixedSize(550, 750)
         self.media_section.setStyleSheet("background-color: #000000;")
         media_layout = QVBoxLayout(self.media_section)
-        media_layout.setAlignment(Qt.AlignCenter)
+        media_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         media_placeholder = QLabel("Media Display")
-        media_placeholder.setFont(QFont(FONT_FAMILY, 24, QFont.Bold))
+        media_placeholder.setFont(QFont(FONT_FAMILY, 24, QFont.Weight.Bold))
         media_placeholder.setStyleSheet("color: #ffffff;")
-        media_placeholder.setAlignment(Qt.AlignCenter)
+        media_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         media_layout.addWidget(media_placeholder)
         
         main_layout.addWidget(self.media_section)
@@ -564,7 +566,7 @@ class ModernLoginWindow(QDialog):
         # self.theme_toggle_btn = QPushButton()
         # self.theme_toggle_btn.setFixedSize(30, 30)
         # self.theme_toggle_btn.setFlat(True)
-        # self.theme_toggle_btn.setCursor(Qt.PointingHandCursor)
+        # self.theme_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         # self.theme_toggle_btn.setStyleSheet(
         #     "QPushButton { background: transparent; border: none; }"
         #     "QPushButton:hover { background: rgba(0, 0, 0, 0.1); border-radius: 4px; }"
@@ -589,9 +591,9 @@ class ModernLoginWindow(QDialog):
         # Close button on right side
         close_btn = QPushButton("×")
         close_btn.setFixedSize(30, 30)
-        close_btn.setFont(QFont(FONT_FAMILY, 18, QFont.Bold))
+        close_btn.setFont(QFont(FONT_FAMILY, 18, QFont.Weight.Bold))
         close_btn.setFlat(True)
-        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         close_btn.setStyleSheet(
             "QPushButton { color: #999; background: transparent; border: none; }"
             "QPushButton:hover { color: #ccc; }"
@@ -620,7 +622,7 @@ class ModernLoginWindow(QDialog):
             pass
         
         self.app_name_label = QLabel(APP_NAME)
-        self.app_name_label.setFont(QFont(FONT_FAMILY, 96, QFont.Bold))
+        self.app_name_label.setFont(QFont(FONT_FAMILY, 96, QFont.Weight.Bold))
         app_header_layout.addWidget(self.app_name_label)
         app_header_layout.addStretch()
         
@@ -712,7 +714,7 @@ class ModernLoginWindow(QDialog):
         login_btn_layout.addStretch()
         self.login_btn = QPushButton("Login")
         self.login_btn.setFixedSize(350, 65)
-        self.login_btn.setFont(QFont(FONT_FAMILY, 14, QFont.Bold))
+        self.login_btn.setFont(QFont(FONT_FAMILY, 14, QFont.Weight.Bold))
         self.login_btn.setAutoDefault(False)  # Prevent Enter from triggering this button
         self.login_btn.setDefault(False)  # Explicitly set not default
         self.login_btn.setStyleSheet(
@@ -737,7 +739,7 @@ class ModernLoginWindow(QDialog):
         trial_btn_layout.addStretch()
         self.trial_btn = QPushButton("Try Free Trial")
         self.trial_btn.setFixedSize(350, 65)
-        self.trial_btn.setFont(QFont(FONT_FAMILY, 14, QFont.Bold))
+        self.trial_btn.setFont(QFont(FONT_FAMILY, 14, QFont.Weight.Bold))
         self.trial_btn.setStyleSheet(
             "QPushButton { "
             "background-color: transparent; "
@@ -759,8 +761,8 @@ class ModernLoginWindow(QDialog):
         self.buy_layout = QVBoxLayout()
         # Replace label with a delicate grey divider bar, centered with even side margins
         self.buy_label = QFrame()
-        self.buy_label.setFrameShape(QFrame.HLine)
-        self.buy_label.setFrameShadow(QFrame.Plain)
+        self.buy_label.setFrameShape(QFrame.Shape.HLine)
+        self.buy_label.setFrameShadow(QFrame.Shadow.Plain)
         self.buy_label.setFixedHeight(2)
         # Theme-aware subtle color
         _is_dark = self.is_dark_mode()
@@ -964,14 +966,14 @@ class ModernLoginWindow(QDialog):
             
             # Create pixmap from modified SVG
             pixmap = QPixmap(size, size)
-            pixmap.fill(Qt.transparent)
+            pixmap.fill(Qt.GlobalColor.transparent)
             
             # Use QSvgWidget to render (alternative: use QPainter with QSvgRenderer)
-            from PyQt5.QtSvg import QSvgRenderer
+            from PyQt6.QtSvg import QSvgRenderer
             renderer = QSvgRenderer()
             
             # Load from string
-            from PyQt5.QtCore import QByteArray
+            from PyQt6.QtCore import QByteArray
             renderer.load(QByteArray(svg_content.encode('utf-8')))
             
             painter = QPainter(pixmap)
@@ -1429,7 +1431,7 @@ class ModernLoginWindow(QDialog):
         # Add send button
         self.send_btn = QPushButton("Send")
         self.send_btn.setFixedSize(350, 65)
-        self.send_btn.setFont(QFont(FONT_FAMILY, 14, QFont.Bold))
+        self.send_btn.setFont(QFont(FONT_FAMILY, 14, QFont.Weight.Bold))
         is_dark = is_dark_mode()
         btn_text_color = "white" if is_dark else "black"
         self.send_btn.setStyleSheet(
@@ -1454,7 +1456,7 @@ class ModernLoginWindow(QDialog):
         # Add back button as proper button class under send button
         self.back_btn = QPushButton("back")
         self.back_btn.setFixedSize(350, 50)
-        self.back_btn.setFont(QFont(FONT_FAMILY, 14, QFont.Bold))
+        self.back_btn.setFont(QFont(FONT_FAMILY, 14, QFont.Weight.Bold))
         self.back_btn.setStyleSheet(
             "QPushButton { "
             "background-color: transparent; "
@@ -1540,7 +1542,7 @@ class ModernLoginWindow(QDialog):
         # Add trial send button
         self.trial_send_btn = QPushButton("enter trial mode")
         self.trial_send_btn.setFixedSize(350, 65)
-        self.trial_send_btn.setFont(QFont(FONT_FAMILY, 14, QFont.Bold))
+        self.trial_send_btn.setFont(QFont(FONT_FAMILY, 14, QFont.Weight.Bold))
         is_dark = is_dark_mode()
         btn_text_color = "white" if is_dark else "black"
         self.trial_send_btn.setStyleSheet(
@@ -1564,7 +1566,7 @@ class ModernLoginWindow(QDialog):
         # Add trial back button
         self.trial_back_btn = QPushButton("back")
         self.trial_back_btn.setFixedSize(350, 50)
-        self.trial_back_btn.setFont(QFont(FONT_FAMILY, 14, QFont.Bold))
+        self.trial_back_btn.setFont(QFont(FONT_FAMILY, 14, QFont.Weight.Bold))
         self.trial_back_btn.setStyleSheet(
             "QPushButton { "
             "background-color: transparent; "
@@ -1851,7 +1853,7 @@ class ModernLoginWindow(QDialog):
         
         back_btn = QPushButton("back")
         back_btn.setFixedSize(100, 40)
-        back_btn.setFont(QFont(FONT_FAMILY, 12, QFont.Bold))
+        back_btn.setFont(QFont(FONT_FAMILY, 12, QFont.Weight.Bold))
         back_btn.setStyleSheet(
             "QPushButton { "
             "background-color: transparent; "
@@ -2287,13 +2289,13 @@ class ModernLoginWindow(QDialog):
     
     def keyPressEvent(self, event):
         """Handle key press events - prevent Enter from closing dialog"""
-        if event.key() == Qt.Key_Escape:
+        if event.key() == Qt.Key.Key_Escape:
             self.close_window()
             event.accept()
             return
         
         # Intercept Enter/Return key - NEVER let it reach QDialog's default handler
-        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             print(f"🔍 DEBUG [keyPressEvent]: Enter pressed at dialog level")
             
             # If there's a message overlay, close it
@@ -2319,14 +2321,14 @@ class ModernLoginWindow(QDialog):
     def mousePressEvent(self, event):
         """Handle mouse press for dragging"""
         # Only allow dragging from non-interactive areas (media section)
-        if event.button() == Qt.LeftButton:
-            self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
         super().mousePressEvent(event)
     
     def mouseMoveEvent(self, event):
         """Handle mouse move for dragging"""
-        if event.buttons() == Qt.LeftButton and self.drag_position is not None:
-            self.move(event.globalPos() - self.drag_position)
+        if event.buttons() == Qt.MouseButton.LeftButton and self.drag_position is not None:
+            self.move(event.globalPosition().toPoint() - self.drag_position)
         super().mouseMoveEvent(event)
     
     def mouseReleaseEvent(self, event):
@@ -2346,8 +2348,8 @@ class ModernLoginWindow(QDialog):
     def eventFilter(self, obj, event):
         """Globally intercept Enter/Return while transient messages are visible."""
         try:
-            from PyQt5.QtCore import QEvent
-            if event.type() == QEvent.KeyPress and event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            from PyQt6.QtCore import QEvent
+            if event.type() == QEvent.Type.KeyPress and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 # Check waiting state
                 is_waiting = getattr(self, 'waiting_for_response', False)
                 
@@ -2384,4 +2386,22 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = ModernLoginWindow()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

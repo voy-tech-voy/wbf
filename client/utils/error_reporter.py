@@ -237,7 +237,7 @@ class WindowsErrorReporter:
         
         # Test PyQt5 availability
         try:
-            from PyQt5.QtWidgets import QApplication
+            from PyQt6.QtWidgets import QApplication
             tests["pyqt5_import"] = "✅ OK"
             
             # Test QApplication creation

@@ -3,12 +3,12 @@ Drag and Drop Area Widget
 Handles file drag and drop operations for the graphics converter
 """
 
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QLabel, QPushButton, QFileDialog, QMessageBox
 )
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QDragEnterEvent, QDropEvent, QPixmap, QIcon
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QPixmap, QIcon, QAction
 import os
 from pathlib import Path
 
@@ -115,7 +115,7 @@ class DragDropArea(QWidget):
         
     def handle_dropped_folders(self, folders):
         """Handle dropped folder(s) with user options"""
-        from PyQt5.QtWidgets import QCheckBox, QVBoxLayout, QDialog, QDialogButtonBox, QLabel
+        from PyQt6.QtWidgets import QCheckBox, QVBoxLayout, QDialog, QDialogButtonBox, QLabel
         
         if len(folders) == 1:
             folder_name = os.path.basename(folders[0])
@@ -294,7 +294,7 @@ class DragDropArea(QWidget):
             
     def add_folder_dialog(self):
         """Open folder dialog to add all supported files from a directory"""
-        from PyQt5.QtWidgets import QFileDialog, QCheckBox, QVBoxLayout, QDialog, QDialogButtonBox, QLabel
+        from PyQt6.QtWidgets import QFileDialog, QCheckBox, QVBoxLayout, QDialog, QDialogButtonBox, QLabel
         
         folder = QFileDialog.getExistingDirectory(
             self,
@@ -482,7 +482,7 @@ class DragDropArea(QWidget):
             
     def handle_list_key_press(self, event):
         """Handle keyboard events for the file list"""
-        from PyQt5.QtCore import Qt
+        from PyQt6.QtCore import Qt
         
         # Handle Delete and Backspace keys to remove selected items
         if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
@@ -509,8 +509,7 @@ class DragDropArea(QWidget):
         item = self.file_list_widget.itemAt(position)
         
         if item and not item.text().startswith("📁"):  # Only show for actual files
-            from PyQt5.QtWidgets import QMenu
-            from PyQt5.QtWidgets import QAction
+            from PyQt6.QtWidgets import QMenu
             
             menu = QMenu(self)
             
@@ -543,3 +542,4 @@ class DragDropArea(QWidget):
     def get_files(self):
         """Return the list of selected files"""
         return self.file_list.copy()
+

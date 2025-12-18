@@ -8,9 +8,9 @@ import sys
 import time
 import os
 import shutil
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QMessageBox
-from PyQt5.QtGui import QPixmap, QColor, QPainter
-from PyQt5.QtCore import Qt, QRect
+from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QMessageBox, QDialog
+from PyQt6.QtGui import QPixmap, QColor, QPainter
+from PyQt6.QtCore import Qt, QRect
 from client.gui.login_window_new import ModernLoginWindow
 from client.gui.main_window import MainWindow
 from client.utils.font_manager import AppFonts
@@ -57,8 +57,8 @@ class ToolLoadingWindow(QWidget):
 
     def __init__(self, version_text: str):
         super().__init__()
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setFixedSize(600, 400)
 
         # Create a main label to hold the splash image/content
@@ -161,7 +161,7 @@ def main():
         
         # Set application icon
         try:
-            from PyQt5.QtGui import QIcon
+            from PyQt6.QtGui import QIcon
             from client.utils.resource_path import get_app_icon_path
             
             icon_path = get_app_icon_path()
@@ -187,9 +187,8 @@ def main():
             t_login = time.perf_counter()
             print(f"[startup] Login window instantiated in {(t_login - t0)*1000:.1f} ms (since start)")
         set_dark_title_bar(login)  # Apply dark title bar to login window
-
         # Show login window
-        if login.exec_() == login.Accepted:
+        if login.exec() == QDialog.DialogCode.Accepted:
             # Login successful - show main application
             if CRASH_REPORTING_AVAILABLE:
                 log_info("Login successful, launching main application", "startup")

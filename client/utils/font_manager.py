@@ -3,7 +3,7 @@ Centralized Font Configuration for ImgApp
 Single source of truth for all fonts used in the application
 """
 
-from PyQt5.QtGui import QFont
+from PyQt6.QtGui import QFont
 
 # Global font settings - CHANGE THESE TO UPDATE FONTS EVERYWHERE
 FONT_FAMILY = "Segoe UI"  # Windows-native sans-serif font
@@ -20,7 +20,7 @@ class AppFonts:
         font = QFont(FONT_FAMILY, FONT_SIZE_BASE)
         if bold:
             font.setBold(True)
-        font.setStyleStrategy(QFont.PreferAntialias)
+        font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
         return font
     
     @staticmethod
@@ -29,7 +29,7 @@ class AppFonts:
         font = QFont(FONT_FAMILY, FONT_SIZE_TITLE)
         if bold:
             font.setBold(True)
-        font.setStyleStrategy(QFont.PreferAntialias)
+        font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
         return font
     
     @staticmethod
@@ -38,7 +38,7 @@ class AppFonts:
         font = QFont(FONT_FAMILY, FONT_SIZE_BUTTON)
         if bold:
             font.setBold(True)
-        font.setStyleStrategy(QFont.PreferAntialias)
+        font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
         return font
     
     @staticmethod
@@ -47,5 +47,7 @@ class AppFonts:
         font = QFont(FONT_FAMILY, size)
         if bold:
             font.setBold(True)
-        font.setStyleStrategy(QFont.PreferAntialias)
+        font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
         return font
+
+

@@ -3,12 +3,12 @@ Login Window for ImgApp
 Simple authentication dialog that appears before the main application
 """
 
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
     QLineEdit, QPushButton, QFrame, QApplication, QMessageBox, QInputDialog, QWidget
 )
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QFont, QIcon, QPalette, QPixmap
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QFont, QIcon, QPalette, QPixmap
 import sys
 import winreg
 import os
@@ -152,7 +152,7 @@ class LoginWindow(QDialog):
         
         # Set window icon
         try:
-            from PyQt5.QtGui import QIcon
+            from PyQt6.QtGui import QIcon
             from client.utils.resource_path import get_app_icon_path
             
             icon_path = get_app_icon_path()

@@ -5,14 +5,14 @@ Implements the layout: Top Bar | Mid Section (Drag-Drop + Commands) | Bottom Bar
 
 import sys
 import os
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QMenuBar, QToolBar, QStatusBar, QSplitter,
     QListWidget, QTextEdit, QLabel, QPushButton,
-    QFrame, QGroupBox, QProgressBar, QAction, QMessageBox
+    QFrame, QGroupBox, QProgressBar, QMessageBox
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QPoint, QSize
-from PyQt5.QtGui import QIcon, QDragEnterEvent, QDropEvent, QFont, QMouseEvent
+from PyQt6.QtGui import QIcon, QDragEnterEvent, QDropEvent, QFont, QMouseEvent, QAction
+from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QSize
 
 from .drag_drop_area import DragDropArea
 from .command_panel import CommandPanel
@@ -31,14 +31,14 @@ class DraggableTitleBar(QFrame):
         
     def mousePressEvent(self, event: QMouseEvent):
         """Store the mouse position when pressed"""
-        if event.button() == Qt.LeftButton:
-            self.drag_position = event.globalPos() - self.parent_window.frameGeometry().topLeft()
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.drag_position = event.globalPosition().toPoint() - self.parent_window.frameGeometry().topLeft()
         super().mousePressEvent(event)
         
     def mouseMoveEvent(self, event: QMouseEvent):
         """Move the window when dragging"""
-        if event.buttons() == Qt.LeftButton and self.drag_position is not None:
-            self.parent_window.move(event.globalPos() - self.drag_position)
+        if event.buttons() == Qt.MouseButton.LeftButton and self.drag_position is not None:
+            self.parent_window.move(event.globalPosition().toPoint() - self.drag_position)
         super().mouseMoveEvent(event)
         
     def mouseReleaseEvent(self, event: QMouseEvent):
@@ -52,7 +52,7 @@ class ClickableLabel(QLabel):
     
     def mousePressEvent(self, event: QMouseEvent):
         """Emit signal when label is clicked"""
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit()
         super().mousePressEvent(event)
 
@@ -73,7 +73,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(title)
         
         # Make window frameless for custom title bar
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
             
         self.setGeometry(100, 100, 1200, 1200)
         self.setMinimumSize(800, 900)
@@ -87,7 +87,7 @@ class MainWindow(QMainWindow):
         
         # Set window icon if available
         try:
-            from PyQt5.QtGui import QIcon
+            from PyQt6.QtGui import QIcon
             from client.utils.resource_path import get_app_icon_path
             
             icon_path = get_app_icon_path()
@@ -156,7 +156,7 @@ class MainWindow(QMainWindow):
                 icon = QIcon(icon_path)
                 logo_label.setPixmap(icon.pixmap(32, 32))
                 logo_label.setMaximumWidth(40)
-                logo_label.setCursor(Qt.PointingHandCursor)
+                logo_label.setCursor(Qt.CursorShape.PointingHandCursor)
                 logo_label.setStyleSheet("border: none; padding: 0px; margin: 0px;")
                 title_layout.addWidget(logo_label)
                 self.logo_label = logo_label
@@ -167,7 +167,7 @@ class MainWindow(QMainWindow):
         title_label = ClickableLabel(self.windowTitle())
         title_label.setFont(AppFonts.get_title_font())
         title_label.setStyleSheet("color: #ffffff; font-weight: bold; border: none; padding: 0px; margin: 0px; text-decoration: none;")
-        title_label.setCursor(Qt.PointingHandCursor)
+        title_label.setCursor(Qt.CursorShape.PointingHandCursor)
         title_layout.addWidget(title_label)
         
         # Theme toggle button (Moon/Sun SVG)
@@ -176,7 +176,7 @@ class MainWindow(QMainWindow):
         self.theme_toggle_btn.setMinimumHeight(35)
         self.theme_toggle_btn.setMaximumWidth(40)
         self.theme_toggle_btn.setMaximumHeight(35)
-        self.theme_toggle_btn.setCursor(Qt.PointingHandCursor)
+        self.theme_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         
         # Load SVG icon for theme toggle
         try:
@@ -190,10 +190,10 @@ class MainWindow(QMainWindow):
             print(f"Could not load theme toggle icon: {e}")
             self.theme_toggle_btn.setText("◐")
         self.theme_toggle_btn.clicked.connect(self.toggle_theme)
-        self.theme_toggle_btn.setCursor(Qt.PointingHandCursor)
+        self.theme_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         
         # Create dropdown menu
-        from PyQt5.QtWidgets import QMenu
+        from PyQt6.QtWidgets import QMenu
         self.title_menu = QMenu()
         
         about_action = QAction("About", self)
@@ -229,7 +229,7 @@ class MainWindow(QMainWindow):
         minimize_btn.setMaximumHeight(35)
         minimize_btn.clicked.connect(self.showMinimized)
         minimize_btn.setFont(AppFonts.get_button_font())
-        minimize_btn.setCursor(Qt.PointingHandCursor)
+        minimize_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         
         # Close button
         close_btn = QPushButton("✕")
@@ -239,7 +239,7 @@ class MainWindow(QMainWindow):
         close_btn.setMaximumHeight(35)
         close_btn.clicked.connect(self.close)
         close_btn.setFont(AppFonts.get_button_font())
-        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         
         title_layout.addWidget(minimize_btn)
         title_layout.addSpacing(10)
@@ -371,9 +371,9 @@ class MainWindow(QMainWindow):
         
         if not files:
             msg_box = QMessageBox(QMessageBox.Icon.Warning, "No Files", "Please add files for conversion first.", parent=self)
-            msg_box.setWindowFlags(msg_box.windowFlags() | Qt.FramelessWindowHint)
+            msg_box.setWindowFlags(msg_box.windowFlags() | Qt.WindowType.FramelessWindowHint)
             msg_box.setStyleSheet(self.theme_manager.get_dialog_styles())
-            ok_button = msg_box.button(QMessageBox.Ok)
+            ok_button = msg_box.button(QMessageBox.StandardButton.Ok)
             if ok_button:
                 ok_button.setDefault(True)
                 ok_button.setFocus()
@@ -492,7 +492,7 @@ class MainWindow(QMainWindow):
         self.set_progress(0)
         self.update_status(message)
         
-        from PyQt5.QtWidgets import QMessageBox
+        from PyQt6.QtWidgets import QMessageBox
         if success:
             msg_box = QMessageBox(QMessageBox.Icon.Information, "Conversion Complete", message, parent=self)
         else:
@@ -510,7 +510,7 @@ class MainWindow(QMainWindow):
         missing_tools = [tool for tool, available in tools.items() if not available]
         
         if missing_tools:
-            from PyQt5.QtWidgets import QMessageBox
+            from PyQt6.QtWidgets import QMessageBox
             
             # Create detailed message
             message_parts = ["Tool Status Check:\n"]
@@ -725,12 +725,12 @@ class MainWindow(QMainWindow):
                 msg.setIconPixmap(icon.pixmap(64, 64))
         except Exception as e:
             print(f"Could not set about dialog icon: {e}")
-            msg.setIcon(QMessageBox.Information)
+            msg.setIcon(QMessageBox.Icon.Information)
         
-        msg.setStandardButtons(QMessageBox.Ok)
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
         
         # Hide the title bar (frameless window)
-        msg.setWindowFlags(msg.windowFlags() | Qt.FramelessWindowHint)
+        msg.setWindowFlags(msg.windowFlags() | Qt.WindowType.FramelessWindowHint)
         
         # Apply theme styling to the message box
         dialog_style = f"""
@@ -762,4 +762,6 @@ class MainWindow(QMainWindow):
         # Set dialog size
         msg.resize(450, 400)
         
-        msg.exec_()
+        msg.exec()
+
+

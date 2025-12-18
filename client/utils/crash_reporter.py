@@ -170,7 +170,7 @@ class EmergencyCrashReporter:
             }
             
             # Check critical modules
-            critical_modules = ['PyQt5', 'requests', 'PIL', 'pathlib']
+            critical_modules = ['PyQt6', 'requests', 'PIL', 'pathlib']
             for module in critical_modules:
                 try:
                     __import__(module)
@@ -235,15 +235,15 @@ class EmergencyCrashReporter:
             self._log_init_step("Checking GUI dependencies")
             
             checks = {
-                "pyqt5_available": False,
+                "qt_available": False,
                 "display_available": False,
                 "widgets": {}
             }
             
-            # Check PyQt5 import
+            # Check qt import
             try:
-                from PyQt5.QtWidgets import QApplication
-                checks["pyqt5_available"] = True
+                from PyQt6.QtWidgets import QApplication
+                checks["qt_available"] = True
                 
                 # Test QApplication creation
                 try:
@@ -255,9 +255,9 @@ class EmergencyCrashReporter:
                     checks["qapplication"] = f"❌ Failed: {e}"
                 
             except ImportError as e:
-                checks["pyqt5_available"] = False
+                checks["qt_available"] = False
                 checks["import_error"] = str(e)
-                self._log_error(e, "pyqt5_import")
+                self._log_error(e, "qt_import")
             
             # Check display availability (Windows)
             try:
@@ -271,7 +271,7 @@ class EmergencyCrashReporter:
                 checks["display_error"] = str(e)
             
             self.crash_info["gui"] = checks
-            return checks["pyqt5_available"]
+            return checks["qt_available"]
             
         except Exception as e:
             self._log_error(e, "gui_check")
@@ -378,8 +378,8 @@ CRITICAL ANALYSIS
             
             # GUI issues
             gui_info = diagnostics.get("gui", {})
-            if not gui_info.get("pyqt5_available", True):
-                content += "❌ PyQt5 not available - GUI framework missing\\n"
+            if not gui_info.get("qt_available", True):
+                content += "❌ qt not available - GUI framework missing\\n"
             
             # Environment issues  
             env_info = diagnostics.get("environment", {})
@@ -391,7 +391,7 @@ CRITICAL ANALYSIS
             content += f'''
 TROUBLESHOOTING STEPS
 ====================
-1. Check Python/PyQt5 installation
+1. Check Python/qt installation
 2. Verify file permissions
 3. Test with administrator privileges
 4. Check antivirus software interference
@@ -448,3 +448,4 @@ def run_with_crash_protection(main_func, *args, **kwargs):
         if reporter:
             reporter._log_init_step("Application exited normally")
         raise
+

@@ -3,9 +3,9 @@ Theme Manager for the Graphics Conversion App
 Handles dark/light mode detection and styling
 """
 
-from PyQt5.QtCore import QObject, pyqtSignal
-from PyQt5.QtGui import QPalette, QColor
-from PyQt5.QtWidgets import QApplication
+from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtGui import QPalette, QColor
+from PyQt6.QtWidgets import QApplication
 import sys
 
 class ThemeManager(QObject):

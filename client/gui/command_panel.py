@@ -3,14 +3,14 @@ Command Panel Widget
 Provides conversion commands and options for ffmpeg, gifsicle, and ImageMagick
 """
 
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QLabel, QPushButton, QComboBox, QSpinBox, QDoubleSpinBox, QCheckBox, QLineEdit,
-    QGroupBox, QFormLayout, QTabWidget, QTextEdit, QSlider, QRadioButton
+    QGroupBox, QFormLayout, QTabWidget, QTextEdit, QSlider, QRadioButton, QSizePolicy
 )
 from client.utils.font_manager import AppFonts, FONT_FAMILY, FONT_SIZE_BUTTON
-from PyQt5.QtCore import Qt, pyqtSignal, QRect, QPoint, QTimer
-from PyQt5.QtGui import QPainter, QPen, QColor, QBrush
+from PyQt6.QtCore import Qt, pyqtSignal, QRect, QPoint, QTimer
+from PyQt6.QtGui import QPainter, QPen, QColor, QBrush
 import json
 import winreg
 
@@ -257,13 +257,13 @@ class QRangeSlider(QWidget):
         end_text = f"{self.end_value * 100:.0f}"
         
         # Position labels below handles
-        start_text_rect = painter.boundingRect(0, 0, 100, 20, Qt.AlignCenter, start_text)
+        start_text_rect = painter.boundingRect(0, 0, 100, 20, Qt.AlignmentFlag.AlignCenter, start_text)
         start_text_rect.moveCenter(QPoint(start_pixel, self.height() // 2 + self.handle_radius + 10))
-        painter.drawText(start_text_rect, Qt.AlignCenter, start_text)
+        painter.drawText(start_text_rect, Qt.AlignmentFlag.AlignCenter, start_text)
         
-        end_text_rect = painter.boundingRect(0, 0, 100, 20, Qt.AlignCenter, end_text)
+        end_text_rect = painter.boundingRect(0, 0, 100, 20, Qt.AlignmentFlag.AlignCenter, end_text)
         end_text_rect.moveCenter(QPoint(end_pixel, self.height() // 2 + self.handle_radius + 10))
-        painter.drawText(end_text_rect, Qt.AlignCenter, end_text)
+        painter.drawText(end_text_rect, Qt.AlignmentFlag.AlignCenter, end_text)
     
     def mousePressEvent(self, event):
         """Handle mouse press events"""
@@ -463,7 +463,7 @@ class CommandPanel(QWidget):
         
         # Rotation options
         rotation_group = QGroupBox("Rotation Options")
-        rotation_group.setSizePolicy(rotation_group.sizePolicy().horizontalPolicy(), rotation_group.sizePolicy().Maximum)
+        rotation_group.setSizePolicy(rotation_group.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Maximum)
         rotation_layout = QFormLayout(rotation_group)
         
         self.rotation_angle = QComboBox()
@@ -491,10 +491,10 @@ class CommandPanel(QWidget):
         codec_layout.addRow("Format:", self.video_codec)
         
         # Quality (CRF) slider for WebM
-        self.video_quality = QSlider(Qt.Horizontal)
+        self.video_quality = QSlider(Qt.Orientation.Horizontal)
         self.video_quality.setRange(0, 100)
         self.video_quality.setValue(30)  # Maps to CRF 23 (good quality)
-        self.video_quality.setTickPosition(QSlider.TicksBelow)
+        self.video_quality.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.video_quality.setTickInterval(10)
         self.video_quality.setToolTip("Quality: 0=lossless, 100=worst quality\nRecommended: 30-50 for WebM")
         self.video_quality_label = QLabel("Quality:")
@@ -603,7 +603,7 @@ class CommandPanel(QWidget):
         self.enable_retime.toggled.connect(self.toggle_retime)
         time_layout.addRow(self.enable_retime)
 
-        self.retime_slider = QSlider(Qt.Horizontal)
+        self.retime_slider = QSlider(Qt.Orientation.Horizontal)
         self.retime_slider.setRange(10, 30)  # 1.0x to 3.0x in 0.1 steps
         self.retime_slider.setValue(10)
         self.retime_slider.setSingleStep(1)
@@ -685,10 +685,10 @@ class CommandPanel(QWidget):
         # ffmpeg_layout.addRow(self.ffmpeg_gif_dither_label, self.ffmpeg_gif_dither)
 
         # Dither Quality Slider
-        self.gif_dither_quality_slider = QSlider(Qt.Horizontal)
+        self.gif_dither_quality_slider = QSlider(Qt.Orientation.Horizontal)
         self.gif_dither_quality_slider.setRange(0, 5)
         self.gif_dither_quality_slider.setValue(3)  # Default to best quality (floyd_steinberg)
-        self.gif_dither_quality_slider.setTickPosition(QSlider.TicksBelow)
+        self.gif_dither_quality_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.gif_dither_quality_slider.setTickInterval(1)
         
         self.gif_dither_quality_label = QLabel("Quality: 3 (High)")
@@ -714,7 +714,7 @@ class CommandPanel(QWidget):
         
         # Resize options - SECOND
         resize_group = QGroupBox("Resize")
-        resize_group.setSizePolicy(resize_group.sizePolicy().horizontalPolicy(), resize_group.sizePolicy().Maximum)
+        resize_group.setSizePolicy(resize_group.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Maximum)
         resize_layout = QFormLayout(resize_group)
         
         # Resize mode selection - FIRST
@@ -752,7 +752,7 @@ class CommandPanel(QWidget):
         
         # GIF rotation options - THIRD
         rotation_group = QGroupBox("Rotation Options")
-        rotation_group.setSizePolicy(rotation_group.sizePolicy().horizontalPolicy(), rotation_group.sizePolicy().Maximum)
+        rotation_group.setSizePolicy(rotation_group.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Maximum)
         rotation_layout = QFormLayout(rotation_group)
         
         self.gif_rotation_angle = QComboBox()
@@ -764,7 +764,7 @@ class CommandPanel(QWidget):
         
         # GIF time options (cutting + retime) - FOURTH
         gif_time_group = QGroupBox("Time Options")
-        gif_time_group.setSizePolicy(gif_time_group.sizePolicy().horizontalPolicy(), gif_time_group.sizePolicy().Maximum)
+        gif_time_group.setSizePolicy(gif_time_group.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Maximum)
         gif_time_layout = QFormLayout(gif_time_group)
         
         # Time range toggle
@@ -788,7 +788,7 @@ class CommandPanel(QWidget):
         self.gif_enable_retime.toggled.connect(self.toggle_gif_retime)
         gif_time_layout.addRow(self.gif_enable_retime)
 
-        self.gif_retime_slider = QSlider(Qt.Horizontal)
+        self.gif_retime_slider = QSlider(Qt.Orientation.Horizontal)
         self.gif_retime_slider.setRange(10, 30)
         self.gif_retime_slider.setValue(10)
         self.gif_retime_slider.setSingleStep(1)
@@ -862,7 +862,7 @@ class CommandPanel(QWidget):
         self.is_converting = False
         
         # Make button expand to full width
-        self.convert_btn.setSizePolicy(QPushButton().sizePolicy().Expanding, QPushButton().sizePolicy().Fixed)
+        self.convert_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
         # DynamicFontButton handles stylesheet with font properties automatically
         layout.addWidget(self.convert_btn)
@@ -907,7 +907,7 @@ class CommandPanel(QWidget):
         
     def browse_output_directory(self):
         """Browse for output directory"""
-        from PyQt5.QtWidgets import QFileDialog
+        from PyQt6.QtWidgets import QFileDialog
         directory = QFileDialog.getExistingDirectory(self, "Select Output Directory")
         if directory:
             self.output_dir.setText(directory)
@@ -1053,7 +1053,7 @@ class CommandPanel(QWidget):
         params = self.get_conversion_params()
         
         # Create a simple preview dialog
-        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton
         
         dialog = QDialog(self)
         dialog.setWindowTitle("Command Preview")
@@ -1825,7 +1825,7 @@ class CommandPanel(QWidget):
             invalid_values = [val for val in values if val < 1 or val > 240]
             
             if invalid_values:
-                from PyQt5.QtWidgets import QMessageBox
+                from PyQt6.QtWidgets import QMessageBox
                 msg_box = QMessageBox(QMessageBox.Icon.Warning, "Invalid FPS Values", 
                                     f"FPS values must be between 1 and 240.\n\nInvalid values found: {invalid_values}\n\nValid range: 1 to 240\n\nCommon FPS values:\n10-15 = Low motion\n24-30 = Standard motion\n60+ = High motion", 
                                     parent=self)
@@ -1856,7 +1856,7 @@ class CommandPanel(QWidget):
             invalid_values = [val for val in values if val < 2 or val > 256]
             
             if invalid_values:
-                from PyQt5.QtWidgets import QMessageBox
+                from PyQt6.QtWidgets import QMessageBox
                 msg_box = QMessageBox(QMessageBox.Icon.Warning, "Invalid Colors Values", 
                                     f"Colors values must be between 2 and 256.\n\nInvalid values found: {invalid_values}\n\nValid range: 2 to 256\n\nColor recommendations:\n2-16 = Very low quality\n32-64 = Low quality\n128-256 = High quality", 
                                     parent=self)
@@ -1889,7 +1889,7 @@ class CommandPanel(QWidget):
             invalid_values = [val for val in values if val < 0 or val > 100]
             
             if invalid_values:
-                from PyQt5.QtWidgets import QMessageBox
+                from PyQt6.QtWidgets import QMessageBox
                 msg_box = QMessageBox(QMessageBox.Icon.Warning, "Invalid Quality Values", 
                                     f"Quality values must be between 0 and 100.\n\nInvalid values found: {invalid_values}\n\nValid range: 0 to 100\n\nQuality levels:\n0 = Lossless\n25-40 = High quality\n50-70 = Good quality (recommended)\n80-100 = Low quality", 
                                     parent=self)
@@ -1908,3 +1908,12 @@ class CommandPanel(QWidget):
         except ValueError:
             # Ignore non-numeric input during typing
             pass
+
+
+
+
+
+
+
+
+
