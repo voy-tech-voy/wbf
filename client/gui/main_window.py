@@ -75,8 +75,8 @@ class MainWindow(QMainWindow):
         # Make window frameless for custom title bar
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
             
-        self.setGeometry(100, 100, 1200, 1200)
-        self.setMinimumSize(800, 900)
+        self.setGeometry(100, 100, 1200, 1000)
+        self.setMinimumSize(800, 700)
         
         if self.is_trial:
             self.trial_manager = TrialManager()
@@ -264,20 +264,26 @@ class MainWindow(QMainWindow):
         # Create horizontal splitter for left and right panels
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(0)  # Hide splitter handle visual
+        splitter.setStyleSheet("QSplitter::handle { background: transparent; border: none; }")
         
         # Store splitter reference for styling
         self.splitter = splitter
         
-        # Left panel - Drag and Drop Area
-        left_frame = QGroupBox("Files")
+        # Left panel - Drag and Drop Area (no frame)
+        left_frame = QWidget()
         left_layout = QVBoxLayout(left_frame)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
         
         self.drag_drop_area = DragDropArea()
         left_layout.addWidget(self.drag_drop_area)
         
-        # Right panel - Command Panel
-        right_frame = QGroupBox("Conversion Commands")
+        # Right panel - Command Panel (no frame)
+        right_frame = QWidget()
         right_layout = QVBoxLayout(right_frame)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
         
         self.command_panel = CommandPanel()
         right_layout.addWidget(self.command_panel)

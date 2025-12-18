@@ -370,6 +370,10 @@ class CommandPanel(QWidget):
         self.gif_tab = self.create_gif_tab()
         self.tabs.addTab(self.gif_tab, "GIFs")
         
+        # Make tab buttons fill available width
+        tab_bar = self.tabs.tabBar()
+        tab_bar.setExpanding(True)
+        
         layout.addWidget(self.tabs)
         
         # Output settings
