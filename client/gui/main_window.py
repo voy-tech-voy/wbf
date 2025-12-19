@@ -111,6 +111,10 @@ class MainWindow(QMainWindow):
         self.apply_theme()
         self.check_tools()
         
+        # Reset drop area rendering after 1ms
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(1, self.drag_drop_area.clear_files)
+        
     def setup_ui(self):
         """Setup the main user interface layout"""
         central_widget = QWidget()
@@ -222,7 +226,7 @@ class MainWindow(QMainWindow):
         title_layout.addWidget(self.theme_toggle_btn)
         
         # Minimize button
-        minimize_btn = QPushButton("_")
+        minimize_btn = QPushButton("—")
         minimize_btn.setMinimumWidth(45)
         minimize_btn.setMinimumHeight(35)
         minimize_btn.setMaximumWidth(45)
@@ -395,36 +399,6 @@ class MainWindow(QMainWindow):
         # Initialize variants
         resize_variants = self.command_panel.get_resize_values()
         video_variants = self.command_panel.get_video_variant_values()
-
-        # Trial check
-        if self.is_trial:
-            # Calculate expected output files
-            variants_count = 0
-            if resize_variants:
-                variants_count += len(resize_variants)
-            if video_variants:
-                variants_count += len(video_variants)
-            
-            multiplier = max(1, variants_count)
-            total_files_needed = len(files) * multiplier
-
-            status = self.trial_manager.check_trial_status()
-            if not status.get('allowed', False):
-                error_msg = status.get('error')
-                if error_msg == 'connection_error':
-                     QMessageBox.warning(self, "Connection Error", "Could not connect to the trial server.\nPlease check your internet connection or try again later.")
-                else:
-                     QMessageBox.warning(self, "Trial Expired", f"You have reached the trial limit of {status.get('limits', {}).get('files', 30)} files.\nPlease purchase a license.")
-                return
-            
-            # Check if we have enough remaining files
-            remaining = status.get('remaining_files', 0)
-            if total_files_needed > remaining:
-                 QMessageBox.warning(self, "Trial Limit Exceeded", f"This batch requires {total_files_needed} files, but you only have {remaining} remaining in your trial.\nPlease reduce the number of files or purchase a license.")
-                 return
-            
-            # Increment trial usage
-            self.trial_manager.increment_trial_usage(total_files_needed)
         
         # Set button to stop state
         self.command_panel.set_conversion_state(True)
@@ -499,10 +473,14 @@ class MainWindow(QMainWindow):
         self.update_status(message)
         
         from PyQt6.QtWidgets import QMessageBox
+        from PyQt6.QtCore import Qt
         if success:
             msg_box = QMessageBox(QMessageBox.Icon.Information, "Conversion Complete", message, parent=self)
         else:
             msg_box = QMessageBox(QMessageBox.Icon.Critical, "Conversion Error", message, parent=self)
+        
+        # Remove title bar and make frameless
+        msg_box.setWindowFlags(msg_box.windowFlags() | Qt.WindowType.FramelessWindowHint)
         
         # Apply dark theme to the dialog
         msg_box.setStyleSheet(self.theme_manager.get_dialog_styles())
@@ -543,6 +521,9 @@ class MainWindow(QMainWindow):
         
         # Update drag drop area theme
         self.drag_drop_area.set_theme_manager(self.theme_manager)
+        
+        # Programmatically click clear button to reset drop area rendering
+        self.drag_drop_area.clear_files()
         
         # Update command panel theme (for toggle boxes)
         is_dark = self.theme_manager.get_current_theme() == 'dark'
@@ -587,10 +568,19 @@ class MainWindow(QMainWindow):
                 with open(self.sun_moon_svg_path, 'r', encoding='utf-8') as f:
                     svg_content = f.read()
                 
-                # Change stroke color based on theme
+                # Change stroke and fill color based on theme
                 icon_color = "#ffffff" if is_dark else "#000000"
+                svg_content = svg_content.replace('stroke:currentColor', f'stroke:{icon_color}')
                 svg_content = svg_content.replace('stroke:#020202', f'stroke:{icon_color}')
+                svg_content = svg_content.replace('stroke:#000000', f'stroke:{icon_color}')
                 svg_content = svg_content.replace('stroke=#020202', f'stroke={icon_color}')
+                svg_content = svg_content.replace('stroke=#000000', f'stroke={icon_color}')
+                svg_content = svg_content.replace('fill:currentColor', f'fill:{icon_color}')
+                svg_content = svg_content.replace('fill:#020202', f'fill:{icon_color}')
+                svg_content = svg_content.replace('fill=#020202', f'fill={icon_color}')
+                svg_content = svg_content.replace('fill:#000000', f'fill:{icon_color}')
+                svg_content = svg_content.replace('fill:#000', f'fill:{icon_color}')
+                svg_content = svg_content.replace('fill:black', f'fill:{icon_color}')
                 
                 # Create a temporary SVG with the new color
                 import tempfile

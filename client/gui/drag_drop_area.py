@@ -7,10 +7,115 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QLabel, QPushButton, QFileDialog, QMessageBox
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QPixmap, QIcon, QAction, QPainter, QColor
+from PyQt6.QtCore import Qt, pyqtSignal, QEvent
+from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QPixmap, QIcon, QAction, QPainter, QColor, QCursor
 import os
 from pathlib import Path
+
+class FileListItemWidget(QWidget):
+    """Custom widget for list items with hover-based remove button"""
+    remove_clicked = pyqtSignal()
+    
+    def __init__(self, text, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover)
+        self.installEventFilter(self)
+        self._hovered = False
+        
+        # Set background for visibility
+        self.setStyleSheet("background-color: transparent;")
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)  # Give more space vertically
+        layout.setSpacing(10)
+        
+        # Text label - expand to fill height
+        self.text_label = QLabel(text)
+        self.text_label.setStyleSheet("background: transparent; border: none;")
+        self.text_label.setWordWrap(False)  # Prevent wrapping
+        self.text_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(self.text_label, 1)
+        
+        # Remove button (X) - use MinimumExpanding to not constrain the layout
+        self.remove_btn = QPushButton("✕")
+        self.remove_btn.setMaximumSize(28, 28)  # Max size instead of fixed
+        self.remove_btn.setMinimumSize(24, 24)
+        self.remove_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.remove_btn.setVisible(False)  # Hidden by default
+        self.remove_btn.clicked.connect(self.remove_clicked.emit)
+        layout.addWidget(self.remove_btn, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
+        
+        self.update_button_style(False)
+        
+    def sizeHint(self):
+        """Return the recommended size for the widget"""
+        from PyQt6.QtCore import QSize
+        # Don't set a specific width - let the parent container define it
+        # Just return height; width will be handled by the parent list widget
+        return QSize(0, 56)  # Width 0 means fill available space
+    
+    def minimumSizeHint(self):
+        """Return the minimum recommended size"""
+        from PyQt6.QtCore import QSize
+        return QSize(0, 50)  # Width 0 means fill available space
+        
+    def eventFilter(self, obj, event):
+        if obj == self:
+            if event.type() == QEvent.Type.Enter:
+                self._hovered = True
+                self.remove_btn.setVisible(True)
+            elif event.type() == QEvent.Type.Leave:
+                self._hovered = False
+                self.remove_btn.setVisible(False)
+        return super().eventFilter(obj, event)
+    
+    def update_button_style(self, is_dark_theme):
+        """Update button styling based on theme"""
+        if is_dark_theme:
+            btn_style = """
+                QPushButton {
+                    background-color: transparent;
+                    color: #888888;
+                    border: none;
+                    font-size: 16px;
+                    font-weight: bold;
+                    padding: 0px;
+                }
+                QPushButton:hover {
+                    color: #ff4444;
+                    background-color: rgba(255, 68, 68, 0.1);
+                    border-radius: 3px;
+                }
+                QPushButton:pressed {
+                    color: #ff0000;
+                    background-color: rgba(255, 0, 0, 0.2);
+                }
+            """
+            text_style = "background: transparent; border: none; color: #ffffff; font-size: 13px;"
+        else:
+            btn_style = """
+                QPushButton {
+                    background-color: transparent;
+                    color: #999999;
+                    border: none;
+                    font-size: 16px;
+                    font-weight: bold;
+                    padding: 0px;
+                }
+                QPushButton:hover {
+                    color: #ff4444;
+                    background-color: rgba(255, 68, 68, 0.1);
+                    border-radius: 3px;
+                }
+                QPushButton:pressed {
+                    color: #ff0000;
+                    background-color: rgba(255, 0, 0, 0.2);
+                }
+            """
+            text_style = "background: transparent; border: none; color: #333333; font-size: 13px;"
+        
+        self.remove_btn.setStyleSheet(btn_style)
+        self.text_label.setStyleSheet(text_style)
 
 class DragDropArea(QWidget):
     files_added = pyqtSignal(list)  # Signal emitted when files are added
@@ -55,6 +160,9 @@ class DragDropArea(QWidget):
         # Combined file list widget that serves as both drop area and display
         self.file_list_widget = QListWidget()
         self.file_list_widget.setMinimumHeight(300)
+        
+        # Disable dashed focus rectangle
+        self.file_list_widget.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         
         # Initial styling will be set by theme manager
         self.reset_list_style()
@@ -223,11 +331,33 @@ class DragDropArea(QWidget):
             """)
             
     def _get_scrollbar_style(self):
-        """Get modern minimalistic scrollbar styling"""
+        """Get modern minimalistic scrollbar styling with grey item selection"""
         is_dark = self.theme_manager and self.theme_manager.current_theme == 'dark'
         
         if is_dark:
             return """
+                QListWidget::item {
+                    outline: none;
+                    border: none;
+                }
+                QListWidget::item:selected {
+                    background-color: #3a3a3a;
+                    color: #ffffff;
+                    outline: none;
+                    border: none;
+                }
+                QListWidget::item:focus {
+                    outline: none;
+                    border: none;
+                }
+                QListWidget::item:selected:focus {
+                    background-color: #3a3a3a;
+                    outline: none;
+                    border: none;
+                }
+                QListWidget::item:hover {
+                    background-color: #4a4a4a;
+                }
                 QScrollBar:vertical {
                     background: #1a1a1a;
                     width: 10px;
@@ -251,6 +381,28 @@ class DragDropArea(QWidget):
             """
         else:
             return """
+                QListWidget::item {
+                    outline: none;
+                    border: none;
+                }
+                QListWidget::item:selected {
+                    background-color: #d3d3d3;
+                    color: #333333;
+                    outline: none;
+                    border: none;
+                }
+                QListWidget::item:focus {
+                    outline: none;
+                    border: none;
+                }
+                QListWidget::item:selected:focus {
+                    background-color: #d3d3d3;
+                    outline: none;
+                    border: none;
+                }
+                QListWidget::item:hover {
+                    background-color: #e0e0e0;
+                }
                 QScrollBar:vertical {
                     background: #f0f0f0;
                     width: 10px;
@@ -442,6 +594,7 @@ class DragDropArea(QWidget):
     def add_files(self, files):
         """Add files to the conversion list"""
         added_files = []
+        unsupported_count = 0
         
         for file_path in files:
             if file_path not in self.file_list:
@@ -456,15 +609,37 @@ class DragDropArea(QWidget):
                     file_size = self.get_file_size(file_path)
                     item_text = f"{file_name} ({file_size})"
                     
-                    item = QListWidgetItem(item_text)
+                    # Create custom widget for the item
+                    item = QListWidgetItem()
                     item.setToolTip(f"Full path: {file_path}\nSize: {file_size}")
+                    
+                    # Create custom widget with remove button
+                    item_widget = FileListItemWidget(item_text, self)
+                    is_dark = self.theme_manager and self.theme_manager.current_theme == 'dark'
+                    item_widget.update_button_style(is_dark)
+                    
+                    # Connect remove button - use closure to capture the widget
+                    def create_remove_handler(widget):
+                        def handler():
+                            # Find the index by iterating through list
+                            for i in range(self.file_list_widget.count()):
+                                if self.file_list_widget.itemWidget(self.file_list_widget.item(i)) == widget:
+                                    self.remove_file_by_index(i)
+                                    break
+                        return handler
+                    
+                    item_widget.remove_clicked.connect(create_remove_handler(item_widget))
+                    
+                    # Set size and add to list
+                    item.setSizeHint(item_widget.sizeHint())
                     self.file_list_widget.addItem(item)
+                    self.file_list_widget.setItemWidget(item, item_widget)
                 else:
-                    QMessageBox.warning(
-                        self,
-                        "Unsupported File",
-                        f"File type {file_ext} is not supported.\n\nFile: {os.path.basename(file_path)}"
-                    )
+                    unsupported_count += 1
+        
+        # Show single consolidated dialog if there were unsupported files
+        if unsupported_count > 0:
+            self.show_unsupported_files_dialog(unsupported_count)
                     
         if added_files:
             self.files_added.emit(added_files)
@@ -593,32 +768,84 @@ class DragDropArea(QWidget):
                 item.setSizeHint(viewport_size)
             item.setBackground(Qt.GlobalColor.transparent)
             item.setFlags(Qt.ItemFlag.NoItemFlags)
+            # Mark as placeholder with special data
+            item.setData(Qt.ItemDataRole.UserRole, "PLACEHOLDER")
             self.file_list_widget.addItem(item)
             self.file_list_widget.setItemWidget(item, wrapper)
         else:
             # Remove any placeholder items if files are present
-            while self.file_list_widget.count() > 0:
-                first_item = self.file_list_widget.item(0)
-                if first_item and self.file_list_widget.itemWidget(first_item):
-                    self.file_list_widget.takeItem(0)
-                else:
-                    break
+            items_to_remove = []
+            for i in range(self.file_list_widget.count()):
+                item = self.file_list_widget.item(i)
+                if item and item.data(Qt.ItemDataRole.UserRole) == "PLACEHOLDER":
+                    items_to_remove.append(i)
+            
+            # Remove placeholder items in reverse order
+            for i in reversed(items_to_remove):
+                self.file_list_widget.takeItem(i)
+            
             # Restore original list widget styling
             self.reset_list_style()
                     
-    def remove_file_item(self, item):
-        """Remove a file item when double-clicked"""
-        # Don't remove placeholder (which has a widget set)
-        if item and not self.file_list_widget.itemWidget(item):
-            row = self.file_list_widget.row(item)
-            file_path = self.file_list[row]
+    def remove_file_by_index(self, index):
+        """Remove a file by its index in the list"""
+        if 0 <= index < len(self.file_list):
+            # Remove from file list
+            self.file_list.pop(index)
             
-            # Remove from both lists
-            self.file_list.remove(file_path)
-            self.file_list_widget.takeItem(row)
+            # Remove from widget
+            self.file_list_widget.takeItem(index)
             
             # Update placeholder if empty
             self.update_placeholder_text()
+            
+    def remove_file_item(self, item):
+        """Remove a file item when double-clicked"""
+        if item:
+            row = self.file_list_widget.row(item)
+            if 0 <= row < len(self.file_list):
+                self.remove_file_by_index(row)
+    
+    def show_unsupported_files_dialog(self, count):
+        """Show a single consolidated dialog for unsupported files"""
+        from PyQt6.QtWidgets import QDialog
+        from PyQt6.QtGui import QFont
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("")  # No title bar text
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.setFixedSize(400, 150)
+        dialog.setWindowFlags(dialog.windowFlags() & ~Qt.WindowType.WindowCloseButtonHint)  # Remove close button
+        
+        # Apply theme styling
+        if self.theme_manager:
+            dialog.setStyleSheet(self.theme_manager.get_dialog_styles())
+        
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        
+        # Message label
+        message_label = QLabel(f"There were {count} unsupported file(s).\nSkipped {count} file(s).")
+        message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        font = message_label.font()
+        font.setPointSize(11)
+        message_label.setFont(font)
+        layout.addWidget(message_label)
+        
+        # OK button
+        ok_button = QPushButton("OK")
+        ok_button.setFixedWidth(80)
+        ok_button.clicked.connect(dialog.accept)
+        
+        # Center the button
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        button_layout.addWidget(ok_button)
+        button_layout.addStretch()
+        layout.addLayout(button_layout)
+        
+        dialog.exec()
             
     def handle_list_key_press(self, event):
         """Handle keyboard events for the file list"""
@@ -648,7 +875,8 @@ class DragDropArea(QWidget):
         """Show context menu for file operations"""
         item = self.file_list_widget.itemAt(position)
         
-        if item and not item.text().startswith("📁"):  # Only show for actual files
+        # Only show for actual files (not placeholder)
+        if item and item.data(Qt.ItemDataRole.UserRole) != "PLACEHOLDER":
             from PyQt6.QtWidgets import QMenu
             
             menu = QMenu(self)
@@ -667,17 +895,27 @@ class DragDropArea(QWidget):
             
     def show_in_explorer(self, item):
         """Open file location in Windows Explorer"""
-        if item and not item.text().startswith("📁"):
+        if item and item.data(Qt.ItemDataRole.UserRole) != "PLACEHOLDER":
             row = self.file_list_widget.row(item)
-            file_path = self.file_list[row]
-            
-            import subprocess
-            try:
-                subprocess.run(['explorer', '/select,', file_path])
-            except:
-                # Fallback: just open the folder
-                folder_path = os.path.dirname(file_path)
-                subprocess.run(['explorer', folder_path])
+            if 0 <= row < len(self.file_list):
+                file_path = self.file_list[row]
+                
+                import subprocess
+                try:
+                    # Use the file_path with proper formatting for Windows Explorer
+                    folder_path = os.path.dirname(file_path)
+                    if os.path.isdir(folder_path):
+                        # Open Explorer and highlight the file
+                        subprocess.Popen(['explorer', '/select,', os.path.normpath(file_path)])
+                except Exception as e:
+                    print(f"Error opening Explorer: {e}")
+                    # Fallback: just open the folder
+                    try:
+                        folder_path = os.path.dirname(file_path)
+                        if os.path.isdir(folder_path):
+                            subprocess.Popen(['explorer', os.path.normpath(folder_path)])
+                    except Exception as e2:
+                        print(f"Error opening folder: {e2}")
             
     def get_files(self):
         """Return the list of selected files"""

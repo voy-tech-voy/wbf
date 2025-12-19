@@ -254,8 +254,8 @@ class LicenseManager:
             trials = self.load_trials()
             license_key = self.generate_license_key()
             
-            # Trial expires in 1 day
-            expiry_date = datetime.now() + timedelta(days=1)
+            # Trial expires in 7 days
+            expiry_date = datetime.now() + timedelta(days=7)
             
             # Create trial license (immediately bound to device)
             trial_data = {
@@ -331,8 +331,8 @@ class LicenseManager:
             expiry = datetime.fromisoformat(license_data['expiry_date'])
             days_diff = (expiry - created).days
             
-            # Trial licenses have 1-day duration
-            return days_diff <= 1
+            # Trial licenses have 7-day duration
+            return days_diff <= 7
         except:
             return False
     

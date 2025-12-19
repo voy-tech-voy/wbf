@@ -84,12 +84,12 @@ def test_trial_creation():
     assert license_data['hardware_id'] == "TRIAL-DEVICE-789", "Should be immediately bound"
     print("✅ License immediately bound to device")
     
-    # Check 1-day expiry
+    # Check 7-day expiry
     created = datetime.fromisoformat(license_data['created_date'])
     expiry = datetime.fromisoformat(license_data['expiry_date'])
     duration = (expiry - created).days
-    assert duration == 1, f"Trial should be 1 day, got {duration}"
-    print(f"✅ Trial duration correct: {duration} day")
+    assert duration == 7, f"Trial should be 7 days, got {duration}"
+    print(f"✅ Trial duration correct: {duration} days")
     
     print("\n✅ ALL TRIAL CREATION TESTS PASSED\n")
 

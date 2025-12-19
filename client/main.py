@@ -81,7 +81,7 @@ class ToolLoadingWindow(QWidget):
         if os.path.exists(splash_path):
             pix = QPixmap(splash_path)
             if not pix.isNull():
-                self.content_label.setPixmap(pix.scaled(600, 400, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                self.content_label.setPixmap(pix.scaled(600, 400, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         else:
             # Create placeholder splash
             pix = QPixmap(600, 400)
@@ -96,7 +96,7 @@ class ToolLoadingWindow(QWidget):
             if os.path.exists(icon_path):
                 icon_pix = QPixmap(icon_path)
                 icon_size = 128
-                icon_pix = icon_pix.scaled(icon_size, icon_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                icon_pix = icon_pix.scaled(icon_size, icon_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
                 painter.drawPixmap((600 - icon_size) // 2, 80, icon_pix)
             
             # Draw App Name
@@ -138,6 +138,9 @@ def main():
     if CRASH_REPORTING_AVAILABLE:
         log_info("Starting ImgApp with crash protection", "startup")
     
+    # Check for dev mode - skip login window
+    dev_mode = os.getenv('DEV_MODE', '0') == '1'
+    
     # Set AppUserModelID for Windows taskbar icon
     if os.name == 'nt':
         try:
@@ -178,71 +181,81 @@ def main():
             if CRASH_REPORTING_AVAILABLE:
                 log_error(e, "icon_loading")
         
-        # Show login window first
+        # Show login window first (unless in dev mode)
         if CRASH_REPORTING_AVAILABLE:
-            log_info("Initializing login window", "startup")
-            
-        login = ModernLoginWindow()
-        if profile_startup:
-            t_login = time.perf_counter()
-            print(f"[startup] Login window instantiated in {(t_login - t0)*1000:.1f} ms (since start)")
-        set_dark_title_bar(login)  # Apply dark title bar to login window
-        # Show login window
-        if login.exec() == QDialog.DialogCode.Accepted:
-            # Login successful - show main application
-            if CRASH_REPORTING_AVAILABLE:
-                log_info("Login successful, launching main application", "startup")
-
-            # Show a lightweight splash while bundled tools initialize
-            version_text = get_version()
-            splash = ToolLoadingWindow(version_text)
-            splash.show()
-            app.processEvents()
-            
-            # Record start time to ensure minimum display duration
-            splash_start_time = time.time()
-            
-            try:
-                init_bundled_tools()
-                
-                # Check for FFmpeg (Critical for Lite versions)
-                if not os.environ.get('FFMPEG_BINARY'):
-                    # Fallback to system FFmpeg
-                    system_ffmpeg = shutil.which('ffmpeg')
-                    if system_ffmpeg:
-                        os.environ['FFMPEG_BINARY'] = system_ffmpeg
-                        if CRASH_REPORTING_AVAILABLE:
-                            log_info(f"Using system FFmpeg: {system_ffmpeg}", "startup")
-                    else:
-                        # No FFmpeg found
-                        splash.close()
-                        QMessageBox.critical(None, "FFmpeg Missing", 
-                            "FFmpeg was not found.\n\n"
-                            "This version requires FFmpeg to be installed and available in your system PATH.\n"
-                            "Please install FFmpeg or use the Full version.")
-                        sys.exit(1)
-                
-                # Ensure splash is displayed for at least 2 seconds
-                elapsed = time.time() - splash_start_time
-                if elapsed < 2.0:
-                    time.sleep(2.0 - elapsed)
-                        
-            finally:
-                splash.close()
-
-            window = MainWindow(is_trial=login.is_trial)
-            set_dark_title_bar(window)  # Apply dark title bar to main window
-            window.show()
-            
-            if CRASH_REPORTING_AVAILABLE:
-                log_info("Main application window displayed", "startup")
-                
-            sys.exit(app.exec())
+            if dev_mode:
+                log_info("Dev mode enabled - skipping login window", "startup")
+            else:
+                log_info("Initializing login window", "startup")
+        
+        # Skip login in dev mode
+        if not dev_mode:
+            login = ModernLoginWindow()
+            if profile_startup:
+                t_login = time.perf_counter()
+                print(f"[startup] Login window instantiated in {(t_login - t0)*1000:.1f} ms (since start)")
+            set_dark_title_bar(login)  # Apply dark title bar to login window
+            # Show login window
+            if login.exec() != QDialog.DialogCode.Accepted:
+                # Login cancelled or authentication failed - exit application
+                if CRASH_REPORTING_AVAILABLE:
+                    log_info("Login cancelled or failed, exiting application", "startup")
+                sys.exit(0)
+            # Login successful
+            is_trial = login.is_trial
         else:
-            # Login cancelled or authentication failed - exit application
-            if CRASH_REPORTING_AVAILABLE:
-                log_info("Login cancelled or failed, exiting application", "startup")
-            sys.exit(0)
+            # Dev mode - skip login
+            is_trial = False
+
+        # Login successful (or dev mode) - show main application
+        if CRASH_REPORTING_AVAILABLE:
+            log_info("Launching main application", "startup")
+
+        # Show a lightweight splash while bundled tools initialize
+        version_text = get_version()
+        splash = ToolLoadingWindow(version_text)
+        splash.show()
+        app.processEvents()
+        
+        # Record start time to ensure minimum display duration
+        splash_start_time = time.time()
+        
+        try:
+            init_bundled_tools()
+            
+            # Check for FFmpeg (Critical for Lite versions)
+            if not os.environ.get('FFMPEG_BINARY'):
+                # Fallback to system FFmpeg
+                system_ffmpeg = shutil.which('ffmpeg')
+                if system_ffmpeg:
+                    os.environ['FFMPEG_BINARY'] = system_ffmpeg
+                    if CRASH_REPORTING_AVAILABLE:
+                        log_info(f"Using system FFmpeg: {system_ffmpeg}", "startup")
+                else:
+                    # No FFmpeg found
+                    splash.close()
+                    QMessageBox.critical(None, "FFmpeg Missing", 
+                        "FFmpeg was not found.\n\n"
+                        "This version requires FFmpeg to be installed and available in your system PATH.\n"
+                        "Please install FFmpeg or use the Full version.")
+                    sys.exit(1)
+            
+            # Ensure splash is displayed for at least 2 seconds
+            elapsed = time.time() - splash_start_time
+            if elapsed < 2.0:
+                time.sleep(2.0 - elapsed)
+                    
+        finally:
+            splash.close()
+
+        window = MainWindow(is_trial=is_trial)
+        set_dark_title_bar(window)  # Apply dark title bar to main window
+        window.show()
+        
+        if CRASH_REPORTING_AVAILABLE:
+            log_info("Main application window displayed", "startup")
+            
+        sys.exit(app.exec())
             
     except Exception as e:
         error_msg = f"Critical error in main application: {e}"

@@ -177,9 +177,10 @@ def get_version():
 
 def get_version_info():
     """Get detailed version information"""
+    manager = get_version_manager()
     return {
-        "version": __version__,
+        "version": manager.get_current_version(),
         "author": __author__,
-        "description": __description__,
+        "description": APP_NAME,
         "license": __license__
     }

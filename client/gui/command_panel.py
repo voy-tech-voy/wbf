@@ -297,14 +297,20 @@ class CommandPanel(QWidget):
             QTabBar::tab {
                 min-width: 0px;
                 max-width: 16777215px;
-                padding: 8px 16px;
+                padding: 8px 16px 13px 16px;
                 min-height: 32px;
-                margin-bottom: 2px;
+                margin-bottom: 8px;
+                border-bottom: 2px solid #888888;
+            }
+            QTabBar::tab:selected {
+                border-bottom: 2px solid #00AA00;
+                margin-bottom: 6px;
             }
             QTabWidget::pane {
                 border-top: 2px solid palette(mid);
                 margin-top: 0px;
                 padding-top: 2px;
+                margin-bottom: 5px;
             }
         """)
         
@@ -325,7 +331,7 @@ class CommandPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         
         # Output format selection
-        format_group = QGroupBox("Output Format")
+        format_group = QGroupBox("Image Settings")
         format_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         format_layout = QFormLayout(format_group)
         
@@ -370,7 +376,7 @@ class CommandPanel(QWidget):
         
         # Resize mode selection - FIRST
         self.resize_mode = CustomComboBox()
-        self.resize_mode.addItems(["No resize", "By width (pixels)", "By ratio (percent)"])
+        self.resize_mode.addItems(["No resize", "By width (pixels)", "By longer edge (pixels)", "By ratio (percent)"])
         self.resize_mode.currentTextChanged.connect(self.on_resize_mode_changed)
         resize_layout.addRow("Resize mode:", self.resize_mode)
         
@@ -401,7 +407,7 @@ class CommandPanel(QWidget):
         layout.addWidget(resize_group)
         
         # Rotation options
-        rotation_group = QGroupBox("Rotation Options")
+        rotation_group = QGroupBox("Rotation")
         rotation_group.setSizePolicy(rotation_group.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Maximum)
         rotation_layout = QFormLayout(rotation_group)
         
@@ -470,12 +476,12 @@ class CommandPanel(QWidget):
         layout.addWidget(codec_group)
         
         # Video filters
-        filter_group = QGroupBox("Filters")
+        filter_group = QGroupBox("Resize")
         filter_layout = QFormLayout(filter_group)
         
         # Resize mode selection
         self.video_resize_mode = CustomComboBox()
-        self.video_resize_mode.addItems(["No resize", "By width (pixels)", "By ratio (percent)"])
+        self.video_resize_mode.addItems(["No resize", "By width (pixels)", "By longer edge (pixels)", "By ratio (percent)"])
         self.video_resize_mode.currentTextChanged.connect(self.on_video_resize_mode_changed)
         filter_layout.addRow("Resize mode:", self.video_resize_mode)
         
@@ -506,7 +512,7 @@ class CommandPanel(QWidget):
         layout.addWidget(filter_group)
         
         # Video rotation options
-        rotation_group = QGroupBox("Rotation Options")
+        rotation_group = QGroupBox("Rotation")
         rotation_layout = QFormLayout(rotation_group)
         
         self.video_rotation_angle = CustomComboBox()
@@ -565,7 +571,7 @@ class CommandPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         
         # --- FFmpeg Export Options ---
-        self.ffmpeg_group = QGroupBox("GIF Export Options")
+        self.ffmpeg_group = QGroupBox("GIF Settings")
         self.ffmpeg_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         ffmpeg_layout = QFormLayout(self.ffmpeg_group)
 
@@ -656,7 +662,7 @@ class CommandPanel(QWidget):
         
         # Resize mode selection - FIRST
         self.gif_resize_mode = CustomComboBox()
-        self.gif_resize_mode.addItems(["No resize", "By width (pixels)", "By ratio (percent)"])
+        self.gif_resize_mode.addItems(["No resize", "By width (pixels)", "By longer edge (pixels)", "By ratio (percent)"])
         self.gif_resize_mode.setStyleSheet(COMBOBOX_STYLE)
         self.gif_resize_mode.currentTextChanged.connect(self.on_gif_resize_mode_changed)
         resize_layout.addRow("Resize mode:", self.gif_resize_mode)
@@ -688,7 +694,7 @@ class CommandPanel(QWidget):
         layout.addWidget(resize_group)
         
         # GIF rotation options - THIRD
-        rotation_group = QGroupBox("Rotation Options")
+        rotation_group = QGroupBox("Rotation")
         rotation_group.setSizePolicy(rotation_group.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Maximum)
         rotation_layout = QFormLayout(rotation_group)
         
@@ -1248,6 +1254,9 @@ class CommandPanel(QWidget):
             if not resize_text:
                 return []
             
+            # Get current mode to determine value format
+            current_mode = self.video_resize_mode.currentText() if hasattr(self, 'video_resize_mode') else "By width (pixels)"
+            
             sizes = []
             for value in resize_text.split(','):
                 value = value.strip()
@@ -1257,6 +1266,10 @@ class CommandPanel(QWidget):
                             percent = float(value[:-1])
                             if 1 <= percent <= 200:
                                 sizes.append(f"{percent}%")
+                        elif current_mode == "By longer edge (pixels)":
+                            width = int(value)
+                            if width > 0:
+                                sizes.append(f"L{width}")
                         else:
                             width = int(value)
                             if width > 0:
@@ -1274,6 +1287,8 @@ class CommandPanel(QWidget):
                     return [f"{value}%"]
                 elif mode == "By width (pixels)":
                     return [str(value)]
+                elif mode == "By longer edge (pixels)":
+                    return [f"L{value}"]
             
             return []
     
@@ -1560,6 +1575,13 @@ class CommandPanel(QWidget):
             self.video_resize_value.setValue(1920)  # Default 1920px
             self.video_resize_value.setSuffix("")
             self.video_resize_value.setRange(1, 10000)
+        elif mode == "By longer edge (pixels)":
+            self.video_resize_value.setVisible(True)
+            self.video_resize_value_label.setVisible(True)
+            self.video_resize_value_label.setText("Longer edge (pixels):")
+            self.video_resize_value.setValue(1080)  # Default 1080px
+            self.video_resize_value.setSuffix("")
+            self.video_resize_value.setRange(1, 10000)
         elif mode == "By ratio (percent)":
             self.video_resize_value.setVisible(True)
             self.video_resize_value_label.setVisible(True)
@@ -1573,6 +1595,9 @@ class CommandPanel(QWidget):
             if mode == "By width (pixels)":
                 self.video_size_variants.setPlaceholderText("e.g., 480,720,1080")
                 self.video_size_variants.setText("480,720,1080")
+            elif mode == "By longer edge (pixels)":
+                self.video_size_variants.setPlaceholderText("e.g., 720,1080,1440")
+                self.video_size_variants.setText("720,1080,1440")
             else:
                 self.video_size_variants.setPlaceholderText("e.g., 33,66,90")
                 self.video_size_variants.setText("33,66")
@@ -1630,6 +1655,13 @@ class CommandPanel(QWidget):
             self.resize_value.setValue(720)  # Always use default value
             self.resize_value.setSuffix("")
             self.resize_value.setRange(1, 10000)
+        elif mode == "By longer edge (pixels)":
+            self.resize_value.setVisible(True)
+            self.resize_value_label.setVisible(True)
+            self.resize_value_label.setText("Longer edge (pixels):")
+            self.resize_value.setValue(960)  # Always use default value
+            self.resize_value.setSuffix("")
+            self.resize_value.setRange(1, 10000)
         elif mode == "By ratio (percent)":
             self.resize_value.setVisible(True)
             self.resize_value_label.setVisible(True)
@@ -1643,6 +1675,9 @@ class CommandPanel(QWidget):
             if mode == "By width (pixels)":
                 self.resize_variants.setPlaceholderText("e.g., 720,1280,1920")
                 self.resize_variants.setText("720,1280,1920")
+            elif mode == "By longer edge (pixels)":
+                self.resize_variants.setPlaceholderText("e.g., 720,960,1080")
+                self.resize_variants.setText("720,960,1080")
             else:
                 self.resize_variants.setPlaceholderText("e.g., 33,66,90")
                 self.resize_variants.setText("33,66")
@@ -1673,6 +1708,11 @@ class CommandPanel(QWidget):
                                 percent = float(value)
                                 if 1 <= percent <= 200:
                                     sizes.append(f"{percent}%")
+                            elif current_mode == "By longer edge (pixels)":
+                                # Mode is "By longer edge (pixels)", prefix with "L"
+                                width = int(value)
+                                if width > 0:
+                                    sizes.append(f"L{width}")
                             else:
                                 # Mode is "By width (pixels)", treat as pixel width
                                 width = int(value)
@@ -1691,6 +1731,8 @@ class CommandPanel(QWidget):
                     return [f"{value}%"]
                 elif mode == "By width (pixels)":
                     return [str(value)]
+                elif mode == "By longer edge (pixels)":
+                    return [f"L{value}"]
             
             return []
             
@@ -1709,6 +1751,13 @@ class CommandPanel(QWidget):
             self.gif_resize_value.setValue(720)  # Default 720px
             self.gif_resize_value.setSuffix("")
             self.gif_resize_value.setRange(1, 10000)
+        elif mode == "By longer edge (pixels)":
+            self.gif_resize_value.setVisible(True)
+            self.gif_resize_value_label.setVisible(True)
+            self.gif_resize_value_label.setText("Longer edge (pixels):")
+            self.gif_resize_value.setValue(720)  # Default 720px
+            self.gif_resize_value.setSuffix("")
+            self.gif_resize_value.setRange(1, 10000)
         elif mode == "By ratio (percent)":
             self.gif_resize_value.setVisible(True)
             self.gif_resize_value_label.setVisible(True)
@@ -1720,6 +1769,9 @@ class CommandPanel(QWidget):
         # Update variants if multiple mode is enabled
         if multiple_enabled:
             if mode == "By width (pixels)":
+                self.gif_resize_variants.setPlaceholderText("e.g., 480,720,1080")
+                self.gif_resize_variants.setText("480,720,1080")
+            elif mode == "By longer edge (pixels)":
                 self.gif_resize_variants.setPlaceholderText("e.g., 480,720,1080")
                 self.gif_resize_variants.setText("480,720,1080")
             else:
@@ -1752,6 +1804,11 @@ class CommandPanel(QWidget):
                                 percent = float(value)
                                 if 1 <= percent <= 200:
                                     sizes.append(f"{percent}%")
+                            elif current_mode == "By longer edge (pixels)":
+                                # Mode is "By longer edge (pixels)", prefix with "L"
+                                width = int(value)
+                                if width > 0:
+                                    sizes.append(f"L{width}")
                             else:
                                 # Mode is "By width (pixels)", treat as pixel width
                                 width = int(value)
@@ -1771,6 +1828,8 @@ class CommandPanel(QWidget):
                 elif mode == "By width (pixels)":
                     # Add size validation here if needed
                     return [str(value)]
+                elif mode == "By longer edge (pixels)":
+                    return [f"L{value}"]
             
             return []
     

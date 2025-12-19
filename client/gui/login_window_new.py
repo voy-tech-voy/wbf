@@ -1118,8 +1118,8 @@ class ModernLoginWindow(QDialog):
         QApplication.processEvents()
         
         try:
-            from client.config.config import BASE_URL
-            status, details = self.server_health_checker.check_server_health(BASE_URL, timeout=5)
+            from client.config.config import API_BASE_URL
+            status, details = self.server_health_checker.check_server_health(API_BASE_URL, timeout=5)
             
             if status != 'online':
                 # Server is not available

@@ -372,8 +372,8 @@ def map_ui_quality_to_crf(ui_quality: int, codec: str = 'generic') -> int:
 
 def get_image_dimensions(file_path: str) -> tuple:
     """
-    Get image dimensions using FFmpeg probe
-    Returns (width, height) or (0, 0) if unable to determine
+    Get image dimensions using FFmpeg probe, accounting for EXIF rotation
+    Returns (width, height) after applying rotation, or (0, 0) if unable to determine
     """
     try:
         probe = ffmpeg.probe(file_path)
@@ -382,6 +382,25 @@ def get_image_dimensions(file_path: str) -> tuple:
         if video_stream:
             width = int(video_stream['width'])
             height = int(video_stream['height'])
+            
+            # Check for EXIF rotation (side_data_list or tags.rotate)
+            rotation = 0
+            
+            # Method 1: Check side_data_list for displaymatrix rotation
+            if 'side_data_list' in video_stream:
+                for side_data in video_stream['side_data_list']:
+                    if side_data.get('side_data_type') == 'Display Matrix':
+                        rotation = side_data.get('rotation', 0)
+                        break
+            
+            # Method 2: Check tags.rotate
+            if rotation == 0 and 'tags' in video_stream:
+                rotation = int(video_stream['tags'].get('rotate', 0))
+            
+            # Swap dimensions if rotation is 90 or 270 degrees
+            if abs(rotation) == 90 or abs(rotation) == 270:
+                return (height, width)  # Swap for portrait orientation
+            
             return (width, height)
     except Exception:
         pass
@@ -442,6 +461,40 @@ def clamp_resize_width(original_width: int, target_width: int) -> int:
     if original_width and target_width > original_width:
         return original_width
     return target_width
+
+
+def calculate_longer_edge_resize(original_width: int, original_height: int, target_longer_edge: int) -> tuple:
+    """
+    Calculate new dimensions based on longer edge resize (no upscaling).
+    Returns (new_width, new_height) or (original_width, original_height) if no resize needed.
+    
+    Rules:
+    - Identify the longer edge
+    - Scale so longer edge becomes target_longer_edge
+    - If longer edge is already smaller than target, don't resize
+    - Maintain aspect ratio
+    """
+    if not original_width or not original_height:
+        return (original_width, original_height)
+    
+    longer_edge = max(original_width, original_height)
+    
+    # Don't upscale if longer edge is already smaller than target
+    if longer_edge < target_longer_edge:
+        return (original_width, original_height)
+    
+    # Calculate scale factor based on longer edge
+    scale_factor = target_longer_edge / longer_edge
+    
+    # Calculate new dimensions maintaining aspect ratio
+    new_width = int(original_width * scale_factor)
+    new_height = int(original_height * scale_factor)
+    
+    # Ensure even dimensions (required for some codecs)
+    new_width = new_width if new_width % 2 == 0 else new_width - 1
+    new_height = new_height if new_height % 2 == 0 else new_height - 1
+    
+    return (new_width, new_height)
 
 
 def _resolve_output_dir(params: Dict, input_path: Path) -> Path:
@@ -765,6 +818,23 @@ class ConversionEngine(QThread):
                     stream = ffmpeg.filter(stream, 'scale', target_w, target_h)
                 else:
                     stream = ffmpeg.filter(stream, 'scale', f'iw*{percent}', f'ih*{percent}')
+            elif current_resize.startswith('L'):
+                # Longer edge resize (no upscaling)
+                target_longer_edge = int(current_resize[1:])
+                orig_w, orig_h = get_image_dimensions(file_path)
+                longer_edge = max(orig_w, orig_h)
+                # Don't upscale if longer edge is already smaller than target
+                if longer_edge >= target_longer_edge:
+                    if orig_w > orig_h:
+                        # Width is longer: scale by width
+                        stream = ffmpeg.filter(stream, 'scale', target_longer_edge, -1)
+                    else:
+                        # Height is longer: calculate width to maintain aspect ratio
+                        ratio = target_longer_edge / orig_h
+                        new_w = int(orig_w * ratio)
+                        # Ensure even dimensions for codec compatibility
+                        new_w = new_w if new_w % 2 == 0 else new_w - 1
+                        stream = ffmpeg.filter(stream, 'scale', new_w, target_longer_edge)
             else:
                 # Pixel resize (width-based, maintain aspect ratio)
                 width = int(current_resize)
@@ -778,9 +848,15 @@ class ConversionEngine(QThread):
             width = clamp_resize_width(orig_w, int(width)) if width is not None else width
             stream = ffmpeg.filter(stream, 'scale', width, -1)
             
-        # Handle rotation
+        # Handle rotation (skip rotation when using longer edge resize unless explicitly toggled)
         rotation_angle = self.params.get('rotation_angle')
-        if rotation_angle:
+        # Skip rotation for longer edge mode UNLESS rotation is explicitly set to a real rotation value
+        skip_rotation_for_longer_edge = (
+            current_resize and 
+            current_resize.startswith('L') and 
+            (not rotation_angle or rotation_angle == "No rotation")
+        )
+        if rotation_angle and rotation_angle != "No rotation" and not skip_rotation_for_longer_edge:
             if rotation_angle == "90° clockwise":
                 stream = ffmpeg.filter(stream, 'transpose', 1)  # 90 degrees clockwise
             elif rotation_angle == "180°":
@@ -978,9 +1054,16 @@ class ConversionEngine(QThread):
                 else:
                     self.status_updated.emit("DEBUG: Scale enabled but no width parameter found")
                 
-            # Handle rotation
+            # Handle rotation (skip rotation when using longer edge resize unless explicitly toggled)
+            current_resize = self.params.get('current_resize')
             rotation_angle = self.params.get('rotation_angle')
-            if rotation_angle:
+            # Skip rotation for longer edge mode UNLESS rotation is explicitly set to a real rotation value
+            skip_rotation_for_longer_edge = (
+                current_resize and 
+                current_resize.startswith('L') and 
+                (not rotation_angle or rotation_angle == "No rotation")
+            )
+            if rotation_angle and rotation_angle != "No rotation" and not skip_rotation_for_longer_edge:
                 if rotation_angle == "90° clockwise":
                     video_stream = ffmpeg.filter(video_stream, 'transpose', 1)  # 90 degrees clockwise
                 elif rotation_angle == "180°":
@@ -1098,9 +1181,29 @@ class ConversionEngine(QThread):
             resize_mode = self.params.get('gif_resize_mode', 'No resize')
             resize_values = self.params.get('gif_resize_values', [])
             
-            if resize_mode != 'No resize' and resize_values:
+            # Check if resize_values contains "L" prefix (longer edge format)
+            has_longer_edge_prefix = resize_values and isinstance(resize_values[0], str) and resize_values[0].startswith('L')
+            
+            if (resize_mode != 'No resize' or has_longer_edge_prefix) and resize_values:
                 resize_value = resize_values[0]
-                if resize_mode == 'By ratio (percent)':
+                # Check for "L" prefix first (longer edge format)
+                if isinstance(resize_value, str) and resize_value.startswith('L'):
+                    # Handle "L" prefix format for longer edge
+                    target_longer_edge = int(resize_value[1:])
+                    longer_edge = max(original_width, original_height)
+                    # Don't upscale if longer edge is already smaller than target
+                    if longer_edge >= target_longer_edge:
+                        if original_width > original_height:
+                            # Width is longer: scale by width
+                            input_stream = ffmpeg.filter(input_stream, 'scale', str(target_longer_edge), '-2')
+                        else:
+                            # Height is longer: calculate width to maintain aspect ratio
+                            ratio = target_longer_edge / original_height
+                            new_w = int(original_width * ratio)
+                            # Ensure even dimensions
+                            new_w = new_w if new_w % 2 == 0 else new_w - 1
+                            input_stream = ffmpeg.filter(input_stream, 'scale', str(new_w), str(target_longer_edge))
+                elif resize_mode == 'By ratio (percent)':
                     if resize_value.endswith('%'):
                         percent = float(resize_value[:-1]) / 100.0
                         new_width = int(original_width * percent)
@@ -1110,15 +1213,40 @@ class ConversionEngine(QThread):
                     new_width = int(resize_value)
                     new_width = clamp_resize_width(original_width, new_width)
                     input_stream = ffmpeg.filter(input_stream, 'scale', str(new_width), '-2')
+                elif resize_mode == 'By longer edge (pixels)':
+                    # Handle mode name format for longer edge
+                    # Check if resize_value has 'L' prefix and strip it
+                    if isinstance(resize_value, str) and resize_value.startswith('L'):
+                        target_longer_edge = int(resize_value[1:])
+                    else:
+                        target_longer_edge = int(resize_value)
+                    longer_edge = max(original_width, original_height)
+                    # Don't upscale if longer edge is already smaller than target
+                    if longer_edge >= target_longer_edge:
+                        if original_width > original_height:
+                            # Width is longer: scale by width
+                            input_stream = ffmpeg.filter(input_stream, 'scale', str(target_longer_edge), '-2')
+                        else:
+                            # Height is longer: calculate width to maintain aspect ratio
+                            ratio = target_longer_edge / original_height
+                            new_w = int(original_width * ratio)
+                            # Ensure even dimensions
+                            new_w = new_w if new_w % 2 == 0 else new_w - 1
+                            input_stream = ffmpeg.filter(input_stream, 'scale', str(new_w), str(target_longer_edge))
             
-            # Rotation
+            # Rotation (skip rotation when using longer edge resize unless explicitly toggled)
             rotation_angle = self.params.get('rotation')
-            if rotation_angle == "90° clockwise":
+            # Skip rotation for longer edge mode UNLESS rotation is explicitly set to a real rotation value
+            skip_rotation_for_longer_edge = (
+                resize_mode == 'By longer edge (pixels)' and 
+                (not rotation_angle or rotation_angle == "No rotation")
+            )
+            if rotation_angle and rotation_angle != "No rotation" and not skip_rotation_for_longer_edge and rotation_angle == "90° clockwise":
                 input_stream = ffmpeg.filter(input_stream, 'transpose', 1)
-            elif rotation_angle == "180°":
+            elif rotation_angle and rotation_angle != "No rotation" and not skip_rotation_for_longer_edge and rotation_angle == "180°":
                 input_stream = ffmpeg.filter(input_stream, 'transpose', 2)
                 input_stream = ffmpeg.filter(input_stream, 'transpose', 2)
-            elif rotation_angle == "270° clockwise":
+            elif rotation_angle and rotation_angle != "No rotation" and not skip_rotation_for_longer_edge and rotation_angle == "270° clockwise":
                 input_stream = ffmpeg.filter(input_stream, 'transpose', 2)
                 
             # Blur
@@ -1171,6 +1299,11 @@ class ConversionEngine(QThread):
 
     def _convert_single_video_to_gif(self, file_path: str) -> bool:
         """Convert single video to GIF using FFmpeg"""
+        # Set current_resize if gif_resize_values is provided
+        gif_resize_values = self.params.get('gif_resize_values', [])
+        if gif_resize_values and len(gif_resize_values) > 0:
+            self.params['current_resize'] = gif_resize_values[0]
+        
         output_path = self.get_output_path(file_path, 'gif')
         
         # Ensure output directory exists
@@ -1317,6 +1450,23 @@ class ConversionEngine(QThread):
                         input_stream = ffmpeg.filter(input_stream, 'scale', str(target_w), str(target_h))
                     else:
                         input_stream = ffmpeg.filter(input_stream, 'scale', f"trunc(iw*{percent}/2)*2", f"trunc(ih*{percent}/2)*2")
+                elif resize_variant.startswith('L'):
+                    # Longer edge resize (no upscaling)
+                    target_longer_edge = int(resize_variant[1:])
+                    original_width, original_height = get_video_dimensions(file_path)
+                    longer_edge = max(original_width, original_height)
+                    # Don't upscale if longer edge is already smaller than target
+                    if longer_edge >= target_longer_edge:
+                        if original_width > original_height:
+                            # Width is longer: scale by width
+                            input_stream = ffmpeg.filter(input_stream, 'scale', str(target_longer_edge), '-2')
+                        else:
+                            # Height is longer: calculate width to maintain aspect ratio
+                            ratio = target_longer_edge / original_height
+                            new_w = int(original_width * ratio)
+                            # Ensure even dimensions
+                            new_w = new_w if new_w % 2 == 0 else new_w - 1
+                            input_stream = ffmpeg.filter(input_stream, 'scale', str(new_w), str(target_longer_edge))
                 else:
                     width = int(resize_variant)
                     original_width, _ = get_video_dimensions(file_path)
@@ -1481,6 +1631,40 @@ class ConversionEngine(QThread):
                     else:
                         # Fallback to percent notation if no input path
                         suffixes.append(f"size{current_resize[:-1]}pc")
+                elif current_resize.startswith('L'):
+                    # Longer edge resize (no upscaling) - MUST MATCH conversion logic
+                    if input_path:
+                        target_longer_edge = int(current_resize[1:])
+                        orig_w, orig_h = get_image_dimensions(input_path)
+                        if orig_w > 0 and orig_h > 0:
+                            longer_edge = max(orig_w, orig_h)
+                            # Don't upscale if longer edge is already smaller than target
+                            if longer_edge >= target_longer_edge:
+                                if orig_w > orig_h:
+                                    # Width is longer: scale by width (matches conversion line 811)
+                                    new_w = target_longer_edge
+                                    new_w = new_w if new_w % 2 == 0 else new_w - 1
+                                    # Calculate height maintaining aspect ratio (FFmpeg does this with -1)
+                                    new_h = int((new_w * orig_h) / orig_w)
+                                    new_h = new_h if new_h % 2 == 0 else new_h - 1
+                                else:
+                                    # Height is longer: calculate width (matches conversion line 814-816)
+                                    ratio = target_longer_edge / orig_h
+                                    new_w = int(orig_w * ratio)
+                                    new_w = new_w if new_w % 2 == 0 else new_w - 1
+                                    new_h = target_longer_edge
+                                    new_h = new_h if new_h % 2 == 0 else new_h - 1
+                                print(f"DEBUG SUFFIX: Portrait image - orig={orig_w}x{orig_h}, target={target_longer_edge}, calculated={new_w}x{new_h}")
+                                suffixes.append(f"size{new_w}x{new_h}")
+                            else:
+                                # No resize needed (no upscaling)
+                                suffixes.append(f"size{orig_w}x{orig_h}")
+                        else:
+                            # Fallback to longer edge notation if dimensions can't be determined
+                            suffixes.append(f"sizeLonger{current_resize[1:]}")
+                    else:
+                        # Fallback to longer edge notation if no input path
+                        suffixes.append(f"sizeLonger{current_resize[1:]}")
                 else:
                     # Calculate actual output dimensions for pixel width resize (maintain aspect ratio)
                     if input_path:
@@ -1679,6 +1863,43 @@ class ConversionEngine(QThread):
                     else:
                         # Fallback to percent notation if no input path
                         suffixes.append(f"size{resize_value[:-1]}pc")
+                elif resize_value.startswith('L'):
+                    # Longer edge resize - same logic as images
+                    if input_path:
+                        # For GIFs from video, get video dimensions
+                        if input_path.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')):
+                            orig_w, orig_h = get_video_dimensions(input_path)
+                        else:
+                            orig_w, orig_h = get_image_dimensions(input_path)
+                        
+                        if orig_w > 0 and orig_h > 0:
+                            target_longer_edge = int(resize_value[1:])
+                            longer_edge = max(orig_w, orig_h)
+                            # Don't upscale if longer edge is already smaller than target
+                            if longer_edge >= target_longer_edge:
+                                if orig_w > orig_h:
+                                    # Width is longer
+                                    new_w = target_longer_edge
+                                    new_w = new_w if new_w % 2 == 0 else new_w - 1
+                                    new_h = int((new_w * orig_h) / orig_w)
+                                    new_h = new_h if new_h % 2 == 0 else new_h - 1
+                                else:
+                                    # Height is longer
+                                    ratio = target_longer_edge / orig_h
+                                    new_w = int(orig_w * ratio)
+                                    new_w = new_w if new_w % 2 == 0 else new_w - 1
+                                    new_h = target_longer_edge
+                                    new_h = new_h if new_h % 2 == 0 else new_h - 1
+                                suffixes.append(f"size{new_w}x{new_h}")
+                            else:
+                                # No resize needed (no upscaling)
+                                suffixes.append(f"size{orig_w}x{orig_h}")
+                        else:
+                            # Fallback to longer edge notation if dimensions can't be determined
+                            suffixes.append(f"sizeLonger{resize_value[1:]}")
+                    else:
+                        # Fallback to longer edge notation if no input path
+                        suffixes.append(f"sizeLonger{resize_value[1:]}")
                 else:
                     # Calculate actual output dimensions for pixel width resize (maintain aspect ratio)
                     if input_path:
@@ -1752,6 +1973,35 @@ class ConversionEngine(QThread):
                 else:
                     # Fallback to percent notation if dimensions can't be determined
                     suffixes.append(f"size{resize[:-1]}pc")
+            elif resize.startswith('L'):
+                # Longer edge resize (no upscaling) - MUST MATCH conversion logic
+                target_longer_edge = int(resize[1:])
+                orig_w, orig_h = get_image_dimensions(input_path)
+                if orig_w > 0 and orig_h > 0:
+                    longer_edge = max(orig_w, orig_h)
+                    # Don't upscale if longer edge is already smaller than target
+                    if longer_edge >= target_longer_edge:
+                        if orig_w > orig_h:
+                            # Width is longer: scale by width (matches conversion line 811)
+                            new_w = target_longer_edge
+                            new_w = new_w if new_w % 2 == 0 else new_w - 1
+                            # Calculate height maintaining aspect ratio (FFmpeg does this with -1)
+                            new_h = int((new_w * orig_h) / orig_w)
+                            new_h = new_h if new_h % 2 == 0 else new_h - 1
+                        else:
+                            # Height is longer: calculate width (matches conversion line 814-816)
+                            ratio = target_longer_edge / orig_h
+                            new_w = int(orig_w * ratio)
+                            new_w = new_w if new_w % 2 == 0 else new_w - 1
+                            new_h = target_longer_edge
+                            new_h = new_h if new_h % 2 == 0 else new_h - 1
+                        suffixes.append(f"size{new_w}x{new_h}")
+                    else:
+                        # No resize needed (no upscaling)
+                        suffixes.append(f"size{orig_w}x{orig_h}")
+                else:
+                    # Fallback to longer edge notation if dimensions can't be determined
+                    suffixes.append(f"sizeLonger{resize[1:]}")
             else:
                 # Calculate actual output dimensions for pixel width resize (maintain aspect ratio)
                 original_width, original_height = get_image_dimensions(input_path)
@@ -2099,6 +2349,33 @@ class ConversionEngine(QThread):
                     # Fallback to percent notation if dimensions can't be determined
                     percent_val = size_variant[:-1].replace('.', '_')
                     variant_parts.append(f"{percent_val}p")
+            elif size_variant.startswith('L'):
+                # Longer edge resize (no upscaling) - use same logic as conversion
+                target_longer_edge = int(size_variant[1:])
+                original_width, original_height = get_video_dimensions(file_path)
+                if original_width > 0 and original_height > 0:
+                    longer_edge = max(original_width, original_height)
+                    # Don't upscale if longer edge is already smaller than target
+                    if longer_edge >= target_longer_edge:
+                        if original_width > original_height:
+                            # Width is longer: scale by width
+                            output_width = target_longer_edge
+                            output_height = int((target_longer_edge * original_height) / original_width)
+                        else:
+                            # Height is longer: calculate width to maintain aspect ratio
+                            ratio = target_longer_edge / original_height
+                            output_width = int(original_width * ratio)
+                            output_height = target_longer_edge
+                        # Ensure even dimensions
+                        output_width = output_width if output_width % 2 == 0 else output_width - 1
+                        output_height = output_height if output_height % 2 == 0 else output_height - 1
+                        variant_parts.append(f"{output_width}x{output_height}")
+                    else:
+                        # No resize needed (no upscaling)
+                        variant_parts.append(f"{original_width}x{original_height}")
+                else:
+                    # Fallback to longer edge notation if dimensions can't be determined
+                    variant_parts.append(f"L{target_longer_edge}")
             else:
                 # Calculate actual output dimensions for pixel width resize (maintain aspect ratio)
                 original_width, original_height = get_video_dimensions(file_path)
