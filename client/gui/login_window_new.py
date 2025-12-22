@@ -14,8 +14,8 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QFrame, QCheckBox, QMessageBox, QApplication, QWidget
 )
-from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal, QPoint, QByteArray
-from PyQt6.QtGui import QFont, QIcon, QPixmap, QColor, QPainter, QPalette
+from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal, QPoint, QByteArray, QUrl, QThread
+from PyQt6.QtGui import QFont, QIcon, QPixmap, QColor, QPainter, QPalette, QImage
 from PyQt6.QtSvgWidgets import QSvgWidget
 from PyQt6.QtSvg import QSvgRenderer
 from client.utils.font_manager import AppFonts, FONT_FAMILY
@@ -453,7 +453,95 @@ class LoginMessage(QWidget):
     def add_content(self, widget):
         """Add custom content widget to the message"""
         self.layout().addWidget(widget)
+
+
+class VideoPlaybackThread(QThread):
+    """Thread for playing video frames using OpenCV"""
+    finished = pyqtSignal()
+    frame_ready = pyqtSignal(object)  # Emit QPixmap for thread-safe display
     
+    def __init__(self, video_path, video_widget, duration_ms=None, frame_size=(422, 750)):
+        super().__init__()
+        self.video_path = video_path
+        self.video_widget = video_widget
+        self.duration_ms = duration_ms  # None means loop forever
+        self.frame_size = frame_size  # (width, height) for frame resizing
+        self.is_running = True
+        # Note: Signal connection should be done externally by the parent widget
+        # to avoid multiple connections. Internal connection removed.
+    
+    def run(self):
+        """Play video for specified duration or loop indefinitely"""
+        try:
+            import cv2
+            import time
+            
+            cap = cv2.VideoCapture(self.video_path)
+            if not cap.isOpened():
+                print(f"❌ Failed to open video: {self.video_path}")
+                self.finished.emit()
+                return
+            
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            frame_delay = 1000 / fps if fps > 0 else 33  # milliseconds
+            start_time = time.time() * 1000  # current time in ms
+            
+            if self.duration_ms:
+                print(f"▶️  Video playback started - FPS: {fps}, Frame delay: {frame_delay}ms, Duration: {self.duration_ms}ms")
+            else:
+                print(f"▶️  Video playback started (looping) - FPS: {fps}, Frame delay: {frame_delay}ms")
+            
+            while self.is_running:
+                elapsed_ms = (time.time() * 1000) - start_time if self.duration_ms else 0
+                
+                # Stop if we've exceeded the duration (if duration is specified)
+                if self.duration_ms and elapsed_ms > self.duration_ms:
+                    print(f"⏹️  Video playback duration complete ({self.duration_ms}ms)")
+                    break
+                
+                ret, frame = cap.read()
+                if not ret:
+                    # Loop video if it ends
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                
+                # Resize frame to fit the video widget
+                frame = cv2.resize(frame, self.frame_size)
+                
+                # Convert BGR to RGB
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                
+                # Convert to QPixmap
+                h, w, ch = frame_rgb.shape
+                bytes_per_line = ch * w
+                q_frame = QPixmap.fromImage(
+                    QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+                )
+                
+                # Emit signal to update frame safely in GUI thread
+                self.frame_ready.emit(q_frame)
+                
+                # Small delay to maintain FPS
+                time.sleep(frame_delay / 1000)
+            
+            cap.release()
+            print(f"✅ Video playback thread completed")
+        except ImportError:
+            print(f"❌ OpenCV (cv2) not installed. Install with: pip install opencv-python")
+        except Exception as e:
+            print(f"❌ Error in video playback: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            self.finished.emit()
+    
+    def stop(self):
+        """Stop video playback"""
+        self.is_running = False
+
+
 class ModernLoginWindow(QDialog):
     """Modern login window with split layout"""
     login_requested = pyqtSignal(str, str)  # email, license_key
@@ -468,12 +556,15 @@ class ModernLoginWindow(QDialog):
         self.waiting_for_response = False
         self.message_stable = True  # Flag to prevent premature Enter resets
         self.server_health_checker = ServerHealthChecker()
+        self.media_player = None  # Video player reference
+        self.video_widget = None  # Video display widget
+        self.final_image_pixmap = None  # Store final image after video
         
         self.setWindowTitle("ImgApp - Login")
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
-        self.setGeometry(100, 100, 1000, 750)
-        self.setMinimumSize(1000, 750)
-        self.setMaximumSize(1000, 750)
+        self.setGeometry(100, 100, 872, 750)
+        self.setMinimumSize(872, 750)
+        self.setMaximumSize(872, 750)
         
         # Center window on screen
         self.center_on_screen()
@@ -535,18 +626,22 @@ class ModernLoginWindow(QDialog):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         
-        # LEFT SECTION - Media Display (550x750)
+        # LEFT SECTION - Media Display with Video Player (422x750)
         self.media_section = QFrame()
-        self.media_section.setFixedSize(550, 750)
+        self.media_section.setFixedSize(422, 750)
         self.media_section.setStyleSheet("background-color: #000000;")
         media_layout = QVBoxLayout(self.media_section)
-        media_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        media_layout.setContentsMargins(0, 0, 0, 0)
+        media_layout.setSpacing(0)
         
-        media_placeholder = QLabel("Media Display")
-        media_placeholder.setFont(QFont(FONT_FAMILY, 24, QFont.Weight.Bold))
-        media_placeholder.setStyleSheet("color: #ffffff;")
-        media_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        media_layout.addWidget(media_placeholder)
+        # Create video widget for displaying MP4 animation using QLabel
+        self.video_widget = QLabel()
+        self.video_widget.setStyleSheet("background-color: #000000;")
+        self.video_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        media_layout.addWidget(self.video_widget)
+        
+        # Load and play the animation video
+        self.load_media_animation()
         
         main_layout.addWidget(self.media_section)
         
@@ -2380,6 +2475,122 @@ class ModernLoginWindow(QDialog):
         except Exception as e:
             print(f"🔍 DEBUG [eventFilter]: Exception: {e}")
         return super().eventFilter(obj, event)
+
+    def load_media_animation(self):
+        """Load and start playing the login animation video using OpenCV"""
+        try:
+            # Get path to the animation file
+            animation_path = os.path.join(
+                os.path.dirname(__file__), 
+                '..', 'assets', 'animations', 'login_anim.mp4'
+            )
+            
+            animation_path = os.path.abspath(animation_path)
+            
+            if os.path.exists(animation_path):
+                print(f"📁 Animation path: {animation_path}")
+                print(f"📁 File exists: {os.path.exists(animation_path)}")
+                
+                # Calculate video duration using OpenCV
+                import cv2
+                cap = cv2.VideoCapture(animation_path)
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                cap.release()
+                
+                duration_ms = int((frame_count / fps) * 1000) if fps > 0 else None
+                print(f"📹 Video duration: {duration_ms}ms ({duration_ms/1000:.1f}s)")
+                
+                # Start video playback in a separate thread with calculated duration
+                self.video_thread = VideoPlaybackThread(animation_path, self.video_widget, duration_ms=duration_ms)
+                # Connect frame signal manually for thread-safe updates
+                self.video_thread.frame_ready.connect(self._on_login_frame_ready)
+                self.video_thread.finished.connect(self._on_video_playback_finished)
+                self.video_thread.start()
+                print(f"✅ Login animation started")
+            else:
+                print(f"⚠️  Animation file not found: {animation_path}")
+                self.show_placeholder_image()
+        except Exception as e:
+            print(f"❌ Error loading animation: {e}")
+            import traceback
+            traceback.print_exc()
+            self.show_placeholder_image()
+    
+    def _on_video_playback_finished(self):
+        """Called when video playback finishes after 4 seconds"""
+        try:
+            print(f"⏹️  Video playback finished, showing placeholder")
+            self.show_placeholder_image()
+        except Exception as e:
+            print(f"❌ Error after video playback: {e}")
+            self.show_placeholder_image()
+    
+    def _on_login_frame_ready(self, pixmap):
+        """Slot to handle frame display updates from video thread for login animation"""
+        if pixmap and isinstance(self.video_widget, QLabel):
+            self.video_widget.setPixmap(pixmap)
+    
+    
+    def on_video_status_changed(self, status):
+        """Handle video status changes (deprecated - using OpenCV now)"""
+        pass
+    
+    def on_playback_state_changed(self, state):
+        """Handle playback state changes (deprecated - using OpenCV now)"""
+        pass
+    
+    def show_placeholder_image(self):
+        """Display a static placeholder image after video ends"""
+        try:
+            # Try to load a placeholder image from assets
+            placeholder_path = os.path.join(
+                os.path.dirname(__file__), 
+                '..', 'assets', 'images', 'login_placeholder.png'
+            )
+            
+            placeholder_path = os.path.abspath(placeholder_path)
+            
+            if os.path.exists(placeholder_path):
+                # Create label with image
+                image_label = QLabel()
+                pixmap = QPixmap(placeholder_path)
+                # Scale to fit the media section exactly (422x750)
+                scaled_pixmap = pixmap.scaledToHeight(750, Qt.TransformationMode.SmoothTransformation)
+                image_label.setPixmap(scaled_pixmap)
+                image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                
+                # Replace video widget with image label
+                media_layout = self.media_section.layout()
+                media_layout.replaceWidget(self.video_widget, image_label)
+                self.video_widget.hide()
+                image_label.show()
+                
+                print(f"✅ Placeholder image displayed: {placeholder_path}")
+            else:
+                # Show black background with a simple label
+                print(f"⚠️  Placeholder image not found: {placeholder_path}")
+                self.show_simple_placeholder()
+        except Exception as e:
+            print(f"❌ Error displaying placeholder: {e}")
+            self.show_simple_placeholder()
+    
+    def show_simple_placeholder(self):
+        """Show a simple text placeholder"""
+        try:
+            label = QLabel("ImgApp")
+            label.setFont(QFont(FONT_FAMILY, 48, QFont.Weight.Bold))
+            label.setStyleSheet("color: #ffffff;")
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            
+            media_layout = self.media_section.layout()
+            media_layout.replaceWidget(self.video_widget, label)
+            self.video_widget.hide()
+            label.show()
+            
+            print(f"✅ Simple placeholder displayed")
+        except Exception as e:
+            print(f"❌ Error showing simple placeholder: {e}")
 
 
 if __name__ == "__main__":

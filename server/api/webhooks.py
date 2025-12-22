@@ -404,6 +404,7 @@ def trial_check_eligibility():
         }), 500
 
 @webhook_bp.route('/trial/create', methods=['POST'])
+@webhook_bp.route('/trial/create', methods=['POST'])
 def trial_create():
     """Create a new trial license
     
@@ -438,10 +439,13 @@ def trial_create():
                 "required": ["email", "hardware_id"]
             }), 400
         
+        logger.info(f"📝 Trial creation request: email={email}, hardware_id={hardware_id}")
+        
         # Create trial license
         result = license_manager.create_trial_license(email, hardware_id, device_name)
         
         if result['success']:
+            logger.info(f"✅ Trial created successfully: {result['license_key'][:8]}...")
             # Send trial-specific activation email
             try:
                 email_service.send_trial_email(email, result['license_key'])
@@ -450,6 +454,8 @@ def trial_create():
             
             return jsonify(result), 201
         else:
+            # Trial creation was rejected
+            logger.warning(f"⚠️ Trial creation rejected: {result.get('error')} - {result.get('message')}")
             return jsonify(result), 400
         
     except Exception as e:

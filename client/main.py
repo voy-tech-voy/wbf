@@ -9,9 +9,9 @@ import time
 import os
 import shutil
 from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QMessageBox, QDialog
-from PyQt6.QtGui import QPixmap, QColor, QPainter
-from PyQt6.QtCore import Qt, QRect
-from client.gui.login_window_new import ModernLoginWindow
+from PyQt6.QtGui import QPixmap, QColor, QPainter, QFont
+from PyQt6.QtCore import Qt, QRect, QTimer
+from client.gui.login_window_new import ModernLoginWindow, VideoPlaybackThread
 from client.gui.main_window import MainWindow
 from client.utils.font_manager import AppFonts
 from client.version import get_version, APP_NAME
@@ -53,79 +53,51 @@ def set_dark_title_bar(window):
 
 
 class ToolLoadingWindow(QWidget):
-    """Lightweight frameless splash shown while bundled tools initialize."""
+    """Super simple splash window - just displays splash_pic.jpg"""
 
     def __init__(self, version_text: str):
         super().__init__()
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setFixedSize(600, 400)
-
-        # Create a main label to hold the splash image/content
-        self.content_label = QLabel(self)
-        self.content_label.setFixedSize(600, 400)
-        self.content_label.setStyleSheet(
-            "background-color: #1e1e1e;"
-            "border-radius: 15px;"
-            "border: 2px solid #333333;"
-        )
-        self.content_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        # Try to load splash image
+        
+        # Load splash image
         from client.utils.resource_path import get_resource_path
+        img_path = get_resource_path('client/assets/images/splash_pic.jpg')
         
-        splash_path = get_resource_path('client/assets/splash.png')
-        if not os.path.exists(splash_path):
-            splash_path = get_resource_path('client/assets/splash.jpg')
+        if not os.path.exists(img_path):
+            print(f"❌ Splash image not found: {img_path}")
+            sys.exit(1)
         
-        if os.path.exists(splash_path):
-            pix = QPixmap(splash_path)
-            if not pix.isNull():
-                self.content_label.setPixmap(pix.scaled(600, 400, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-        else:
-            # Create placeholder splash
-            pix = QPixmap(600, 400)
-            pix.fill(QColor("#1e1e1e"))
-            
-            painter = QPainter(pix)
-            painter.setRenderHint(QPainter.Antialiasing)
-            
-            # Draw App Icon
-            from client.utils.resource_path import get_app_icon_path
-            icon_path = get_app_icon_path()
-            if os.path.exists(icon_path):
-                icon_pix = QPixmap(icon_path)
-                icon_size = 128
-                icon_pix = icon_pix.scaled(icon_size, icon_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-                painter.drawPixmap((600 - icon_size) // 2, 80, icon_pix)
-            
-            # Draw App Name
-            painter.setPen(QColor("#ffffff"))
-            font = painter.font()
-            font.setFamily("Segoe UI")
-            font.setPointSize(28)
-            font.setBold(True)
-            painter.setFont(font)
-            
-            text_rect = QRect(0, 230, 600, 50)
-            painter.drawText(text_rect, Qt.AlignCenter, APP_NAME)
-            
-            # Draw Version
-            font.setPointSize(12)
-            font.setBold(False)
-            painter.setFont(font)
-            painter.setPen(QColor("#aaaaaa"))
-            
-            version_rect = QRect(0, 280, 600, 30)
-            painter.drawText(version_rect, Qt.AlignCenter, f"Version {version_text}")
-            
-            # Draw Loading Status
-            painter.setPen(QColor("#4CAF50"))
-            status_rect = QRect(0, 340, 600, 30)
-            painter.drawText(status_rect, Qt.AlignCenter, "Initializing Environment...")
-            
-            painter.end()
-            self.content_label.setPixmap(pix)
+        pixmap = QPixmap(img_path)
+        if pixmap.isNull():
+            print(f"❌ Failed to load splash image")
+            sys.exit(1)
+        
+        print(f"📷 Pixmap loaded: {pixmap.width()}x{pixmap.height()}, isNull: {pixmap.isNull()}")
+        
+        # Scale to 50% size
+        scale_factor = .8
+        width = int(pixmap.width() * scale_factor)
+        height = int(pixmap.height() * scale_factor)
+        scaled_pixmap = pixmap.scaled(width, height, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        self.setFixedSize(width, height)
+        
+        # Frameless, always on top
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
+        
+        # Center on screen
+        screen = QApplication.primaryScreen().geometry()
+        self.move(
+            (screen.width() - width) // 2,
+            (screen.height() - height) // 2
+        )
+        
+        # Create label to display the pixmap
+        label = QLabel(self)
+        label.setFixedSize(width, height)
+        label.setPixmap(scaled_pixmap)
+        label.setScaledContents(False)  # Don't scale, show at exact size
+        
+        print(f"✅ Splash window created: {width}x{height}")
+
 
 def main():
     """Main application entry point with comprehensive error handling"""
@@ -215,13 +187,24 @@ def main():
         version_text = get_version()
         splash = ToolLoadingWindow(version_text)
         splash.show()
-        app.processEvents()
+        splash.raise_()
+        splash.activateWindow()
         
-        # Record start time to ensure minimum display duration
+        # Force the splash to render
+        splash.update()
+        splash.repaint()
+        for _ in range(5):
+            QApplication.processEvents()
+        
+        print(f"🪟 Splash visible: {splash.isVisible()}")
+        
+        # Record start time
         splash_start_time = time.time()
         
         try:
+            # Initialize bundled tools with splash visible
             init_bundled_tools()
+            QApplication.processEvents()  # Keep splash responsive
             
             # Check for FFmpeg (Critical for Lite versions)
             if not os.environ.get('FFMPEG_BINARY'):
@@ -240,13 +223,21 @@ def main():
                         "Please install FFmpeg or use the Full version.")
                     sys.exit(1)
             
-            # Ensure splash is displayed for at least 2 seconds
+            # Wait for video to finish
+            if hasattr(splash, 'video_thread') and splash.video_thread and splash.video_thread.isRunning():
+                print("⏳ Waiting for video...")
+                splash.video_thread.wait()
+                print("✅ Video complete")
+            
+            # Ensure splash displays for at least 2 seconds
             elapsed = time.time() - splash_start_time
             if elapsed < 2.0:
                 time.sleep(2.0 - elapsed)
                     
         finally:
+            # Close splash when app is fully loaded
             splash.close()
+            print("✅ Application fully loaded, splash closed")
 
         window = MainWindow(is_trial=is_trial)
         set_dark_title_bar(window)  # Apply dark title bar to main window

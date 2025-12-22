@@ -1,7 +1,7 @@
 {
-  "version": "8.5",
-  "build": 13,
-  "last_build": "2025-12-19T14:29:45.230374Z",
+  "version": "8.6",
+  "build": 14,
+  "last_build": "2025-12-22T18:13:58.644052Z",
   "changelog": {
     "7.4": "Phase 1 enterprise implementation (backup system, trial conversion, server health)",
     "7.3": "Login error UX improvements (inline errors, removed popups)",
@@ -17,6 +17,7 @@
     "8.2": "Build 2025-12-19",
     "8.3": "Build 2025-12-19",
     "8.4": "Build 2025-12-19",
-    "8.5": "Build 2025-12-19"
+    "8.5": "Build 2025-12-19",
+    "8.6": "Build 2025-12-22"
   }
 }

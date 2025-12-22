@@ -168,52 +168,88 @@ class LicenseManager:
             hardware_id: Device hardware ID
         
         Returns:
-            dict: {'eligible': bool, 'reason': str}
+            dict: {'eligible': bool, 'reason': str, 'message': str}
         """
         try:
             # Check trials.json for existing trials
             trials = self.load_trials()
+            now = datetime.now()
             
             # Check if trial already exists for this email
             for trial_key, trial_data in trials.items():
                 if trial_data.get('email') == email:
-                    # Check if trial is still active (not expired)
-                    expiry = datetime.fromisoformat(trial_data['expiry_date'])
-                    if datetime.now() < expiry:
+                    # Check is_active flag first (most important)
+                    is_active = trial_data.get('is_active', False)
+                    
+                    if is_active:
+                        logger.warning(f"❌ Trial creation rejected: Email {email} has active trial {trial_key[:8]}...")
                         return {
                             'eligible': False,
                             'reason': 'trial_already_used_email',
                             'message': 'You have already used your free trial'
                         }
+                    
+                    # Also check expiry date as backup
+                    try:
+                        expiry = datetime.fromisoformat(trial_data['expiry_date'])
+                        if now < expiry:
+                            logger.warning(f"❌ Trial creation rejected: Email {email} has non-expired trial {trial_key[:8]}...")
+                            return {
+                                'eligible': False,
+                                'reason': 'trial_already_used_email',
+                                'message': 'You have already used your free trial'
+                            }
+                    except ValueError as e:
+                        logger.error(f"Invalid expiry_date format for trial {trial_key}: {e}")
             
             # Check if trial already exists for this hardware_id
             for trial_key, trial_data in trials.items():
                 if trial_data.get('hardware_id') == hardware_id:
-                    # Check if trial is still active (not expired)
-                    expiry = datetime.fromisoformat(trial_data['expiry_date'])
-                    if datetime.now() < expiry:
+                    # Check is_active flag first (most important)
+                    is_active = trial_data.get('is_active', False)
+                    
+                    if is_active:
+                        logger.warning(f"❌ Trial creation rejected: Hardware {hardware_id} has active trial {trial_key[:8]}...")
                         return {
                             'eligible': False,
                             'reason': 'trial_already_used_device',
-                            'message': 'This device has already been used for a free trial'
+                            'message': 'You already used your free trial.'
                         }
+                    
+                    # Also check expiry date as backup
+                    try:
+                        expiry = datetime.fromisoformat(trial_data['expiry_date'])
+                        if now < expiry:
+                            logger.warning(f"❌ Trial creation rejected: Hardware {hardware_id} has non-expired trial {trial_key[:8]}...")
+                            return {
+                                'eligible': False,
+                                'reason': 'trial_already_used_device',
+                                'message': 'You already used your free trial.'
+                            }
+                    except ValueError as e:
+                        logger.error(f"Invalid expiry_date format for trial {trial_key}: {e}")
             
             # Also check if user already has a full license
             licenses = self.load_licenses()
             for license_key, license_data in licenses.items():
                 if license_data.get('email') == email and license_data.get('is_active'):
                     # Check if it's NOT a trial (full license)
-                    created = datetime.fromisoformat(license_data['created_date'])
-                    expiry = datetime.fromisoformat(license_data['expiry_date'])
-                    days_diff = (expiry - created).days
-                    
-                    if days_diff > 1:  # It's a full license, not a trial
-                        return {
-                            'eligible': False,
-                            'reason': 'already_has_license',
-                            'message': 'You already have a full license. Please log in with your license key.'
-                        }
+                    try:
+                        created = datetime.fromisoformat(license_data['created_date'])
+                        expiry = datetime.fromisoformat(license_data['expiry_date'])
+                        days_diff = (expiry - created).days
+                        
+                        if days_diff > 1:  # It's a full license, not a trial
+                            logger.warning(f"❌ Trial creation rejected: Email {email} already has full license {license_key[:8]}...")
+                            return {
+                                'eligible': False,
+                                'reason': 'already_has_license',
+                                'message': 'You already have a full license. Please log in with your license key.'
+                            }
+                    except ValueError as e:
+                        logger.error(f"Invalid date format for license {license_key}: {e}")
             
+            logger.info(f"✅ Trial eligibility check PASSED: {email} (hardware: {hardware_id})")
             return {
                 'eligible': True,
                 'message': 'User is eligible for a trial'
@@ -241,9 +277,11 @@ class LicenseManager:
             dict: {'success': bool, 'license_key': str, 'error': str}
         """
         try:
-            # Check eligibility first
+            # Check eligibility first - THIS IS CRITICAL
             eligibility = self.check_trial_eligibility(email, hardware_id)
             if not eligibility['eligible']:
+                logger.error(f"❌ Trial creation REJECTED: {email} - Reason: {eligibility.get('reason')}")
+                logger.error(f"   Message: {eligibility.get('message')}")
                 return {
                     'success': False,
                     'error': eligibility['reason'],
