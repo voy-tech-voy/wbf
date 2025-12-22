@@ -459,6 +459,7 @@ class VideoPlaybackThread(QThread):
     """Thread for playing video frames using OpenCV"""
     finished = pyqtSignal()
     frame_ready = pyqtSignal(object)  # Emit QPixmap for thread-safe display
+    last_frame_captured = pyqtSignal(object)  # Emit last frame when video ends
     
     def __init__(self, video_path, video_widget, duration_ms=None, frame_size=(422, 750)):
         super().__init__()
@@ -467,6 +468,7 @@ class VideoPlaybackThread(QThread):
         self.duration_ms = duration_ms  # None means loop forever
         self.frame_size = frame_size  # (width, height) for frame resizing
         self.is_running = True
+        self.last_frame = None  # Store the last frame to emit when video ends
         # Note: Signal connection should be done externally by the parent widget
         # to avoid multiple connections. Internal connection removed.
     
@@ -520,11 +522,19 @@ class VideoPlaybackThread(QThread):
                     QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
                 )
                 
+                # Store as last frame (will emit when video ends)
+                self.last_frame = q_frame
+                
                 # Emit signal to update frame safely in GUI thread
                 self.frame_ready.emit(q_frame)
                 
                 # Small delay to maintain FPS
                 time.sleep(frame_delay / 1000)
+            
+            # Emit the last frame so it stays displayed after video ends
+            if self.last_frame:
+                print(f"📸 Holding last video frame")
+                self.last_frame_captured.emit(self.last_frame)
             
             cap.release()
             print(f"✅ Video playback thread completed")
@@ -559,6 +569,7 @@ class ModernLoginWindow(QDialog):
         self.media_player = None  # Video player reference
         self.video_widget = None  # Video display widget
         self.final_image_pixmap = None  # Store final image after video
+        self._elements_hidden = False  # Track if login elements are hidden
         
         self.setWindowTitle("ImgApp - Login")
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
@@ -594,9 +605,50 @@ class ModernLoginWindow(QDialog):
         except:
             self.overlay_widget = None
 
+    def _hide_login_elements(self):
+        """Hide all login elements except logo and store buttons"""
+        # Hide email, license key inputs
+        self.email_input.setVisible(False)
+        self.license_input.setVisible(False)
+        
+        # Hide checkbox, forgot button, login button, trial button
+        self.auto_login_cb.setVisible(False)
+        self.forgot_btn.setVisible(False)
+        self.login_btn.setVisible(False)
+        self.trial_btn.setVisible(False)
+        
+        # Keep app name label visible (don't hide it)
+        # self.app_name_label.setVisible(False)
+        
+        # Store visibility state for restoration
+        self._elements_hidden = True
+    
+    def _show_login_elements(self):
+        """Show all hidden login elements"""
+        # Show email, license key inputs
+        self.email_input.setVisible(True)
+        self.license_input.setVisible(True)
+        
+        # Show checkbox, forgot button, login button, trial button
+        self.auto_login_cb.setVisible(True)
+        self.forgot_btn.setVisible(True)
+        self.login_btn.setVisible(True)
+        self.trial_btn.setVisible(True)
+        
+        # App name label stays visible (never was hidden)
+        # self.app_name_label.setVisible(True)
+        
+        # Update visibility state
+        self._elements_hidden = False
+
     def _show_centered_message(self, message_widget):
-        """Show a message centered within the login section using an overlay."""
+        """Show a message centered within the login section using an overlay.
+        Hides all login elements except logo and store buttons."""
         self._remove_message_overlay()
+        
+        # Hide login form elements
+        self._hide_login_elements()
+        
         overlay = QWidget(self.login_section)
         overlay.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         overlay.setStyleSheet("background: transparent;")
@@ -649,55 +701,20 @@ class ModernLoginWindow(QDialog):
         self.login_section = QFrame()
         self.login_section.setFixedSize(450, 750)
         login_layout = QVBoxLayout(self.login_section)
-        login_layout.setContentsMargins(30, 5, 30, 30)
+        login_layout.setContentsMargins(30, 25, 30, 30)  # Increased top margin from 5 to 25 (20px padding)
         login_layout.setSpacing(0)
         
         # Top bar with theme toggle (left) and close button (right)
         top_bar_layout = QHBoxLayout()
-        top_bar_layout.setContentsMargins(0, 0, 0, 0)
+        top_bar_layout.setContentsMargins(0, 0, -40, 0)  # Right margin to move close button to corner
         
-        # Dark mode toggle button (sun/moon icon) - left side
-        # DISABLED: Toggle functionality commented out as requested
-        # self.theme_toggle_btn = QPushButton()
-        # self.theme_toggle_btn.setFixedSize(30, 30)
-        # self.theme_toggle_btn.setFlat(True)
-        # self.theme_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        # self.theme_toggle_btn.setStyleSheet(
-        #     "QPushButton { background: transparent; border: none; }"
-        #     "QPushButton:hover { background: rgba(0, 0, 0, 0.1); border-radius: 4px; }"
-        # )
-        # # Load SVG icon
-        # try:
-        #     svg_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'icons', 'sun-moon.svg')
-        #     if os.path.exists(svg_path):
-        #         icon = QIcon(svg_path)
-        #         self.theme_toggle_btn.setIcon(icon)
-        #         self.theme_toggle_btn.setIconSize(QSize(24, 24))
-        # except:
-        #     # Fallback to emoji if SVG not found
-        #     self.theme_toggle_btn.setText("☀️" if self.is_dark_mode() else "🌙")
-        #     self.theme_toggle_btn.setFont(QFont(FONT_FAMILY, 16))
-        # self.theme_toggle_btn.clicked.connect(self.toggle_dark_mode)
-        # top_bar_layout.addWidget(self.theme_toggle_btn)
+        # Dark mode toggle button - will be positioned at main window level
         
         # Stretch in middle
         top_bar_layout.addStretch()
         
-        # Close button on right side
-        close_btn = QPushButton("×")
-        close_btn.setFixedSize(30, 30)
-        close_btn.setFont(QFont(FONT_FAMILY, 18, QFont.Weight.Bold))
-        close_btn.setFlat(True)
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.setStyleSheet(
-            "QPushButton { color: #999; background: transparent; border: none; }"
-            "QPushButton:hover { color: #ccc; }"
-        )
-        close_btn.clicked.connect(self.reject)
-        top_bar_layout.addWidget(close_btn)
-        
         login_layout.addLayout(top_bar_layout)
-        login_layout.addSpacing(5)
+        # login_layout.addSpacing()
         
         # App icon and name - fixed at top
         app_header_layout = QHBoxLayout()
@@ -918,6 +935,32 @@ class ModernLoginWindow(QDialog):
         main_layout.addWidget(self.login_section)
         self.setLayout(main_layout)
         
+        # Create dark mode toggle button at main window level (COMMENTED OUT)
+        # self.theme_toggle_btn = QPushButton(self)
+        # self.theme_toggle_btn.setFixedSize(30, 30)
+        # self.theme_toggle_btn.setFlat(True)
+        # self.theme_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        # self.theme_toggle_btn.setStyleSheet(
+        #     "QPushButton { background: transparent; border: none; }"
+        #     "QPushButton:hover { background: rgba(0, 0, 0, 0.1); border-radius: 4px; }"
+        # )
+        
+        # Create close button at main window level (outside login_section)
+        # This allows it to be positioned in the top-right corner of the entire window
+        close_btn = QPushButton("×", self)
+        close_btn.setFixedSize(30, 30)
+        close_btn.setFont(QFont(FONT_FAMILY, 18, QFont.Weight.Bold))
+        close_btn.setFlat(True)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setStyleSheet(
+            "QPushButton { color: #999; background: transparent; border: none; }"
+            "QPushButton:hover { color: #ccc; }"
+        )
+        close_btn.clicked.connect(self.reject)
+        # Position at top-right corner of main window (10px from edges)
+        self.close_btn = close_btn  # Store reference for dynamic repositioning
+        self._update_close_button_position()
+        
         # Set focus to email input by default so Enter always has a target
         QTimer.singleShot(0, lambda: self.email_input.setFocus())
         
@@ -1090,25 +1133,28 @@ class ModernLoginWindow(QDialog):
         except:
             return False
     
-    def toggle_dark_mode(self):
-        """Toggle between light and dark mode"""
-        try:
-            import winreg
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-                               r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
-                               0, winreg.KEY_WRITE)
-            current = self.is_dark_mode()
-            # Set to opposite: if dark (True), set to light (1); if light (False), set to dark (0)
-            new_value = 1 if current else 0
-            winreg.SetValueEx(key, "AppsUseLightTheme", 0, winreg.REG_DWORD, new_value)
-            winreg.CloseKey(key)
-            
-            # Update UI immediately
-            self.apply_theme()
-            
-            print(f"✅ Theme toggled to {'dark' if self.is_dark_mode() else 'light'} mode")
-        except Exception as e:
-            print(f"⚠️  Could not toggle dark mode: {e}")
+    # def toggle_dark_mode(self):
+    #     """Toggle between light and dark mode (COMMENTED OUT)"""
+    #     try:
+    #         import winreg
+    #         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+    #                            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+    #                            0, winreg.KEY_WRITE)
+    #         current = self.is_dark_mode()
+    #         # Set to opposite: if dark (True), set to light (1); if light (False), set to dark (0)
+    #         new_value = 1 if current else 0
+    #         winreg.SetValueEx(key, "AppsUseLightTheme", 0, winreg.REG_DWORD, new_value)
+    #         winreg.CloseKey(key)
+    #         
+    #         # Update UI immediately
+    #         self.apply_theme()
+    #         
+    #         # Update theme toggle button emoji
+    #         self._update_theme_toggle_button()
+    #         
+    #         print(f"✅ Theme toggled to {'dark' if self.is_dark_mode() else 'light'} mode")
+    #     except Exception as e:
+    #         print(f"⚠️  Could not toggle dark mode: {e}")
     
     
     def get_config_path(self):
@@ -2119,6 +2165,9 @@ class ModernLoginWindow(QDialog):
         self.show_forgot_mode = False
         self.waiting_for_response = False
         
+        # Restore all hidden login elements
+        self._show_login_elements()
+        
         # Show all original widgets (with safety checks)
         if hasattr(self, 'email_input'):
             try:
@@ -2432,13 +2481,40 @@ class ModernLoginWindow(QDialog):
         super().mouseReleaseEvent(event)
 
     def resizeEvent(self, event):
-        """Ensure overlay always covers the login section for proper centering."""
+        """Ensure overlay always covers the login section for proper centering, and reposition buttons."""
         try:
             if hasattr(self, 'overlay_widget') and self.overlay_widget:
                 self.overlay_widget.setGeometry(self.login_section.rect())
         except:
             pass
+        
+        # Update button positions relative to window size
+        self._update_close_button_position()
+        
         super().resizeEvent(event)
+    
+    def _update_close_button_position(self):
+        """Position close button and theme toggle button relative to top-right corner of window"""
+        if hasattr(self, 'close_btn') and self.close_btn:
+            # Close button: 10px from right edge, 10px from top
+            x = self.width() - self.close_btn.width() - 10
+            y = 10
+            self.close_btn.move(x, y)
+    
+    # def _update_theme_toggle_button(self):
+    #     """Update theme toggle button based on current mode (COMMENTED OUT)"""
+    #     if hasattr(self, 'theme_toggle_btn') and self.theme_toggle_btn:
+    #         # Only update if using emoji (not SVG icon)
+    #         try:
+    #             svg_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'icons', 'sun-moon.svg')
+    #             if not os.path.exists(svg_path):
+    #                 # SVG not found, use emoji instead
+    #                 is_dark = self.is_dark_mode()
+    #                 self.theme_toggle_btn.setText("☀️" if is_dark else "🌙")
+    #         except:
+    #             # If any error, try emoji
+    #             is_dark = self.is_dark_mode()
+    #             self.theme_toggle_btn.setText("☀️" if is_dark else "🌙")
 
     def eventFilter(self, obj, event):
         """Globally intercept Enter/Return while transient messages are visible."""
@@ -2505,6 +2581,7 @@ class ModernLoginWindow(QDialog):
                 self.video_thread = VideoPlaybackThread(animation_path, self.video_widget, duration_ms=duration_ms)
                 # Connect frame signal manually for thread-safe updates
                 self.video_thread.frame_ready.connect(self._on_login_frame_ready)
+                self.video_thread.last_frame_captured.connect(self._on_login_frame_ready)  # Keep last frame
                 self.video_thread.finished.connect(self._on_video_playback_finished)
                 self.video_thread.start()
                 print(f"✅ Login animation started")
@@ -2518,10 +2595,11 @@ class ModernLoginWindow(QDialog):
             self.show_placeholder_image()
     
     def _on_video_playback_finished(self):
-        """Called when video playback finishes after 4 seconds"""
+        """Called when video playback finishes - last frame should already be displayed"""
         try:
-            print(f"⏹️  Video playback finished, showing placeholder")
-            self.show_placeholder_image()
+            print(f"⏹️  Video playback finished - last frame is held")
+            # Last frame is already being displayed by last_frame_captured signal
+            # No need to show placeholder image anymore
         except Exception as e:
             print(f"❌ Error after video playback: {e}")
             self.show_placeholder_image()

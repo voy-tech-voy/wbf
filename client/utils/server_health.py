@@ -139,6 +139,7 @@ class ServerHealthChecker:
         
         Returns:
             Dictionary with 'title', 'message', and 'action' keys
+            Action is now included in the main message as bold/prominent text
         """
         messages = {
             'online': {
@@ -148,55 +149,64 @@ class ServerHealthChecker:
             },
             'slow': {
                 'title': '⚠️ Slow Connection',
-                'message': f'{details}\n\nYour request may take longer than usual. Please be patient.',
-                'action': 'Continue anyway'
+                'message': f'{details}\n\nYour request may take longer than usual.\n\n'
+                          f'ACTION: Continue anyway',
+                'action': None
             },
             'maintenance': {
                 'title': '🔧 Maintenance Mode',
-                'message': 'The server is currently under maintenance.\n\nThis usually takes only a few minutes.',
-                'action': 'Retry in 5 minutes'
+                'message': 'The server is currently under maintenance.\n\n'
+                          f'This usually takes only a few minutes.\n\n'
+                          f'ACTION: Retry in 5 minutes',
+                'action': None
             },
             'overloaded': {
                 'title': '🚦 Server Busy',
-                'message': 'The server is handling many requests right now.\n\nPlease wait a moment and try again.',
-                'action': 'Retry in 30 seconds'
+                'message': 'The server is handling many requests right now.\n\n'
+                          f'Please wait a moment and try again.\n\n'
+                          f'ACTION: Retry in 30 seconds',
+                'action': None
             },
             'offline': {
                 'title': '❌ Server Offline',
-                'message': f'Cannot connect to the license server.\n\n{details}\n\n'
+                'message': f'{details}\n\n'
                           f'Possible reasons:\n'
-                          f'• Server maintenance (pythonanywhere.com)\n'
+                          f'• Server maintenance\n'
                           f'• Your internet connection is down\n'
                           f'• Temporary server overload\n'
-                          f'• Firewall blocking connection',
-                'action': 'Check internet connection and try again'
+                          f'• Firewall blocking connection\n\n'
+                          f'ACTION: Check internet connection and try again',
+                'action': None
             },
             'timeout': {
                 'title': '⏱️ Connection Timeout',
                 'message': f'The server is not responding.\n\n{details}\n\n'
                           f'This may be temporary. Please check:\n'
                           f'• Your internet connection\n'
-                          f'• Firewall settings',
-                'action': 'Try again in a moment'
+                          f'• Firewall settings\n\n'
+                          f'ACTION: Try again in a moment',
+                'action': None
             },
             'circuit_open': {
                 'title': '🔌 Connection Failed',
                 'message': f'{details}\n\n'
                           f'The app has stopped trying to connect after multiple failures.\n\n'
-                          f'This protects both your computer and the server.',
-                'action': 'Wait and try again'
+                          f'This protects both your computer and the server.\n\n'
+                          f'ACTION: Wait and try again',
+                'action': None
             },
             'unknown': {
                 'title': '⚠️ Unknown Error',
-                'message': f'{details}\n\nAn unexpected error occurred.',
-                'action': 'Please contact support if this persists'
+                'message': f'{details}\n\nAn unexpected error occurred.\n\n'
+                          f'ACTION: Please contact support if this persists',
+                'action': None
             }
         }
         
         return messages.get(status, {
             'title': '⚠️ Connection Issue',
-            'message': details,
-            'action': 'Please try again later'
+            'message': f'{details}\n\nACTION: Please try again later',
+            'action': None
         })
     
     def reset_circuit(self):
