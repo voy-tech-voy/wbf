@@ -697,12 +697,14 @@ class MainWindow(QMainWindow):
         <div style="text-align: center; color: {text_color};">
         <h2 style="color: {accent_color}; margin-bottom: 10px;">{APP_NAME}</h2>
         <p><b>Version:</b> {version}</p>
-        <p><b>Author:</b> <span style="color: {accent_color};">{AUTHOR}</span></p>
+        <p><b>Author:</b> <span style="color: {text_color};">{AUTHOR}</span></p>
         </div>
         <br>
         <p style="color: {text_color};">Web export simplified.</p>
         <p style="color: {text_color};">Convert files to WebM, WebP, GIF, MP4, and other formats in just a few clicks.</p>
         <p style="color: {text_color};">Built for speed, quality, and ease of use.</p>
+        <br>
+        <p style="color: {text_color};">🌐 <a href="" style="color: {accent_color}; text-decoration: none;">Visit our website</a></p>
         <br>
         <p style="color: {text_color};">This software uses FFmpeg (© FFmpeg developers) licensed under the LGPL/GPL.</p>
         <p style="color: {text_color};">© 2025 {AUTHOR}. All rights reserved.</p>

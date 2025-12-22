@@ -12,6 +12,14 @@ from typing import Tuple, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
+# Import MessageManager for centralized messages
+try:
+    from .message_manager import get_message_manager
+    MESSAGE_MANAGER_AVAILABLE = True
+except ImportError:
+    MESSAGE_MANAGER_AVAILABLE = False
+    logger.warning("MessageManager not available, using hardcoded messages")
+
 
 class ServerHealthChecker:
     """
@@ -136,11 +144,37 @@ class ServerHealthChecker:
     def get_user_message(self, status: str, details: str) -> Dict[str, str]:
         """
         Convert technical status to user-friendly message
+        Uses MessageManager if available, falls back to hardcoded messages
         
         Returns:
             Dictionary with 'title', 'message', and 'action' keys
             Action is now included in the main message as bold/prominent text
         """
+        # Try to use MessageManager for centralized messages
+        if MESSAGE_MANAGER_AVAILABLE:
+            try:
+                msg_manager = get_message_manager()
+                
+                # Map status to message keys
+                status_map = {
+                    'online': 'online',
+                    'slow': 'slow',
+                    'maintenance': 'maintenance',
+                    'overloaded': 'overloaded',
+                    'offline': 'offline',
+                    'timeout': 'timeout',
+                    'circuit_open': 'circuit_open'
+                }
+                
+                key = status_map.get(status)
+                if key:
+                    message = msg_manager.get_message('server_health', key, details=details)
+                    if message:
+                        return message
+            except Exception as e:
+                logger.warning(f"Error getting message from MessageManager: {e}, using fallback")
+        
+        # Fallback to hardcoded messages
         messages = {
             'online': {
                 'title': '✅ Connected',

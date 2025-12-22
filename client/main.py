@@ -17,6 +17,15 @@ from client.utils.font_manager import AppFonts
 from client.version import get_version, APP_NAME
 from client.core.conversion_engine import init_bundled_tools
 
+# Import MessageManager for centralized message handling
+try:
+    from client.utils.message_manager import get_message_manager
+    from client.config.app_config import SERVER_BASE_URL
+    MESSAGE_MANAGER_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: MessageManager not available: {e}")
+    MESSAGE_MANAGER_AVAILABLE = False
+
 # Import crash reporting
 try:
     from client.utils.crash_reporter import run_with_crash_protection
@@ -53,7 +62,7 @@ def set_dark_title_bar(window):
 
 
 class ToolLoadingWindow(QWidget):
-    """Super simple splash window - just displays splash_pic.jpg"""
+    """Super simple splash window - just displays splash_pic.jpg with version info"""
 
     def __init__(self, version_text: str):
         super().__init__()
@@ -96,6 +105,23 @@ class ToolLoadingWindow(QWidget):
         label.setPixmap(scaled_pixmap)
         label.setScaledContents(False)  # Don't scale, show at exact size
         
+        # Add version text in bottom right corner
+        version_label = QLabel(self)
+        version_label.setText(f"{APP_NAME} v{version_text}")
+        version_label.setStyleSheet(
+            "color: #999999; font-size: 11px; font-weight: normal;"
+        )
+        version_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
+        
+        # Position in bottom right corner with small padding
+        padding = 8
+        version_label.setGeometry(
+            width - 150,
+            height - 25,
+            145,
+            20
+        )
+        
         print(f"✅ Splash window created: {width}x{height}")
 
 
@@ -129,6 +155,19 @@ def main():
             t_app = time.perf_counter()
             print(f"[startup] QApplication created in {(t_app - t0)*1000:.1f} ms")
         app.setApplicationName(APP_NAME)
+        
+        # Initialize MessageManager early in the application lifecycle
+        if MESSAGE_MANAGER_AVAILABLE:
+            try:
+                msg_manager = get_message_manager(SERVER_BASE_URL)
+                # Attempt to fetch messages from server (non-blocking, will use cache/fallback on failure)
+                msg_manager.fetch_from_server(timeout=3)
+                if CRASH_REPORTING_AVAILABLE:
+                    log_info("MessageManager initialized successfully", "startup")
+            except Exception as e:
+                print(f"Warning: Failed to initialize MessageManager: {e}")
+                if CRASH_REPORTING_AVAILABLE:
+                    log_error(e, "message_manager_init")
         app.setApplicationVersion("1.0.0")
         
         # Set global application font - single point of control
@@ -201,47 +240,45 @@ def main():
         # Record start time
         splash_start_time = time.time()
         
-        try:
-            # Initialize bundled tools with splash visible
-            init_bundled_tools()
-            QApplication.processEvents()  # Keep splash responsive
-            
-            # Check for FFmpeg (Critical for Lite versions)
-            if not os.environ.get('FFMPEG_BINARY'):
-                # Fallback to system FFmpeg
-                system_ffmpeg = shutil.which('ffmpeg')
-                if system_ffmpeg:
-                    os.environ['FFMPEG_BINARY'] = system_ffmpeg
-                    if CRASH_REPORTING_AVAILABLE:
-                        log_info(f"Using system FFmpeg: {system_ffmpeg}", "startup")
-                else:
-                    # No FFmpeg found
-                    splash.close()
-                    QMessageBox.critical(None, "FFmpeg Missing", 
-                        "FFmpeg was not found.\n\n"
-                        "This version requires FFmpeg to be installed and available in your system PATH.\n"
-                        "Please install FFmpeg or use the Full version.")
-                    sys.exit(1)
-            
-            # Wait for video to finish
-            if hasattr(splash, 'video_thread') and splash.video_thread and splash.video_thread.isRunning():
-                print("⏳ Waiting for video...")
-                splash.video_thread.wait()
-                print("✅ Video complete")
-            
-            # Ensure splash displays for at least 2 seconds
-            elapsed = time.time() - splash_start_time
-            if elapsed < 2.0:
-                time.sleep(2.0 - elapsed)
-                    
-        finally:
-            # Close splash when app is fully loaded
-            splash.close()
-            print("✅ Application fully loaded, splash closed")
-
+        # Initialize bundled tools with splash visible
+        init_bundled_tools()
+        QApplication.processEvents()  # Keep splash responsive
+        
+        # Check for FFmpeg (Critical for Lite versions)
+        if not os.environ.get('FFMPEG_BINARY'):
+            # Fallback to system FFmpeg
+            system_ffmpeg = shutil.which('ffmpeg')
+            if system_ffmpeg:
+                os.environ['FFMPEG_BINARY'] = system_ffmpeg
+                if CRASH_REPORTING_AVAILABLE:
+                    log_info(f"Using system FFmpeg: {system_ffmpeg}", "startup")
+            else:
+                # No FFmpeg found
+                splash.close()
+                QMessageBox.critical(None, "FFmpeg Missing", 
+                    "FFmpeg was not found.\n\n"
+                    "This version requires FFmpeg to be installed and available in your system PATH.\n"
+                    "Please install FFmpeg or use the Full version.")
+                sys.exit(1)
+        
+        # Create main window in background while splash is still visible
+        print("🔨 Creating main window in background...")
         window = MainWindow(is_trial=is_trial)
         set_dark_title_bar(window)  # Apply dark title bar to main window
+        QApplication.processEvents()  # Process events during window creation
+        print("✅ Main window created")
+        
+        # Ensure splash displays for exactly 3 seconds
+        elapsed = time.time() - splash_start_time
+        if elapsed < 3.0:
+            remaining = 3.0 - elapsed
+            print(f"⏳ Waiting {remaining:.1f}s more for splash...")
+            time.sleep(remaining)
+        
+        # Close splash and show main window simultaneously
+        splash.close()
         window.show()
+        print("✅ Splash closed, main window displayed")
         
         if CRASH_REPORTING_AVAILABLE:
             log_info("Main application window displayed", "startup")

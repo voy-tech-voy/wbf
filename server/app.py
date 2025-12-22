@@ -1,6 +1,7 @@
 from flask import Flask
 from config.settings import Config
 from api import api_bp, webhook_bp
+from api.messages import messages_bp
 import logging
 
 # Configure logging
@@ -14,6 +15,7 @@ def create_app(config_class=Config):
     # Register Blueprints
     app.register_blueprint(api_bp, url_prefix='/api/v1')
     app.register_blueprint(webhook_bp, url_prefix='/api/v1/webhooks')
+    app.register_blueprint(messages_bp)  # Messages endpoint at /api/v1/messages
 
     @app.route('/', methods=['GET'])
     def health_check():
