@@ -3,11 +3,10 @@ API endpoint for serving centralized messages to clients
 """
 from flask import jsonify, Blueprint
 from server.messages import (
-    SERVER_HEALTH_MESSAGES,
+    SERVER_MESSAGES,
     LOGIN_MESSAGES,
     TRIAL_MESSAGES,
-    FORGOT_LICENSE_MESSAGES,
-    GENERAL_MESSAGES,
+    FORGOT_MESSAGES,
     get_message
 )
 
@@ -21,11 +20,10 @@ def get_all_messages():
     """
     try:
         all_messages = {
-            "server_health": SERVER_HEALTH_MESSAGES,
+            "server": SERVER_MESSAGES,
             "login": LOGIN_MESSAGES,
             "trial": TRIAL_MESSAGES,
-            "forgot_license": FORGOT_LICENSE_MESSAGES,
-            "general": GENERAL_MESSAGES
+            "forgot": FORGOT_MESSAGES
         }
         
         return jsonify({
@@ -48,11 +46,10 @@ def get_messages_by_category(category):
     """
     try:
         category_map = {
-            "server_health": SERVER_HEALTH_MESSAGES,
+            "server": SERVER_MESSAGES,
             "login": LOGIN_MESSAGES,
             "trial": TRIAL_MESSAGES,
-            "forgot_license": FORGOT_LICENSE_MESSAGES,
-            "general": GENERAL_MESSAGES
+            "forgot": FORGOT_MESSAGES
         }
         
         if category not in category_map:
