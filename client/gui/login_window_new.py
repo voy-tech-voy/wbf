@@ -588,8 +588,10 @@ class ModernLoginWindow(QDialog):
         self.esc_timer = QTimer()
 
         # Install global event filter to intercept Enter when messages are shown
+        self._global_filter_installed = False
         try:
             QApplication.instance().installEventFilter(self)
+            self._global_filter_installed = True
         except:
             pass
 
@@ -1375,7 +1377,28 @@ class ModernLoginWindow(QDialog):
                 return
         except:
             pass
+        # Remove global event filter before closing
+        self._remove_global_event_filter()
         super().accept()
+    
+    def reject(self):
+        """Override dialog reject to remove event filter before closing."""
+        self._remove_global_event_filter()
+        super().reject()
+    
+    def closeEvent(self, event):
+        """Remove global event filter when window is closed."""
+        self._remove_global_event_filter()
+        super().closeEvent(event)
+    
+    def _remove_global_event_filter(self):
+        """Remove the global event filter from QApplication."""
+        if getattr(self, '_global_filter_installed', False):
+            try:
+                QApplication.instance().removeEventFilter(self)
+                self._global_filter_installed = False
+            except:
+                pass
     
     def handle_trial(self):
         """Show trial mode UI"""

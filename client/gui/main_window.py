@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QFrame, QGroupBox, QProgressBar, QMessageBox
 )
 from PyQt6.QtGui import QIcon, QDragEnterEvent, QDropEvent, QFont, QMouseEvent, QAction
-from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QSize, pyqtSlot, pyqtProperty
 
 from .drag_drop_area import DragDropArea
 from .command_panel import CommandPanel
@@ -335,10 +335,114 @@ class MainWindow(QMainWindow):
         menubar.hide()
         
     def setup_status_bar(self):
-        """Setup the bottom status bar"""
+        """Setup the bottom status bar with progress bar above it"""
+        # Create custom progress bar with dual-layer rendering
+        from PyQt6.QtWidgets import QWidget
+        from PyQt6.QtGui import QPainter, QLinearGradient, QColor
+        from PyQt6.QtCore import Qt
+        
+        class CustomProgressBar(QWidget):
+            def __init__(self, color, height=4):
+                super().__init__()
+                self.setFixedHeight(height)
+                self.progress = 0.0 # 0.0 to 1.0
+                self.color = color
+                self._animation = None
+                
+            def set_progress(self, value, animate=True, min_duration_ms=250):
+                from PyQt6.QtCore import QPropertyAnimation, QEasingCurve, pyqtProperty
+                
+                target_value = max(0.0, min(1.0, value))
+                
+                # If not animating, set immediately
+                if not animate:
+                    if self._animation and self._animation.state() == QPropertyAnimation.State.Running:
+                        self._animation.stop()
+                    self.progress = target_value
+                    self.repaint()
+                    return
+                
+                # If new file started (target < current), reset immediately without animation
+                if target_value < self.progress - 0.1:
+                    if self._animation and self._animation.state() == QPropertyAnimation.State.Running:
+                        self._animation.stop()
+                    self.progress = target_value
+                    self.repaint()
+                    return
+                
+                # Stop current animation if running
+                if self._animation and self._animation.state() == QPropertyAnimation.State.Running:
+                    self._animation.stop()
+                
+                # Calculate animation duration based on progress distance
+                distance = abs(target_value - self.progress)
+                duration = max(min_duration_ms, int(distance * 500))  # At least min_duration_ms
+                
+                # Create smooth animation from current position
+                self._animation = QPropertyAnimation(self, b"progress_value")
+                self._animation.setDuration(duration)
+                self._animation.setStartValue(self.progress)
+                self._animation.setEndValue(target_value)
+                self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+                self._animation.start()
+            
+            @pyqtProperty(float)
+            def progress_value(self):
+                return self.progress
+            
+            @progress_value.setter
+            def progress_value(self, value):
+                self.progress = value
+                self.repaint()
+                
+            def paintEvent(self, event):
+                painter = QPainter(self)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+                rect = self.rect()
+                
+                # Background (dark)
+                painter.fillRect(rect, QColor(60, 60, 60, 80))
+                
+                width = int(rect.width() * self.progress)
+                # Ensure at least 1px visible if > 0
+                if self.progress > 0 and width == 0:
+                    width = 1
+                    
+                if width > 0:
+                    gradient = QLinearGradient(0, 0, width, 0)
+                    gradient.setColorAt(0, self.color)
+                    gradient.setColorAt(1, self.color.lighter(130))
+                    painter.fillRect(0, 0, width, rect.height(), gradient)
+                
+                painter.end()
+
+        # Progress Bar Container
+        self.progress_container = QWidget()
+        self.progress_container.setFixedHeight(8)  # Fixed 8px height container
+        progress_layout = QVBoxLayout(self.progress_container)
+        progress_layout.setContentsMargins(0, 0, 0, 0)
+        progress_layout.setSpacing(1)
+        
+        # Single File Progress (Blue, Top)
+        self.file_progress_bar = CustomProgressBar(QColor(33, 150, 243), height=3) # Blue, Slim
+        
+        # Total Progress (Green, Bottom)
+        self.total_progress_bar = CustomProgressBar(QColor(76, 175, 80), height=3) # Green
+        
+        progress_layout.addWidget(self.file_progress_bar)
+        progress_layout.addWidget(self.total_progress_bar)
+        
+        self._completed_files_count = 0
+        
+        # Add progress bar to the central widget's layout (above status bar)
+        if self.centralWidget():
+            central_layout = self.centralWidget().layout()
+            if central_layout:
+                central_layout.addWidget(self.progress_container)
+        
+        # Status bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        
         self.status_bar.showMessage("Ready for image conversion")
         
     def update_status(self, message):
@@ -358,6 +462,26 @@ class MainWindow(QMainWindow):
     def set_progress(self, value):
         """Set progress bar value (0-100)"""
         self.progress_bar.setValue(value)
+    
+    @pyqtSlot(int, float)
+    def on_file_progress(self, file_index, progress):
+        """Handle individual file progress update"""
+        # Update file list item progress
+        self.drag_drop_area.set_file_progress(file_index, progress)
+        
+        # Update separated progress bars
+        if hasattr(self, 'file_progress_bar'):
+            self.file_progress_bar.set_progress(progress)
+            
+        if hasattr(self, 'total_progress_bar'):
+            # Calculate total progress
+            total_files = len(self.drag_drop_area.file_list)
+            if total_files > 0:
+                # Base progress from completed files
+                base_progress = self._completed_files_count / total_files
+                # Add fraction of current file
+                current_fraction = progress / total_files
+                self.total_progress_bar.set_progress(base_progress + current_fraction)
         
     def connect_signals(self):
         """Connect signals between components"""
@@ -438,10 +562,17 @@ class MainWindow(QMainWindow):
         
         # Connect engine signals
         self.conversion_engine.progress_updated.connect(self.set_progress)
+        self.conversion_engine.file_progress_updated.connect(self.on_file_progress)
         self.conversion_engine.status_updated.connect(self.update_status)
         self.conversion_engine.file_completed.connect(self.on_file_completed)
         self.conversion_engine.conversion_finished.connect(self.on_conversion_finished)
         
+        # Reset separated progress bars
+        if hasattr(self, 'file_progress_bar'):
+            self.file_progress_bar.set_progress(0)
+        if hasattr(self, 'total_progress_bar'):
+            self.total_progress_bar.set_progress(0)
+            
         # Start conversion
         self.show_progress(True)
         self.set_progress(0)
@@ -455,12 +586,36 @@ class MainWindow(QMainWindow):
             self.conversion_engine.stop_conversion()
             # The button state will be reset in on_conversion_finished
     
+    @pyqtSlot(int, float)
+    def on_file_progress(self, file_index, progress):
+        """Handle individual file progress update"""
+        self.drag_drop_area.set_file_progress(file_index, progress)
+        if hasattr(self, 'file_progress_bar'):
+            self.file_progress_bar.set_progress(progress, animate=True, min_duration_ms=500)
+    
     def on_file_completed(self, source_file, output_file):
         """Handle completed file conversion"""
         import os
         source_name = os.path.basename(source_file)
         output_name = os.path.basename(output_file)
         self.update_status(f"✓ Converted: {source_name} → {output_name}")
+        
+        # Ensure blue bar reaches 100% for this file
+        if hasattr(self, 'file_progress_bar'):
+            self.file_progress_bar.set_progress(1.0, animate=True, min_duration_ms=500)
+        
+        # Mark the file as completed in the list
+        # Find the file index
+        for i, f in enumerate(self.drag_drop_area.file_list):
+            if f == source_file:
+                self.drag_drop_area.set_file_completed(i)
+                self._completed_files_count += 1
+                # Update total progress bar
+                if hasattr(self, 'total_progress_bar'):
+                    total_files = len(self.drag_drop_area.file_list)
+                    if total_files > 0:
+                        self.total_progress_bar.set_progress(self._completed_files_count / total_files)
+                break
         
     def on_conversion_finished(self, success, message):
         """Handle conversion completion"""
@@ -470,6 +625,15 @@ class MainWindow(QMainWindow):
         
         self.show_progress(False)
         self.set_progress(0)
+        
+        # Reset separated progress bars
+        if hasattr(self, 'file_progress_bar'):
+            self.file_progress_bar.set_progress(0)
+        if hasattr(self, 'total_progress_bar'):
+            self.total_progress_bar.set_progress(0)
+        
+        self._completed_files_count = 0
+        
         self.update_status(message)
         
         from PyQt6.QtWidgets import QMessageBox
@@ -522,8 +686,8 @@ class MainWindow(QMainWindow):
         # Update drag drop area theme
         self.drag_drop_area.set_theme_manager(self.theme_manager)
         
-        # Programmatically click clear button to reset drop area rendering
-        self.drag_drop_area.clear_files()
+        # Do not clear files when switching themes
+        # self.drag_drop_area.clear_files()
         
         # Update command panel theme (for toggle boxes)
         is_dark = self.theme_manager.get_current_theme() == 'dark'

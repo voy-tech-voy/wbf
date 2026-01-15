@@ -937,6 +937,149 @@ DITHER_MAP = {
     5: 'floyd_steinberg',
 }
 
+# =============================================================================
+# IMAGE MAX SIZE PRESETS
+# =============================================================================
+# Each preset: (quality, resolution_percent, size_factor)
+# quality: 1-100 (FFmpeg/image encoder quality)
+# resolution_percent: 100 = original, 90 = 90% width/height, etc.
+# size_factor: relative size multiplier (calibrated from real encodes)
+
+IMAGE_QUALITY_PRESETS_STANDARD = [
+    # (quality, resolution, size_factor)
+    # --- TIER 1: Maximum Quality ---
+    (100, 100, 1.00),    # 0: Lossless/Maximum
+    (95, 100, 0.85),     # 1: Very high
+    (90, 100, 0.70),     # 2: High
+    (85, 100, 0.58),     # 3: Good+
+    
+    # --- TIER 2: Good Quality ---
+    (80, 100, 0.48),     # 4: Good
+    (75, 100, 0.40),     # 5: Medium-high
+    (70, 100, 0.34),     # 6: Medium+
+    
+    # --- TIER 3: Medium Quality ---
+    (65, 100, 0.29),     # 7: Medium
+    (60, 100, 0.25),     # 8: Medium - REFERENCE PRESET
+    (55, 100, 0.22),     # 9: Medium-
+    (50, 100, 0.19),     # 10: Lower medium
+    
+    # --- TIER 4: Low Quality ---
+    (45, 100, 0.16),     # 11: Low+
+    (40, 100, 0.14),     # 12: Low
+    (35, 100, 0.12),     # 13: Low-
+    (30, 100, 0.10),     # 14: Very low
+    (25, 100, 0.08),     # 15: Minimum+
+    (20, 100, 0.06),     # 16: Minimum
+]
+
+IMAGE_QUALITY_PRESETS_AUTORESIZE = [
+    # (quality, resolution, size_factor)
+    # --- TIER 1: Maximum Quality ---
+    (100, 100, 1.00),    # 0: Lossless/Maximum
+    (95, 100, 0.85),     # 1: Very high
+    (90, 100, 0.70),     # 2: High
+    (85, 100, 0.58),     # 3: Good+
+    
+    # --- TIER 2: Good Quality ---
+    (80, 100, 0.48),     # 4: Good
+    (75, 100, 0.40),     # 5: Medium-high
+    (70, 100, 0.34),     # 6: Medium+
+    
+    # --- TIER 3: Medium Quality ---
+    (65, 100, 0.29),     # 7: Medium
+    (60, 100, 0.25),     # 8: Medium - REFERENCE PRESET
+    (55, 100, 0.22),     # 9: Medium-
+    (50, 100, 0.19),     # 10: Lower medium
+    
+    # --- TIER 3.5: Resolution scaling (before low quality) ---
+    (55, 90, 0.18),      # 11: Medium @ 90% res (~0.81x pixels)
+    (55, 80, 0.14),      # 12: Medium @ 80% res (~0.64x pixels)
+    (50, 70, 0.10),      # 13: Medium @ 70% res (~0.49x pixels)
+    (50, 60, 0.07),      # 14: Medium @ 60% res (~0.36x pixels)
+    
+    # --- TIER 4: Low Quality (last resort) ---
+    (45, 100, 0.16),     # 15: Low+ (back to 100% but lower quality)
+    (40, 100, 0.14),     # 16: Low
+    (35, 100, 0.12),     # 17: Low-
+    (30, 100, 0.10),     # 18: Very low
+    (25, 100, 0.08),     # 19: Minimum+
+    (20, 100, 0.06),     # 20: Minimum
+]
+
+IMAGE_REFERENCE_PRESET_IDX = 8
+
+# =============================================================================
+# VIDEO MAX SIZE PRESETS
+# =============================================================================
+# Each preset: (crf, resolution_percent, audio_bitrate_kbps, size_factor)
+# crf: Constant Rate Factor (0=lossless, 51=worst for H.264/H.265)
+# resolution_percent: 100 = original, 90 = 90% width/height, etc.
+# audio_bitrate_kbps: audio bitrate in kbps (0 = no audio)
+# size_factor: relative size multiplier (calibrated from real encodes)
+
+VIDEO_QUALITY_PRESETS_STANDARD = [
+    # (crf, resolution, audio_kbps, size_factor)
+    # --- TIER 1: Maximum Quality ---
+    (18, 100, 192, 1.00),    # 0: Near-lossless
+    (20, 100, 192, 0.78),    # 1: Very high
+    (22, 100, 160, 0.62),    # 2: High
+    (23, 100, 160, 0.53),    # 3: Good+
+    
+    # --- TIER 2: Good Quality ---
+    (24, 100, 128, 0.45),    # 4: Good
+    (25, 100, 128, 0.39),    # 5: Medium-high
+    (26, 100, 128, 0.33),    # 6: Medium+
+    
+    # --- TIER 3: Medium Quality ---
+    (27, 100, 96, 0.28),     # 7: Medium
+    (28, 100, 96, 0.24),     # 8: Medium - REFERENCE PRESET
+    (29, 100, 96, 0.21),     # 9: Medium-
+    (30, 100, 64, 0.18),     # 10: Lower medium
+    
+    # --- TIER 4: Low Quality ---
+    (32, 100, 64, 0.14),     # 11: Low+
+    (34, 100, 48, 0.11),     # 12: Low
+    (36, 100, 48, 0.08),     # 13: Low-
+    (38, 100, 32, 0.06),     # 14: Very low
+    (42, 100, 32, 0.04),     # 15: Minimum
+]
+
+VIDEO_QUALITY_PRESETS_AUTORESIZE = [
+    # (crf, resolution, audio_kbps, size_factor)
+    # --- TIER 1: Maximum Quality ---
+    (18, 100, 192, 1.00),    # 0: Near-lossless
+    (20, 100, 192, 0.78),    # 1: Very high
+    (22, 100, 160, 0.62),    # 2: High
+    (23, 100, 160, 0.53),    # 3: Good+
+    
+    # --- TIER 2: Good Quality ---
+    (24, 100, 128, 0.45),    # 4: Good
+    (25, 100, 128, 0.39),    # 5: Medium-high
+    (26, 100, 128, 0.33),    # 6: Medium+
+    
+    # --- TIER 3: Medium Quality ---
+    (27, 100, 96, 0.28),     # 7: Medium
+    (28, 100, 96, 0.24),     # 8: Medium - REFERENCE PRESET
+    (29, 100, 96, 0.21),     # 9: Medium-
+    (30, 100, 64, 0.18),     # 10: Lower medium
+    
+    # --- TIER 3.5: Resolution scaling (before low quality) ---
+    (28, 90, 96, 0.19),      # 11: Medium @ 90% res
+    (28, 80, 96, 0.15),      # 12: Medium @ 80% res
+    (28, 70, 64, 0.11),      # 13: Medium @ 70% res
+    (28, 60, 64, 0.08),      # 14: Medium @ 60% res
+    
+    # --- TIER 4: Low Quality (last resort) ---
+    (32, 100, 64, 0.14),     # 15: Low+
+    (34, 100, 48, 0.11),     # 16: Low
+    (36, 100, 48, 0.08),     # 17: Low-
+    (38, 100, 32, 0.06),     # 18: Very low
+    (42, 100, 32, 0.04),     # 19: Minimum
+]
+
+VIDEO_REFERENCE_PRESET_IDX = 8
+
 
 def estimate_all_preset_sizes(file_path: str, base_params: dict, sample_seconds: float = 1.5,
                                auto_resize: bool = False) -> dict:
@@ -1258,6 +1401,422 @@ def find_optimal_gif_params_for_size(file_path: str, base_params: dict, target_s
     return optimized_params
 
 
+# =============================================================================
+# IMAGE MAX SIZE ESTIMATION AND OPTIMIZATION
+# =============================================================================
+
+def estimate_image_size_at_preset(file_path: str, output_format: str, preset: tuple) -> int:
+    """
+    Estimate image size by encoding at a specific preset.
+    Returns file size in bytes.
+    """
+    quality, resolution, _ = preset
+    
+    temp_output = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=f'.{output_format}', delete=False) as tmp_file:
+            temp_output = tmp_file.name
+        
+        # Build FFmpeg command
+        input_stream = ffmpeg.input(file_path)
+        stream = input_stream
+        
+        # Apply resolution scaling if needed
+        if resolution != 100:
+            stream = stream.filter('scale', f'iw*{resolution/100}', f'ih*{resolution/100}')
+        
+        # Output options based on format
+        output_args = {}
+        if output_format in ['jpg', 'jpeg']:
+            output_args['qscale:v'] = max(1, int(31 - (quality / 100) * 30))  # 1-31 (lower is better)
+        elif output_format == 'webp':
+            output_args['quality'] = quality
+        elif output_format == 'png':
+            output_args['compression_level'] = max(0, 9 - int(quality / 11))  # 0-9
+        
+        stream = ffmpeg.output(stream, temp_output, **output_args)
+        stream = ffmpeg.overwrite_output(stream)
+        
+        # Run FFmpeg silently
+        ffmpeg_path = os.environ.get('FFMPEG_BINARY', 'ffmpeg')
+        cmd = stream.compile(cmd=ffmpeg_path)
+        
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=30
+        )
+        
+        if result.returncode == 0 and os.path.exists(temp_output):
+            return os.path.getsize(temp_output)
+        return 0
+        
+    except Exception as e:
+        return 0
+    finally:
+        if temp_output and os.path.exists(temp_output):
+            try:
+                os.remove(temp_output)
+            except:
+                pass
+
+
+def estimate_all_image_preset_sizes(file_path: str, output_format: str, 
+                                     auto_resize: bool = False) -> dict:
+    """
+    Estimate image sizes for all presets using single reference encode + extrapolation.
+    """
+    presets = IMAGE_QUALITY_PRESETS_AUTORESIZE if auto_resize else IMAGE_QUALITY_PRESETS_STANDARD
+    
+    import time
+    start_time = time.time()
+    
+    # Encode at reference preset
+    ref_preset = presets[IMAGE_REFERENCE_PRESET_IDX]
+    reference_size = estimate_image_size_at_preset(file_path, output_format, ref_preset)
+    
+    if reference_size <= 0:
+        # Fallback: estimate based on original file size
+        try:
+            original_size = os.path.getsize(file_path)
+            reference_size = int(original_size * 0.5)  # Assume 50% for reference
+        except:
+            reference_size = 500000  # 500KB default
+    
+    # Extrapolate all preset sizes using size_factor ratios
+    ref_factor = ref_preset[2]  # size_factor of reference preset
+    preset_sizes = []
+    
+    for preset in presets:
+        factor = preset[2]
+        estimated = int(reference_size * (factor / ref_factor))
+        preset_sizes.append(estimated)
+    
+    calibration_time = time.time() - start_time
+    
+    return {
+        'preset_sizes': preset_sizes,
+        'reference_size': reference_size,
+        'calibration_time': calibration_time,
+        'presets_used': presets,
+    }
+
+
+def find_optimal_image_params_for_size(file_path: str, output_format: str, target_size_bytes: int,
+                                        status_callback=None, auto_resize: bool = False) -> dict:
+    """
+    Find optimal image parameters to achieve target file size.
+    
+    Returns dict with:
+        - quality: optimal quality value
+        - _resolution_scale: resolution multiplier if auto_resize is used
+        - _estimated_size: estimated file size
+        - _preset_info: human-readable preset description
+    """
+    
+    def log(msg):
+        if status_callback:
+            status_callback(msg)
+    
+    log(f"Image target size: {target_size_bytes / (1024*1024):.2f} MB")
+    log(f"Auto-resize: {'enabled' if auto_resize else 'disabled'}")
+    
+    presets = IMAGE_QUALITY_PRESETS_AUTORESIZE if auto_resize else IMAGE_QUALITY_PRESETS_STANDARD
+    
+    # Get size estimates
+    calibration = estimate_all_image_preset_sizes(file_path, output_format, auto_resize)
+    preset_sizes = calibration.get('preset_sizes', [])
+    
+    if not preset_sizes:
+        log("Error: Could not estimate preset sizes")
+        return {'quality': 75}  # Default fallback
+    
+    log(f"✓ Calibration complete in {calibration.get('calibration_time', 0):.1f}s")
+    
+    # Check max quality size vs target
+    max_quality_size = preset_sizes[0]
+    size_ratio = max_quality_size / target_size_bytes
+    
+    if size_ratio < 0.70:
+        log(f"✓ Maximum quality fits well below target")
+        best_idx = 0
+    elif size_ratio <= 1.05:
+        log(f"✓ Maximum quality fits target!")
+        best_idx = 0
+    else:
+        # Binary search for best preset
+        left, right = 0, len(presets) - 1
+        best_idx = right
+        
+        if preset_sizes[-1] > target_size_bytes * 1.05:
+            log(f"⚠ Even minimum preset exceeds target")
+            best_idx = len(presets) - 1
+        else:
+            while left <= right:
+                mid = (left + right) // 2
+                if preset_sizes[mid] <= target_size_bytes * 1.05:
+                    best_idx = mid
+                    right = mid - 1
+                else:
+                    left = mid + 1
+    
+    # Build output params
+    best_preset = presets[best_idx]
+    quality, resolution, factor = best_preset
+    
+    result = {
+        'quality': quality,
+        '_estimated_size': preset_sizes[best_idx],
+        '_preset_index': best_idx,
+        '_preset_info': f"Q{quality}",
+        '_calibration_time': calibration.get('calibration_time', 0),
+        '_auto_resize': auto_resize,
+        '_budget_utilization': (preset_sizes[best_idx] / target_size_bytes) * 100,
+    }
+    
+    if resolution != 100:
+        result['_resolution_scale'] = resolution / 100.0
+        result['_preset_info'] = f"Q{quality} @{resolution}%"
+    
+    log(f"✓ Selected: {result['_preset_info']}, Est: {preset_sizes[best_idx]/(1024*1024):.2f} MB")
+    
+    return result
+
+
+# =============================================================================
+# VIDEO MAX SIZE ESTIMATION AND OPTIMIZATION
+# =============================================================================
+
+def estimate_video_size_at_preset(file_path: str, preset: tuple, codec: str,
+                                   sample_seconds: float = 2.0) -> int:
+    """
+    Estimate video size by encoding a short sample at a specific preset.
+    Returns estimated full video size in bytes.
+    """
+    crf, resolution, audio_kbps, _ = preset
+    
+    duration = get_video_duration(file_path)
+    if duration <= 0:
+        return 0
+    
+    # Sample a portion of the video
+    sample_duration = min(sample_seconds, duration * 0.5)
+    if sample_duration < 0.5:
+        sample_duration = duration
+    
+    temp_output = None
+    try:
+        # Determine output extension based on codec
+        if 'webm' in codec.lower() or 'vp9' in codec.lower():
+            ext = 'webm'
+            vcodec = 'libvpx-vp9'
+            acodec = 'libopus'
+        elif 'av1' in codec.lower():
+            ext = 'webm' if 'webm' in codec.lower() else 'mp4'
+            vcodec = 'libaom-av1'
+            acodec = 'libopus' if ext == 'webm' else 'aac'
+        elif 'h.265' in codec.lower() or 'h265' in codec.lower() or 'hevc' in codec.lower():
+            ext = 'mp4'
+            vcodec = 'libx265'
+            acodec = 'aac'
+        else:
+            ext = 'mp4'
+            vcodec = 'libx264'
+            acodec = 'aac'
+        
+        with tempfile.NamedTemporaryFile(suffix=f'.{ext}', delete=False) as tmp_file:
+            temp_output = tmp_file.name
+        
+        # Build FFmpeg command
+        # Start from middle of video for better representation
+        start_time = (duration - sample_duration) / 2
+        
+        input_stream = ffmpeg.input(file_path, ss=start_time, t=sample_duration)
+        video_stream = input_stream.video
+        
+        # Apply resolution scaling if needed
+        if resolution != 100:
+            video_stream = video_stream.filter('scale', f'iw*{resolution/100}', f'ih*{resolution/100}')
+        
+        # Check for audio
+        has_audio = has_audio_stream(file_path)
+        
+        # Output options
+        output_args = {
+            'vcodec': vcodec,
+            'crf': crf,
+        }
+        
+        if vcodec == 'libaom-av1':
+            output_args['cpu-used'] = 8  # Fast for estimation
+        
+        if has_audio and audio_kbps > 0:
+            audio_stream = input_stream.audio
+            output_args['acodec'] = acodec
+            output_args['audio_bitrate'] = f'{audio_kbps}k'
+            stream = ffmpeg.output(video_stream, audio_stream, temp_output, **output_args)
+        else:
+            output_args['an'] = None  # No audio
+            stream = ffmpeg.output(video_stream, temp_output, **output_args)
+        
+        stream = ffmpeg.overwrite_output(stream)
+        
+        # Run FFmpeg
+        ffmpeg_path = os.environ.get('FFMPEG_BINARY', 'ffmpeg')
+        cmd = stream.compile(cmd=ffmpeg_path)
+        
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=60
+        )
+        
+        if result.returncode == 0 and os.path.exists(temp_output):
+            sample_size = os.path.getsize(temp_output)
+            # Extrapolate to full video duration
+            full_size = int(sample_size * (duration / sample_duration))
+            return full_size
+        return 0
+        
+    except Exception as e:
+        return 0
+    finally:
+        if temp_output and os.path.exists(temp_output):
+            try:
+                os.remove(temp_output)
+            except:
+                pass
+
+
+def estimate_all_video_preset_sizes(file_path: str, codec: str, base_params: dict,
+                                     auto_resize: bool = False) -> dict:
+    """
+    Estimate video sizes for all presets using single reference encode + extrapolation.
+    """
+    presets = VIDEO_QUALITY_PRESETS_AUTORESIZE if auto_resize else VIDEO_QUALITY_PRESETS_STANDARD
+    
+    import time
+    start_time = time.time()
+    
+    # Encode at reference preset
+    ref_preset = presets[VIDEO_REFERENCE_PRESET_IDX]
+    reference_size = estimate_video_size_at_preset(file_path, ref_preset, codec, sample_seconds=2.0)
+    
+    if reference_size <= 0:
+        # Fallback: estimate based on original file size and duration
+        try:
+            original_size = os.path.getsize(file_path)
+            reference_size = int(original_size * 0.3)  # Assume 30% for reference
+        except:
+            duration = get_video_duration(file_path)
+            reference_size = int(duration * 500000)  # ~500KB per second default
+    
+    # Extrapolate all preset sizes
+    ref_factor = ref_preset[3]  # size_factor of reference preset
+    preset_sizes = []
+    
+    for preset in presets:
+        factor = preset[3]
+        estimated = int(reference_size * (factor / ref_factor))
+        preset_sizes.append(estimated)
+    
+    calibration_time = time.time() - start_time
+    
+    return {
+        'preset_sizes': preset_sizes,
+        'reference_size': reference_size,
+        'calibration_time': calibration_time,
+        'presets_used': presets,
+    }
+
+
+def find_optimal_video_params_for_size(file_path: str, codec: str, base_params: dict,
+                                        target_size_bytes: int, status_callback=None,
+                                        auto_resize: bool = False) -> dict:
+    """
+    Find optimal video parameters to achieve target file size.
+    
+    Returns dict with:
+        - crf: optimal CRF value
+        - audio_bitrate: optimal audio bitrate in kbps
+        - _resolution_scale: resolution multiplier if auto_resize is used
+        - _estimated_size: estimated file size
+        - _preset_info: human-readable preset description
+    """
+    
+    def log(msg):
+        if status_callback:
+            status_callback(msg)
+    
+    log(f"Video target size: {target_size_bytes / (1024*1024):.2f} MB")
+    log(f"Codec: {codec}")
+    log(f"Auto-resize: {'enabled' if auto_resize else 'disabled'}")
+    
+    presets = VIDEO_QUALITY_PRESETS_AUTORESIZE if auto_resize else VIDEO_QUALITY_PRESETS_STANDARD
+    
+    # Get size estimates
+    calibration = estimate_all_video_preset_sizes(file_path, codec, base_params, auto_resize)
+    preset_sizes = calibration.get('preset_sizes', [])
+    
+    if not preset_sizes:
+        log("Error: Could not estimate preset sizes")
+        return {'crf': 28, 'audio_bitrate': 96}  # Default fallback
+    
+    log(f"✓ Calibration complete in {calibration.get('calibration_time', 0):.1f}s")
+    
+    # Check max quality size vs target
+    max_quality_size = preset_sizes[0]
+    size_ratio = max_quality_size / target_size_bytes
+    
+    if size_ratio < 0.70:
+        log(f"✓ Maximum quality fits well below target")
+        best_idx = 0
+    elif size_ratio <= 1.05:
+        log(f"✓ Maximum quality fits target!")
+        best_idx = 0
+    else:
+        # Binary search for best preset
+        left, right = 0, len(presets) - 1
+        best_idx = right
+        
+        if preset_sizes[-1] > target_size_bytes * 1.05:
+            log(f"⚠ Even minimum preset exceeds target")
+            best_idx = len(presets) - 1
+        else:
+            while left <= right:
+                mid = (left + right) // 2
+                if preset_sizes[mid] <= target_size_bytes * 1.05:
+                    best_idx = mid
+                    right = mid - 1
+                else:
+                    left = mid + 1
+    
+    # Build output params
+    best_preset = presets[best_idx]
+    crf, resolution, audio_kbps, factor = best_preset
+    
+    result = {
+        'crf': crf,
+        'audio_bitrate': audio_kbps,
+        '_estimated_size': preset_sizes[best_idx],
+        '_preset_index': best_idx,
+        '_preset_info': f"CRF{crf}",
+        '_calibration_time': calibration.get('calibration_time', 0),
+        '_auto_resize': auto_resize,
+        '_budget_utilization': (preset_sizes[best_idx] / target_size_bytes) * 100,
+    }
+    
+    if resolution != 100:
+        result['_resolution_scale'] = resolution / 100.0
+        result['_preset_info'] = f"CRF{crf} @{resolution}%"
+    
+    log(f"✓ Selected: {result['_preset_info']}, Est: {preset_sizes[best_idx]/(1024*1024):.2f} MB")
+    
+    return result
+
+
 def _resolve_output_dir(params: Dict, input_path: Path) -> Path:
     """Resolve output directory honoring custom path or nested option."""
     output_dir_param = params.get('output_dir', '').strip()
@@ -1274,6 +1833,7 @@ class ConversionEngine(QThread):
     """Main conversion engine running in separate thread"""
     
     progress_updated = pyqtSignal(int)  # Progress percentage
+    file_progress_updated = pyqtSignal(int, float)  # (file_index, progress 0.0-1.0) for individual file progress
     status_updated = pyqtSignal(str)    # Status message
     file_completed = pyqtSignal(str, str)  # (source, output) file paths
     conversion_finished = pyqtSignal(bool, str)  # (success, message)
@@ -1284,46 +1844,119 @@ class ConversionEngine(QThread):
         self.params = params
         self.should_stop = False
         self.current_process = None
+        self._current_file_index = 0
+        self._total_files = len(files)
 
     def run_ffmpeg_with_cancellation(self, stream_spec, **kwargs):
-        """Run FFmpeg with cancellation support"""
-        # Force quiet mode unless debug is needed
-        if 'quiet' not in kwargs:
-            kwargs['quiet'] = True
-            
+        """Run FFmpeg with cancellation support and progress tracking"""
+        import re
+        import threading
+        import time
+        
         try:
-            # Use run_async to get a handle to the process
-            self.current_process = ffmpeg.run_async(stream_spec, **kwargs)
+            # Add -progress pipe:1 to output progress to stdout in parseable format
+            stream_spec = stream_spec.global_args('-progress', 'pipe:1', '-stats_period', '0.1')
             
-            stdout_data = None
-            stderr_data = None
+            # Use run_async with pipes for progress tracking
+            self.current_process = ffmpeg.run_async(
+                stream_spec, 
+                pipe_stderr=True,
+                pipe_stdout=True,
+                **{k: v for k, v in kwargs.items() if k != 'quiet'}
+            )
             
-            # Use communicate with timeout to prevent pipe deadlocks while allowing cancellation
-            while True:
-                try:
-                    # Wait for process to finish or timeout
-                    # This reads pipes to prevent deadlock
-                    stdout, stderr = self.current_process.communicate(timeout=0.5)
-                    if stdout: stdout_data = stdout
-                    if stderr: stderr_data = stderr
-                    break
-                except subprocess.TimeoutExpired:
-                    # Process still running
-                    if self.should_stop:
-                        self.status_updated.emit("Stopping FFmpeg process...")
-                        self.current_process.kill()
-                        return False
-                    # Continue loop
+            stderr_data = []
+            stdout_data = []
+            last_progress_percent = -1.0  # Use float for smooth progress tracking
+            duration = None
+            duration_lock = threading.Lock()
+            
+            # Thread to read stderr (for duration and errors)
+            def read_stderr():
+                nonlocal duration
+                for line in iter(self.current_process.stderr.readline, b''):
+                    stderr_data.append(line)
+                    line_str = line.decode('utf-8', errors='replace')
+                    
+                    # Extract duration from FFmpeg output
+                    if 'Duration:' in line_str:
+                        duration_match = re.search(r'Duration: (\d+):(\d+):(\d+[\.,]\d+)', line_str)
+                        if duration_match:
+                            h, m, s = duration_match.groups()
+                            s = s.replace(',', '.')
+                            with duration_lock:
+                                duration = int(h) * 3600 + int(m) * 60 + float(s)
+            
+            # Thread to read stdout (for progress)
+            def read_stdout():
+                nonlocal last_progress_percent
+                buffer = ""
+                for line in iter(self.current_process.stdout.readline, b''):
+                    stdout_data.append(line)
+                    buffer += line.decode('utf-8', errors='replace')
+                    
+                    # Parse progress output: out_time_ms=123456
+                    if 'out_time_ms=' in buffer:
+                        out_time_match = re.search(r'out_time_ms=(\d+)', buffer)
+                        if out_time_match:
+                            with duration_lock:
+                                dur = duration
+                            if dur and dur > 0:
+                                out_time_ms = int(out_time_match.group(1))
+                                current_time = out_time_ms / 1000000.0  # microseconds to seconds
+                                
+                                # Calculate smooth file progress (0.0 to 1.0)
+                                smooth_file_progress = min(0.95, current_time / dur)
+                                
+                                # Emit smooth file progress for list item visualization
+                                if hasattr(self, '_current_file_index'):
+                                    self.file_progress_updated.emit(self._current_file_index, smooth_file_progress)
+                                
+                                # Calculate smooth overall progress as float (0-100)
+                                file_progress_float = min(95.0, (current_time / dur) * 100.0)
+                                
+                                # Emit progress for every 0.5% change for smooth animation
+                                if abs(file_progress_float - last_progress_percent) >= 0.5:
+                                    last_progress_percent = file_progress_float
+                                    
+                                    if hasattr(self, '_current_file_index') and hasattr(self, '_total_files'):
+                                        base_progress = (self._current_file_index * 100.0) / self._total_files
+                                        file_weight = 100.0 / self._total_files
+                                        overall = base_progress + (file_progress_float * file_weight) / 100.0
+                                        self.progress_updated.emit(int(overall))
+                                    else:
+                                        self.progress_updated.emit(int(file_progress_float))
+                        
+                        # Clear buffer after parsing progress block
+                        if 'progress=' in buffer:
+                            buffer = ""
+            
+            # Start reader threads
+            stderr_thread = threading.Thread(target=read_stderr, daemon=True)
+            stdout_thread = threading.Thread(target=read_stdout, daemon=True)
+            stderr_thread.start()
+            stdout_thread.start()
+            
+            # Wait for process while checking for cancellation
+            while self.current_process.poll() is None:
+                if self.should_stop:
+                    self.current_process.kill()
+                    return False
+                time.sleep(0.1)
+            
+            # Wait for threads to finish
+            stderr_thread.join(timeout=2)
+            stdout_thread.join(timeout=2)
                 
             # Check exit code
             if self.current_process.returncode != 0:
-                # If we killed it, it's not an error
                 if self.should_stop:
                     return False
                     
+                stderr_str = b''.join(stderr_data).decode('utf-8', errors='replace')
                 error_msg = f"FFmpeg process exited with code {self.current_process.returncode}"
-                if stderr_data:
-                    error_msg += f"\nStderr: {stderr_data.decode('utf-8', errors='replace')}"
+                if stderr_str:
+                    error_msg += f"\nStderr: {stderr_str}"
                 raise Exception(error_msg)
                 
             return True
@@ -1359,11 +1992,31 @@ class ConversionEngine(QThread):
             for i, file_path in enumerate(self.files):
                 if self.should_stop:
                     break
+                
+                # Set current file index for progress tracking
+                self._current_file_index = i
                     
                 self.status_updated.emit(f"Processing: {os.path.basename(file_path)}")
                 print(f"Processing file {i+1}/{total_files}: {file_path}")
                 
+                # Emit progress at the START of each file (shows progress bar immediately)
+                progress_start = int(current_operation * 100 / total_operations)
+                self.progress_updated.emit(progress_start)
+                
+                # Emit file-specific progress start
+                print(f"🔵 EMITTING file_progress_updated({i}, 0.0)")
+                self.file_progress_updated.emit(i, 0.0)
+                
+                # For non-FFmpeg conversions (images), emit progress updates during conversion
+                # Simulate progress: 0% at start, then 50% midway, 100% when done
+                print(f"🔵 EMITTING file_progress_updated({i}, 0.1)")
+                self.file_progress_updated.emit(i, 0.1)  # 10% when starting
+                
                 result = self.convert_file(file_path)
+                
+                # Emit near-complete progress for image conversions (instant completion)
+                print(f"🔵 EMITTING file_progress_updated({i}, 0.95)")
+                self.file_progress_updated.emit(i, 0.95)  # 95% when file conversion completes
                 
                 if result is None:
                     # Skipped file
@@ -1480,6 +2133,40 @@ class ConversionEngine(QThread):
             if 'resize' in self.params and 'current_resize' not in self.params:
                 self.params['current_resize'] = str(self.params['resize'])
             
+            # Check if Max Size mode is enabled
+            image_size_mode = self.params.get('image_size_mode', 'manual')
+            if image_size_mode == 'max_size':
+                target_mb = self.params.get('image_max_size_mb')
+                auto_resize = self.params.get('image_auto_resize', False)
+                
+                if target_mb and target_mb > 0:
+                    target_bytes = int(target_mb * 1024 * 1024)
+                    
+                    # Find optimal parameters for target size
+                    self.status_updated.emit(f"Optimizing for target size: {target_mb:.1f} MB...")
+                    
+                    optimal = find_optimal_image_params_for_size(
+                        file_path, format_ext, target_bytes,
+                        status_callback=lambda msg: self.status_updated.emit(msg),
+                        auto_resize=auto_resize
+                    )
+                    
+                    # Apply optimized quality
+                    self.params['quality'] = optimal.get('quality', self.params.get('quality', 75))
+                    
+                    # Apply resolution scale if present
+                    if '_resolution_scale' in optimal:
+                        scale = optimal['_resolution_scale']
+                        self.params['_max_size_resolution_scale'] = scale
+                        self.status_updated.emit(f"Applied resolution scale: {int(scale * 100)}%")
+                    
+                    # Log optimization result
+                    preset_info = optimal.get('_preset_info', '')
+                    est_size = optimal.get('_estimated_size', 0)
+                    self.status_updated.emit(
+                        f"✓ Optimized: {preset_info} (est. {est_size/(1024*1024):.2f} MB)"
+                    )
+            
             # Check if multiple qualities or resize variants are requested
             has_multiple_qualities = self.params.get('multiple_qualities', False) and self.params.get('quality_variants')
             has_resize_variants = self.params.get('resize_variants', [])
@@ -1564,6 +2251,11 @@ class ConversionEngine(QThread):
         
         # Apply filters
         stream = input_stream
+        
+        # Apply Max Size mode resolution scale FIRST (before other resize)
+        max_size_scale = self.params.get('_max_size_resolution_scale')
+        if max_size_scale and max_size_scale < 1.0:
+            stream = ffmpeg.filter(stream, 'scale', f'iw*{max_size_scale}', f'ih*{max_size_scale}')
         
         # Handle resize based on current_resize parameter
         current_resize = self.params.get('current_resize')
@@ -1674,6 +2366,45 @@ class ConversionEngine(QThread):
             selected_codec = self.params.get('codec', 'H.264 (MP4)')
             output_format = format_map.get(selected_codec, 'mp4')
             
+            # Check if Max Size mode is enabled
+            video_size_mode = self.params.get('video_size_mode', 'manual')
+            if video_size_mode == 'max_size':
+                target_mb = self.params.get('video_max_size_mb')
+                auto_resize = self.params.get('video_auto_resize', False)
+                
+                if target_mb and target_mb > 0:
+                    target_bytes = int(target_mb * 1024 * 1024)
+                    
+                    # Find optimal parameters for target size
+                    self.status_updated.emit(f"Optimizing for target size: {target_mb:.1f} MB...")
+                    
+                    optimal = find_optimal_video_params_for_size(
+                        file_path, selected_codec, self.params, target_bytes,
+                        status_callback=lambda msg: self.status_updated.emit(msg),
+                        auto_resize=auto_resize
+                    )
+                    
+                    # Apply optimized CRF and audio bitrate
+                    optimized_crf = optimal.get('crf', 28)
+                    optimized_audio = optimal.get('audio_bitrate', 96)
+                    
+                    # Store for use in output_args
+                    self.params['_optimized_crf'] = optimized_crf
+                    self.params['_optimized_audio_bitrate'] = optimized_audio
+                    
+                    # Apply resolution scale if present
+                    if '_resolution_scale' in optimal:
+                        scale = optimal['_resolution_scale']
+                        self.params['_max_size_resolution_scale'] = scale
+                        self.status_updated.emit(f"Applied resolution scale: {int(scale * 100)}%")
+                    
+                    # Log optimization result
+                    preset_info = optimal.get('_preset_info', '')
+                    est_size = optimal.get('_estimated_size', 0)
+                    self.status_updated.emit(
+                        f"✓ Optimized: {preset_info} (est. {est_size/(1024*1024):.2f} MB)"
+                    )
+            
             # Debug: Print the command being executed
             self.status_updated.emit(f"DEBUG: Video conversion - Codec: {selected_codec}, Output format: {output_format}")
             
@@ -1749,7 +2480,9 @@ class ConversionEngine(QThread):
             
             output_args = {'vcodec': codec}
             
-            # Get quality parameter
+            # Get quality parameter - use optimized CRF in Max Size mode
+            optimized_crf = self.params.get('_optimized_crf')
+            optimized_audio = self.params.get('_optimized_audio_bitrate')
             quality = self.params.get('quality')
             
             # For WebM/VP9/AV1, we need to handle audio codec and format-specific parameters
@@ -1758,11 +2491,19 @@ class ConversionEngine(QThread):
                 output_args['acodec'] = 'libopus'  # Use Opus audio codec for WebM
                 output_args['f'] = 'webm'          # WebM container format
                 
-                # Apply CRF quality for VP9/WebM single video conversion
-                if quality is not None:
+                # Apply CRF quality - use optimized value if in Max Size mode
+                if optimized_crf is not None:
+                    output_args['crf'] = optimized_crf
+                    self.status_updated.emit(f"DEBUG: WebM CRF set to {optimized_crf} (max size optimized)")
+                elif quality is not None:
                     crf_value = map_ui_quality_to_crf(quality, codec)
                     output_args['crf'] = crf_value
                     self.status_updated.emit(f"DEBUG: WebM CRF set to {crf_value} (quality: {quality})")
+                
+                # Apply optimized audio bitrate if in Max Size mode
+                if optimized_audio is not None:
+                    output_args['audio_bitrate'] = f'{optimized_audio}k'
+                    self.status_updated.emit(f"DEBUG: Audio bitrate set to {optimized_audio}k (max size optimized)")
                 
                 # Optimize AV1 speed
                 if codec == 'libaom-av1':
@@ -1777,17 +2518,33 @@ class ConversionEngine(QThread):
                     output_args['cpu-used'] = 4
                     self.status_updated.emit("DEBUG: Applied AV1 speed optimization (cpu-used=4)")
                 
-                # Apply CRF quality for MP4 codecs if quality is specified
-                if quality is not None:
+                # Apply CRF quality - use optimized value if in Max Size mode
+                if optimized_crf is not None:
+                    output_args['crf'] = optimized_crf
+                    self.status_updated.emit(f"DEBUG: MP4 CRF set to {optimized_crf} (max size optimized)")
+                elif quality is not None:
                     crf_value = map_ui_quality_to_crf(quality, codec)
                     output_args['crf'] = crf_value
                     self.status_updated.emit(f"DEBUG: MP4 CRF set to {crf_value} (quality: {quality})")
+                
+                # Apply optimized audio bitrate if in Max Size mode
+                if optimized_audio is not None:
+                    output_args['audio_bitrate'] = f'{optimized_audio}k'
+                    self.status_updated.emit(f"DEBUG: Audio bitrate set to {optimized_audio}k (max size optimized)")
                 
             # Frame rate (always use original as per user request)
             # fps = self.params.get('fps', 'Keep Original')
             # if fps != 'Keep Original':
             #     output_args['r'] = fps
                 
+            # Apply Max Size mode resolution scale FIRST (before other resize)
+            max_size_scale = self.params.get('_max_size_resolution_scale')
+            if max_size_scale and max_size_scale < 1.0:
+                scale_w = f'trunc(iw*{max_size_scale}/2)*2'
+                scale_h = f'trunc(ih*{max_size_scale}/2)*2'
+                video_stream = ffmpeg.filter(video_stream, 'scale', scale_w, scale_h)
+                self.status_updated.emit(f"DEBUG: Applied max size resolution scale: {int(max_size_scale * 100)}%")
+            
             # Scaling
             if self.params.get('scale', False):
                 width = self.params.get('width', None)

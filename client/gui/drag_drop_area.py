@@ -5,17 +5,17 @@ Handles file drag and drop operations for the graphics converter
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
-    QLabel, QPushButton, QFileDialog, QMessageBox
+    QLabel, QPushButton, QFileDialog, QMessageBox, QStyledItemDelegate
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QEvent
-from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QPixmap, QIcon, QAction, QPainter, QColor, QCursor
+from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QPixmap, QIcon, QAction, QPainter, QColor, QCursor, QBrush
 import os
 import subprocess
 import tempfile
 from pathlib import Path
 
 class FileListItemWidget(QWidget):
-    """Custom widget for list items with hover-based remove button"""
+    """Custom widget for list items with hover-based remove button and progress indicator"""
     remove_clicked = pyqtSignal()
     
     def __init__(self, text, file_path=None, parent=None):
@@ -24,8 +24,9 @@ class FileListItemWidget(QWidget):
         self.installEventFilter(self)
         self._hovered = False
         self.file_path = file_path
+        self._is_completed = False  # Track if conversion is complete
         
-        # Set background for visibility
+        # Set transparent background
         self.setStyleSheet("background-color: transparent;")
         
         layout = QHBoxLayout(self)
@@ -62,6 +63,24 @@ class FileListItemWidget(QWidget):
         layout.addWidget(self.remove_btn, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
         
         self.update_button_style(False)
+    
+    def set_completed(self):
+        """Mark item as completed"""
+        self._is_completed = True
+    
+    def update_theme(self, is_dark):
+        """Update widget colors based on theme"""
+        if is_dark:
+            text_color = "#ffffff"
+            thumb_bg = "#1a1a1a"
+            thumb_border = "#444"
+        else:
+            text_color = "#333333"
+            thumb_bg = "#f5f5f5"
+            thumb_border = "#cccccc"
+        
+        self.text_label.setStyleSheet(f"background: transparent; border: none; color: {text_color};")
+        self.thumbnail_label.setStyleSheet(f"background: {thumb_bg}; border: 1px solid {thumb_border}; border-radius: 4px;")
         
     def sizeHint(self):
         """Return the recommended size for the widget"""
@@ -276,7 +295,34 @@ class DragDropArea(QWidget):
         self.file_list = []
         self.theme_manager = None  # Will be set by parent
         self.setAcceptDrops(True)  # Enable drag/drop on the main widget
+        self._current_processing_index = -1  # Track which file is being processed
         self.setup_ui()
+    
+    def set_file_progress(self, file_index, progress):
+        """Set progress for a specific file in the list (0.0 to 1.0) - No-op now"""
+        # Progress display removed - only show completion
+        pass
+    
+    def set_file_completed(self, file_index):
+        """Mark a file as completed"""
+        if 0 <= file_index < self.file_list_widget.count():
+            item = self.file_list_widget.item(file_index)
+            # Store completion state in item data
+            item.setData(Qt.ItemDataRole.UserRole + 1, True)
+            
+            # Mark the widget as completed (no visual change)
+            widget = self.file_list_widget.itemWidget(item)
+            if widget and hasattr(widget, 'set_completed'):
+                widget.set_completed()
+    
+    def clear_all_progress(self):
+        """Clear progress indicators from all files"""
+        for i in range(self.file_list_widget.count()):
+            item = self.file_list_widget.item(i)
+            widget = self.file_list_widget.itemWidget(item)
+            if widget and hasattr(widget, 'clear_progress'):
+                widget.clear_progress()
+        self._current_processing_index = -1
         
     def setup_ui(self):
         """Setup the drag and drop interface"""
@@ -473,6 +519,17 @@ class DragDropArea(QWidget):
                     background-color: #f0f8f0;
                 }
             """)
+        
+        # Restore completion backgrounds for completed items
+        is_dark = self.theme_manager and self.theme_manager.current_theme == 'dark'
+        
+        for i in range(self.file_list_widget.count()):
+            item = self.file_list_widget.item(i)
+            if item:
+                # Update widget theme colors (this also restores completion background if applicable)
+                widget = self.file_list_widget.itemWidget(item)
+                if widget and hasattr(widget, 'update_theme'):
+                    widget.update_theme(is_dark)
             
     def _get_scrollbar_style(self):
         """Get modern minimalistic scrollbar styling with grey item selection"""
@@ -499,7 +556,7 @@ class DragDropArea(QWidget):
                     outline: none;
                     border: none;
                 }
-                QListWidget::item:hover {
+                QListWidget::item:hover:!selected {
                     background-color: #4a4a4a;
                 }
                 QScrollBar:vertical {
@@ -544,7 +601,7 @@ class DragDropArea(QWidget):
                     outline: none;
                     border: none;
                 }
-                QListWidget::item:hover {
+                QListWidget::item:hover:!selected {
                     background-color: #e0e0e0;
                 }
                 QScrollBar:vertical {
@@ -576,9 +633,8 @@ class DragDropArea(QWidget):
     def set_theme_manager(self, theme_manager):
         """Set the theme manager and apply current theme"""
         self.theme_manager = theme_manager
-        # Clear and rebuild with proper theme
-        self.file_list_widget.clear()
-        self.file_list.clear()
+        # Only update styles, don't clear files (preserves list when switching themes)
+        self.reset_list_style()
         self.update_placeholder_text()
         
         # Apply specific styling to the clear button (red outline)

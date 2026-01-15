@@ -6,10 +6,12 @@ Provides conversion commands and options for ffmpeg, gifsicle, and ImageMagick
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QLabel, QPushButton, QComboBox, QSpinBox, QDoubleSpinBox, QCheckBox, QLineEdit,
-    QGroupBox, QFormLayout, QTabWidget, QTextEdit, QSlider, QRadioButton, QSizePolicy, QButtonGroup
+    QGroupBox, QFormLayout, QTabWidget, QTextEdit, QSlider, QRadioButton, QSizePolicy, QButtonGroup,
+    QProgressBar, QFrame
 )
 from client.utils.font_manager import AppFonts, FONT_FAMILY, FONT_SIZE_BUTTON
-from client.gui.custom_widgets import TimeRangeSlider, ResizeFolder, RotationOptions, CustomComboBox
+from client.gui.custom_widgets import TimeRangeSlider, ResizeFolder, RotationOptions, CustomComboBox, CustomTargetSizeSpinBox, ModeButtonsWidget
+from client.gui.custom_spinbox import CustomSpinBox
 from PyQt6.QtCore import Qt, pyqtSignal, QRect, QPoint, QTimer
 from PyQt6.QtGui import QPainter, QPen, QColor, QBrush
 import json
@@ -35,14 +37,14 @@ class DynamicFontButton(QPushButton):
             "pressed": "background-color: #388e3c; color: white; border-color: #2e7d32;",
             "disabled": "background-color: #2196f3; color: #eeeeee; border-color: #bdbdbd;",
             "stop_normal": (
-                "background-color: #d32f2f; "
-                "color: white; "
-                "border: 2px solid #b71c1c; "
+                "background-color: transparent; "
+                "color: #d32f2f; "
+                "border: 2px solid #d32f2f; "
                 "border-radius: 8px; "
                 "padding: 12px 0px; "
                 "font-weight: bold; "
             ),
-            "stop_hover": "background-color: #c62828; color: white; border-color: #b71c1c;",
+            "stop_hover": "background-color: #d32f2f; color: white; border-color: #b71c1c;",
             "stop_pressed": "background-color: #b71c1c; color: white; border-color: #9c0d0d;",
         }
         
@@ -119,11 +121,12 @@ def get_toggle_style(is_dark):
 TOGGLE_STYLE = get_toggle_style(is_dark_mode())
 
 def get_combobox_style(is_dark):
-    """Get QComboBox style that respects dark/light mode"""
+    """Get QComboBox style that respects dark/light mode with chevron arrow"""
     bg_color = "#2b2b2b" if is_dark else "#ffffff"
     text_color = "white" if is_dark else "black"
     border_color = "#555555" if is_dark else "#cccccc"
-    dropdown_bg = "#404040" if is_dark else "#f0f0f0"
+    dropdown_bg = bg_color  # Match main background
+    arrow_color = "#AAAAAA" if is_dark else "#888888"
     
     return (
         f"QComboBox {{ "
@@ -131,11 +134,25 @@ def get_combobox_style(is_dark):
         f"color: {text_color}; "
         f"border: 1px solid {border_color}; "
         f"border-radius: 4px; "
-        f"padding: 4px; "
+        f"padding: 4px 25px 4px 8px; "
         f"}} "
         f"QComboBox:hover {{ border-color: #4CAF50; }} "
-        f"QComboBox::drop-down {{ background-color: {dropdown_bg}; border: none; border-left: 1px solid {border_color}; }} "
-        f"QComboBox::down-arrow {{ image: none; border: 2px solid {text_color}; border-top: none; border-left: 2px solid transparent; border-right: 2px solid transparent; }} "
+        f"QComboBox::drop-down {{ "
+        f"subcontrol-origin: padding; "
+        f"subcontrol-position: top right; "
+        f"width: 20px; "
+        f"border: none; "
+        f"background-color: {dropdown_bg}; "
+        f"}} "
+        f"QComboBox::down-arrow {{ "
+        f"image: none; "
+        f"width: 0; "
+        f"height: 0; "
+        f"border-left: 5px solid transparent; "
+        f"border-right: 5px solid transparent; "
+        f"border-top: 6px solid {arrow_color}; "
+        f"margin-right: 5px; "
+        f"}} "
         f"QComboBox QAbstractItemView {{ "
         f"background-color: {bg_color}; "
         f"color: {text_color}; "
@@ -184,6 +201,8 @@ class CommandPanel(QWidget):
                 getattr(self, 'gif_enable_time_cutting', None),
                 getattr(self, 'gif_enable_retime', None),
                 getattr(self, 'gif_ffmpeg_variants', None),
+                getattr(self, 'image_auto_resize_checkbox', None),
+                getattr(self, 'video_auto_resize_checkbox', None),
                 getattr(self, 'gif_auto_resize_checkbox', None),
                 getattr(self, 'ffmpeg_gif_blur', None),
                 getattr(self, 'output_mode_same', None),
@@ -211,6 +230,18 @@ class CommandPanel(QWidget):
         rotation_options = self.findChildren(RotationOptions)
         for ro in rotation_options:
             ro.update_theme(is_dark, combobox_style)
+        
+        # Update CustomTargetSizeSpinBox widgets
+        from client.gui.custom_widgets import CustomTargetSizeSpinBox
+        target_size_spinboxes = self.findChildren(CustomTargetSizeSpinBox)
+        for spinbox in target_size_spinboxes:
+            spinbox.update_theme(is_dark)
+        
+        # Update CustomSpinBox widgets
+        from client.gui.custom_spinbox import CustomSpinBox
+        custom_spinboxes = self.findChildren(CustomSpinBox)
+        for spinbox in custom_spinboxes:
+            spinbox.update_theme(is_dark)
         
         # Update nested output name styling
         self._update_nested_output_style()
@@ -287,10 +318,16 @@ class CommandPanel(QWidget):
         self.gif_tab = self.create_gif_tab()
         self.tabs.addTab(self.gif_tab, "GIFs")
         
+        # Initialize UI state to match default mode selections
+        self.on_image_size_mode_changed("Max Size")
+        self.on_video_size_mode_changed("Max Size")
+        self.on_gif_size_mode_changed("Max Size")
+        
         # Make tab buttons fill available width
         tab_bar = self.tabs.tabBar()
         tab_bar.setExpanding(True)
         tab_bar.setDocumentMode(True)
+        tab_bar.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         # Force tabs to use equal sizes
         from PyQt6.QtWidgets import QTabBar
         tab_bar.setUsesScrollButtons(False)
@@ -325,23 +362,138 @@ class CommandPanel(QWidget):
         button_layout = self.create_control_buttons()
         layout.addLayout(button_layout)
         
+        # Install event filter on all input fields for Enter key handling
+        self._install_input_field_filters()
+        
+    def _install_input_field_filters(self):
+        """Install event filter on all input fields to handle Enter key"""
+        from client.gui.custom_widgets import CustomTargetSizeSpinBox
+        
+        # Get all CustomTargetSizeSpinBox lineEdits to exclude them (they handle Enter themselves)
+        custom_spinbox_lineedits = set()
+        custom_spinboxes = self.findChildren(CustomTargetSizeSpinBox)
+        for custom_spinbox in custom_spinboxes:
+            custom_spinbox_lineedits.add(custom_spinbox.spinbox.lineEdit())
+        
+        # Find all QLineEdit widgets (excluding those in CustomTargetSizeSpinBox)
+        line_edits = self.findChildren(QLineEdit)
+        for line_edit in line_edits:
+            if line_edit not in custom_spinbox_lineedits:
+                line_edit.installEventFilter(self)
+        
+        # Find all QSpinBox widgets (including their internal lineEdits)
+        spin_boxes = self.findChildren(QSpinBox)
+        for spin_box in spin_boxes:
+            spin_box.lineEdit().installEventFilter(self)
+        
+        # Find all QDoubleSpinBox widgets - but exclude those inside CustomTargetSizeSpinBox
+        double_spin_boxes = self.findChildren(QDoubleSpinBox)
+        for double_spin_box in double_spin_boxes:
+            if double_spin_box.lineEdit() not in custom_spinbox_lineedits:
+                double_spin_box.lineEdit().installEventFilter(self)
+    
+    def eventFilter(self, obj, event):
+        """Filter Enter key presses in input fields to switch focus to active tab button"""
+        from PyQt6.QtCore import QEvent, Qt
+        
+        # Check if this is a KeyPress event with Enter/Return key
+        if event.type() == QEvent.Type.KeyPress:
+            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                # Check if the object is an input field
+                if isinstance(obj, QLineEdit):
+                    # Clear focus from the input field first
+                    obj.clearFocus()
+                    
+                    # Set focus to the tab button
+                    self._focus_active_tab()
+                    
+                    return True  # Event handled
+        
+        # Let the event propagate normally
+        return super().eventFilter(obj, event)
+    
+    def _focus_active_tab(self):
+        """Set focus to the currently active tab button"""
+        from PyQt6.QtWidgets import QApplication
+        # Clear current focus first
+        focus_widget = QApplication.focusWidget()
+        if focus_widget:
+            focus_widget.clearFocus()
+        tab_bar = self.tabs.tabBar()
+        tab_bar.setFocus()
+
+    def mousePressEvent(self, event):
+        """Clicking empty canvas should clear focus and focus active tab"""
+        super().mousePressEvent(event)
+        child = self.childAt(event.position().toPoint())
+        if child is None or child == self:
+            self._focus_active_tab()
+    
+    def _create_mode_separator(self):
+        """Create a grey separator line to divide Mode section from parameters"""
+        from PyQt6.QtWidgets import QFrame
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Plain)
+        separator.setStyleSheet("background-color: #555555; margin: 4px 0px;")
+        separator.setFixedHeight(1)
+        return separator
+        
     def create_image_tab(self):
         """Create image conversion options tab"""
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(3)
         
         # Output format selection
-        format_group = QGroupBox("Image Settings")
+        format_group = QGroupBox("Settings")
         format_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        format_layout = QFormLayout(format_group)
+        format_group_layout = QVBoxLayout(format_group)
+        format_group_layout.setContentsMargins(0, 0, 0, 0)
+        format_group_layout.setSpacing(0)
         
-        # Format dropdown - FIRST
+        # Mode buttons - uniform component
+        self.image_mode_buttons = ModeButtonsWidget(default_mode="Max Size")
+        self.image_mode_buttons.modeChanged.connect(self.on_image_size_mode_changed)
+        format_group_layout.addWidget(self.image_mode_buttons)
+        self.image_size_mode_value = "manual"
+        
+        # Form layout for settings
+        format_layout = QFormLayout()
+        format_layout.setContentsMargins(14, 9, 14, 14)
+        format_layout.setVerticalSpacing(8)
+        
+        # Target Size - FIRST (shown in Max Size mode)
+        self.image_max_size_spinbox = CustomTargetSizeSpinBox(
+            default_value=0.3,
+            on_enter_callback=self._focus_active_tab
+        )
+        self.image_max_size_spinbox.setRange(0.01, 100.0)  # Allow smaller sizes for images
+        self.image_max_size_spinbox.setDecimals(2)  # Two decimal places for precision
+        self.image_max_size_spinbox.setSensitivity(0.0025)  # Lower sensitivity (40px = 0.1 value change)
+        self.image_max_size_spinbox.setToolTip("Target maximum file size in megabytes")
+        self.image_max_size_spinbox.setVisible(False)
+        self.image_max_size_label = QLabel("Max Size (MB):")
+        self.image_max_size_label.setVisible(False)
+        format_layout.addRow(self.image_max_size_label, self.image_max_size_spinbox)
+
+        # Auto-resize checkbox (for Max Size mode)
+        self.image_auto_resize_checkbox = QCheckBox("Auto-resize")
+        self.image_auto_resize_checkbox.setChecked(True)
+        self.image_auto_resize_checkbox.setStyleSheet(TOGGLE_STYLE)
+        self.image_auto_resize_checkbox.setToolTip(
+            "Change the resolution in pixels (width×height) to match desired file size in MB."
+        )
+        self.image_auto_resize_checkbox.setVisible(False)
+        format_layout.addRow(self.image_auto_resize_checkbox)
+        
+        # Format dropdown - SECOND
         self.image_format = CustomComboBox()
         self.image_format.addItems(["WebP", "JPG", "PNG", "TIFF", "BMP"])
         format_layout.addRow("Format:", self.image_format)
-        
-        # Multiple qualities option - SECOND
+
+        # Multiple qualities option - THIRD
         self.multiple_qualities = QCheckBox("Multiple qualities")
         self.multiple_qualities.toggled.connect(self.toggle_quality_mode)
         self.multiple_qualities.setStyleSheet(TOGGLE_STYLE)
@@ -357,7 +509,8 @@ class CommandPanel(QWidget):
         quality_layout = QHBoxLayout()
         quality_layout.addWidget(self.image_quality)
         quality_layout.addWidget(self.image_quality_label)
-        format_layout.addRow("Quality:", quality_layout)
+        self.image_quality_row_label = QLabel("Quality:")
+        format_layout.addRow(self.image_quality_row_label, quality_layout)
         
         # Quality variants input (hidden by default)
         self.quality_variants = QLineEdit()
@@ -368,12 +521,15 @@ class CommandPanel(QWidget):
         self.quality_variants_label.setVisible(False)
         format_layout.addRow(self.quality_variants_label, self.quality_variants)
         
+        format_group_layout.addLayout(format_layout)
+        
         layout.addWidget(format_group)
         
         # Resize options
         resize_group = QGroupBox("Resize Options")
         resize_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         resize_layout = QFormLayout(resize_group)
+        resize_layout.setVerticalSpacing(8)
         
         # Resize mode selection - FIRST
         self.resize_mode = CustomComboBox()
@@ -388,7 +544,7 @@ class CommandPanel(QWidget):
         resize_layout.addRow(self.multiple_resize)
         
         # Single resize value input
-        self.resize_value = QSpinBox()
+        self.resize_value = CustomSpinBox(on_enter_callback=self._focus_active_tab)
         self.resize_value.setRange(1, 10000)
         self.resize_value.setValue(720)  # Default for pixels
         self.resize_value.setVisible(False)
@@ -425,17 +581,54 @@ class CommandPanel(QWidget):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(3)
         
-        # Video codec selection
-        codec_group = QGroupBox("Video Settings")
+        # Video codec selection (Mode + Settings unified)
+        codec_group = QGroupBox("Settings")
         codec_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        codec_layout = QFormLayout(codec_group)
+        codec_group_layout = QVBoxLayout(codec_group)
+        codec_group_layout.setContentsMargins(0, 0, 0, 0)
+        codec_group_layout.setSpacing(0)
         
+        # Mode buttons - uniform component
+        self.video_mode_buttons = ModeButtonsWidget(default_mode="Max Size")
+        self.video_mode_buttons.modeChanged.connect(self.on_video_size_mode_changed)
+        codec_group_layout.addWidget(self.video_mode_buttons)
+        self.video_size_mode_value = "manual"
+        
+        # Form layout for settings
+        codec_layout = QFormLayout()
+        codec_layout.setContentsMargins(14, 9, 14, 14)
+        codec_layout.setVerticalSpacing(8)
+        codec_group_layout.addLayout(codec_layout)
+        
+        # Target Size - FIRST (shown in Max Size mode)
+        self.video_max_size_spinbox = CustomTargetSizeSpinBox(
+            default_value=1.0,
+            on_enter_callback=self._focus_active_tab
+        )
+        self.video_max_size_spinbox.setToolTip("Target maximum file size in megabytes")
+        self.video_max_size_spinbox.setVisible(False)
+        self.video_max_size_label = QLabel("Max Size (MB):")
+        self.video_max_size_label.setVisible(False)
+        codec_layout.addRow(self.video_max_size_label, self.video_max_size_spinbox)
+
+        # Auto-resize checkbox (for Max Size mode)
+        self.video_auto_resize_checkbox = QCheckBox("Auto-resize")
+        self.video_auto_resize_checkbox.setChecked(True)
+        self.video_auto_resize_checkbox.setStyleSheet(TOGGLE_STYLE)
+        self.video_auto_resize_checkbox.setToolTip(
+            "Change the resolution in pixels (width×height) to match desired file size in MB."
+        )
+        self.video_auto_resize_checkbox.setVisible(False)
+        codec_layout.addRow(self.video_auto_resize_checkbox)
+        
+        # Format dropdown - SECOND
         self.video_codec = CustomComboBox()
         self.video_codec.addItems(["WebM (VP9, faster)", "WebM (AV1, slower)", "MP4 (H.264)", "MP4 (H.265)", "MP4 (AV1)"])
         self.video_codec.currentTextChanged.connect(self.on_video_codec_changed)
         codec_layout.addRow("Format:", self.video_codec)
-        
+
         # Quality (CRF) slider for WebM
         self.video_quality = QSlider(Qt.Orientation.Horizontal)
         self.video_quality.setRange(0, 100)
@@ -479,6 +672,7 @@ class CommandPanel(QWidget):
         # Video filters
         filter_group = QGroupBox("Resize")
         filter_layout = QFormLayout(filter_group)
+        filter_layout.setVerticalSpacing(8)
         
         # Resize mode selection
         self.video_resize_mode = CustomComboBox()
@@ -493,7 +687,7 @@ class CommandPanel(QWidget):
         filter_layout.addRow(self.multiple_video_variants)
         
         # Single resize value input (hidden by default)
-        self.video_resize_value = QSpinBox()
+        self.video_resize_value = CustomSpinBox(on_enter_callback=self._focus_active_tab)
         self.video_resize_value.setRange(1, 10000)
         self.video_resize_value.setValue(1920)
         self.video_resize_value.setVisible(False)
@@ -515,6 +709,7 @@ class CommandPanel(QWidget):
         # Video rotation options
         rotation_group = QGroupBox("Rotation")
         rotation_layout = QFormLayout(rotation_group)
+        rotation_layout.setVerticalSpacing(8)
         
         self.video_rotation_angle = CustomComboBox()
         self.video_rotation_angle.addItems(["No rotation", "90° clockwise", "180°", "270° clockwise"])
@@ -525,6 +720,7 @@ class CommandPanel(QWidget):
         # Video time options (cutting + retime)
         time_group = QGroupBox("Time Options")
         time_layout = QFormLayout(time_group)
+        time_layout.setVerticalSpacing(8)
         
         # Time range toggle (controls range slider visibility)
         self.enable_time_cutting = QCheckBox("Time range")
@@ -539,7 +735,7 @@ class CommandPanel(QWidget):
         self.time_range_slider.setEndValue(1.0)
         self.time_range_slider.setToolTip("Drag the handles to set start and end times (0% = beginning, 100% = end)")
         self.time_range_slider.setVisible(False)
-        time_layout.addRow("Time Range:", self.time_range_slider)
+        time_layout.addRow(self.time_range_slider)
 
         # Retime controls
         self.enable_retime = QCheckBox("Enable retime")
@@ -559,7 +755,11 @@ class CommandPanel(QWidget):
         retime_layout = QHBoxLayout()
         retime_layout.addWidget(self.retime_slider)
         retime_layout.addWidget(self.retime_value_label)
-        time_layout.addRow("Playback speed:", retime_layout)
+        
+        # Store label reference for visibility control
+        self.retime_speed_label = QLabel("Playback speed:")
+        self.retime_speed_label.setVisible(False)
+        time_layout.addRow(self.retime_speed_label, retime_layout)
         
         layout.addWidget(time_group)
         
@@ -570,62 +770,35 @@ class CommandPanel(QWidget):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(3)
         
-        # --- FFmpeg Export Options ---
-        self.ffmpeg_group = QGroupBox("GIF Settings")
+        # ffmpeg GIF options (Mode + Settings unified)
+        self.ffmpeg_group = QGroupBox("Settings")
         self.ffmpeg_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        ffmpeg_layout = QFormLayout(self.ffmpeg_group)
+        ffmpeg_group_layout = QVBoxLayout(self.ffmpeg_group)
+        ffmpeg_group_layout.setContentsMargins(0, 0, 0, 0)
+        ffmpeg_group_layout.setSpacing(0)
+        
+        # Mode buttons - uniform component
+        self.gif_mode_buttons = ModeButtonsWidget(default_mode="Max Size")
+        self.gif_mode_buttons.modeChanged.connect(self.on_gif_size_mode_changed)
+        ffmpeg_group_layout.addWidget(self.gif_mode_buttons)
+        
+        # Form layout for settings
+        ffmpeg_layout = QFormLayout()
+        ffmpeg_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        ffmpeg_layout.setContentsMargins(14, 9, 14, 14)
+        ffmpeg_layout.setVerticalSpacing(8)
+        ffmpeg_group_layout.addLayout(ffmpeg_layout)
 
-        # Mode selection buttons (inside GIF Settings)
-        mode_buttons_container = QWidget()
-        mode_buttons_layout = QHBoxLayout(mode_buttons_container)
-        mode_buttons_layout.setContentsMargins(0, 0, 0, 0)
-        mode_buttons_layout.setSpacing(8)
-
-        mode_button_style = (
-            "QPushButton { padding: 6px 14px; border-radius: 6px; border: 1px solid #555555; }"
-            "QPushButton:checked { background-color: #4CAF50; color: white; border-color: #43a047; }"
+        # Target Size - SECOND
+        self.gif_max_size_spinbox = CustomTargetSizeSpinBox(
+            default_value=2.0,
+            on_enter_callback=self._focus_active_tab
         )
-
-        self.gif_mode_max_size_btn = QPushButton("Max Size")
-        self.gif_mode_max_size_btn.setCheckable(True)
-        self.gif_mode_max_size_btn.setStyleSheet(mode_button_style)
-        self.gif_mode_max_size_btn.setToolTip("Auto-optimize to fit target file size")
-
-        self.gif_mode_manual_btn = QPushButton("Manual")
-        self.gif_mode_manual_btn.setCheckable(True)
-        self.gif_mode_manual_btn.setStyleSheet(mode_button_style)
-        self.gif_mode_manual_btn.setToolTip("Set quality settings yourself")
-
-        self.gif_mode_button_group = QButtonGroup(self)
-        self.gif_mode_button_group.setExclusive(True)
-        self.gif_mode_button_group.addButton(self.gif_mode_max_size_btn)
-        self.gif_mode_button_group.addButton(self.gif_mode_manual_btn)
-
-        # Default: Max Size
-        self.gif_mode_max_size_btn.setChecked(True)
-
-        self.gif_mode_max_size_btn.toggled.connect(
-            lambda checked: checked and self.on_gif_size_mode_changed("Max Size")
-        )
-        self.gif_mode_manual_btn.toggled.connect(
-            lambda checked: checked and self.on_gif_size_mode_changed("Manual")
-        )
-
-        mode_buttons_layout.addWidget(self.gif_mode_max_size_btn)
-        mode_buttons_layout.addWidget(self.gif_mode_manual_btn)
-        ffmpeg_layout.addRow("Mode:", mode_buttons_container)
-
-        # Max size input (hidden by default)
-        self.gif_max_size_spinbox = QDoubleSpinBox()
-        self.gif_max_size_spinbox.setRange(0.5, 100.0)
-        self.gif_max_size_spinbox.setValue(5.0)
-        self.gif_max_size_spinbox.setSuffix("")
-        self.gif_max_size_spinbox.setDecimals(1)
-        self.gif_max_size_spinbox.setSingleStep(0.5)
         self.gif_max_size_spinbox.setToolTip("Target maximum file size in megabytes")
         self.gif_max_size_spinbox.setVisible(False)
-        self.gif_max_size_label = QLabel("Target Size (MB):")
+        self.gif_max_size_label = QLabel("Max Size (MB):")
         self.gif_max_size_label.setVisible(False)
         ffmpeg_layout.addRow(self.gif_max_size_label, self.gif_max_size_spinbox)
 
@@ -634,13 +807,10 @@ class CommandPanel(QWidget):
         self.gif_auto_resize_checkbox.setChecked(True)  # Enabled by default
         self.gif_auto_resize_checkbox.setStyleSheet(TOGGLE_STYLE)
         self.gif_auto_resize_checkbox.setToolTip(
-            "Try resolution scaling (90%, 80%, 70%, 60%) before using very low quality settings.\n"
-            "This helps maintain visual quality while meeting the target size."
+            "Change the resolution in pixels (width×height) to match desired file size in MB."
         )
         self.gif_auto_resize_checkbox.setVisible(False)
-        self.gif_auto_resize_label = QLabel("")  # Empty label for alignment
-        self.gif_auto_resize_label.setVisible(False)
-        ffmpeg_layout.addRow(self.gif_auto_resize_label, self.gif_auto_resize_checkbox)
+        ffmpeg_layout.addRow(self.gif_auto_resize_checkbox)
 
         # Estimation info label (hidden by default)
         self.gif_size_estimate_label = QLabel("")
@@ -708,12 +878,14 @@ class CommandPanel(QWidget):
         self.gif_dither_quality_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.gif_dither_quality_slider.setTickInterval(1)
         
-        self.gif_dither_quality_label = QLabel("Quality: 3 (High)")
+        self.gif_dither_quality_label = QLabel("3")
         self.gif_dither_quality_slider.valueChanged.connect(self.update_dither_quality_label)
         
+        dither_quality_layout = QHBoxLayout()
+        dither_quality_layout.addWidget(self.gif_dither_quality_slider)
+        dither_quality_layout.addWidget(self.gif_dither_quality_label)
         self.gif_dither_quality_row_label = QLabel("Quality:")
-        ffmpeg_layout.addRow(self.gif_dither_quality_row_label, self.gif_dither_quality_slider)
-        ffmpeg_layout.addRow("", self.gif_dither_quality_label)
+        ffmpeg_layout.addRow(self.gif_dither_quality_row_label, dither_quality_layout)
 
         # Dither Variants
         self.ffmpeg_gif_dither_variants = QLineEdit()
@@ -734,6 +906,7 @@ class CommandPanel(QWidget):
         resize_group = QGroupBox("Resize")
         resize_group.setSizePolicy(resize_group.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Maximum)
         resize_layout = QFormLayout(resize_group)
+        resize_layout.setVerticalSpacing(8)
         
         # Resize mode selection - FIRST
         self.gif_resize_mode = CustomComboBox()
@@ -749,7 +922,7 @@ class CommandPanel(QWidget):
         resize_layout.addRow(self.gif_multiple_resize)
         
         # Single resize value input (hidden by default)
-        self.gif_resize_value = QSpinBox()
+        self.gif_resize_value = CustomSpinBox(on_enter_callback=self._focus_active_tab)
         self.gif_resize_value.setRange(1, 10000)
         self.gif_resize_value.setValue(720)
         self.gif_resize_value.setVisible(False)
@@ -772,6 +945,7 @@ class CommandPanel(QWidget):
         rotation_group = QGroupBox("Rotation")
         rotation_group.setSizePolicy(rotation_group.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Maximum)
         rotation_layout = QFormLayout(rotation_group)
+        rotation_layout.setVerticalSpacing(8)
         
         self.gif_rotation_angle = CustomComboBox()
         self.gif_rotation_angle.addItems(["No rotation", "90° clockwise", "180°", "270° clockwise"])
@@ -784,6 +958,7 @@ class CommandPanel(QWidget):
         gif_time_group = QGroupBox("Time Options")
         gif_time_group.setSizePolicy(gif_time_group.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Maximum)
         gif_time_layout = QFormLayout(gif_time_group)
+        gif_time_layout.setVerticalSpacing(8)
         
         # Time range toggle
         self.gif_enable_time_cutting = QCheckBox("Time range")
@@ -798,7 +973,7 @@ class CommandPanel(QWidget):
         self.gif_time_range_slider.setEndValue(1.0)
         self.gif_time_range_slider.setToolTip("Drag the handles to set start and end times (0% = beginning, 100% = end)")
         self.gif_time_range_slider.setVisible(False)
-        gif_time_layout.addRow("Time Range:", self.gif_time_range_slider)
+        gif_time_layout.addRow(self.gif_time_range_slider)
 
         # Retime controls for GIF conversion
         self.gif_enable_retime = QCheckBox("Enable retime")
@@ -818,7 +993,11 @@ class CommandPanel(QWidget):
         gif_retime_layout = QHBoxLayout()
         gif_retime_layout.addWidget(self.gif_retime_slider)
         gif_retime_layout.addWidget(self.gif_retime_value_label)
-        gif_time_layout.addRow("Playback speed:", gif_retime_layout)
+        
+        # Store label reference for visibility control
+        self.gif_retime_speed_label = QLabel("Playback speed:")
+        self.gif_retime_speed_label.setVisible(False)
+        gif_time_layout.addRow(self.gif_retime_speed_label, gif_retime_layout)
         
         layout.addWidget(gif_time_group)
         
@@ -884,6 +1063,7 @@ class CommandPanel(QWidget):
     def create_control_buttons(self):
         """Create conversion control buttons"""
         layout = QVBoxLayout()
+        
         self.convert_btn = DynamicFontButton("Start Conversion")
         self.convert_btn.clicked.connect(self.on_convert_button_clicked)
         self.is_converting = False
@@ -970,10 +1150,16 @@ class CommandPanel(QWidget):
             if resize_values and len(resize_values) == 1:
                 current_resize = resize_values[0]
             
+            # Get size mode settings
+            image_size_mode = getattr(self, 'image_size_mode_value', 'manual')
+            
             params.update({
                 'type': 'image',
                 'format': self.image_format.currentText().lower(),
                 'quality': self.image_quality.value(),
+                'image_size_mode': image_size_mode,  # 'manual' or 'max_size'
+                'image_max_size_mb': self.image_max_size_spinbox.value() if image_size_mode == 'max_size' else None,
+                'image_auto_resize': self.image_auto_resize_checkbox.isChecked() if image_size_mode == 'max_size' else False,
                 'quality_variants': quality_variants,
                 'multiple_qualities': self.multiple_qualities.isChecked(),
                 'resize_variants': resize_values,
@@ -992,6 +1178,9 @@ class CommandPanel(QWidget):
                     except:
                         quality_variants = None
             
+            # Get video size mode settings
+            video_size_mode = getattr(self, 'video_size_mode_value', 'manual')
+            
             # Handle video size variants
             if hasattr(self, 'multiple_video_variants') and self.multiple_video_variants.isChecked():
                 video_variants = self.get_video_variant_values()
@@ -999,6 +1188,9 @@ class CommandPanel(QWidget):
                     'type': 'video',
                     'codec': self.video_codec.currentText(),
                     'quality': self.video_quality.value(),
+                    'video_size_mode': video_size_mode,  # 'manual' or 'max_size'
+                    'video_max_size_mb': self.video_max_size_spinbox.value() if video_size_mode == 'max_size' else None,
+                    'video_auto_resize': self.video_auto_resize_checkbox.isChecked() if video_size_mode == 'max_size' else False,
                     'quality_variants': quality_variants,
                     'multiple_video_qualities': self.multiple_video_qualities.isChecked(),
                     'video_variants': video_variants,
@@ -1029,6 +1221,9 @@ class CommandPanel(QWidget):
                     'type': 'video',
                     'codec': self.video_codec.currentText(),
                     'quality': self.video_quality.value(),
+                    'video_size_mode': video_size_mode,  # 'manual' or 'max_size'
+                    'video_max_size_mb': self.video_max_size_spinbox.value() if video_size_mode == 'max_size' else None,
+                    'video_auto_resize': self.video_auto_resize_checkbox.isChecked() if video_size_mode == 'max_size' else False,
                     'quality_variants': quality_variants,
                     'multiple_video_qualities': self.multiple_video_qualities.isChecked(),
                     'video_variants': [],
@@ -1116,16 +1311,9 @@ class CommandPanel(QWidget):
         # Show/hide appropriate controls
         self.image_quality.setVisible(not checked)
         self.image_quality_label.setVisible(not checked)
+        self.image_quality_row_label.setVisible(not checked)
         self.quality_variants.setVisible(checked)
         self.quality_variants_label.setVisible(checked)
-        
-        # Update the quality row label text
-        quality_row = self.image_tab.findChild(QFormLayout).labelForField(self.image_quality.parent())
-        if quality_row:
-            if checked:
-                quality_row.setText("Quality variants:")
-            else:
-                quality_row.setText("Quality:")
     
     def toggle_resize_mode(self, checked):
         """Toggle between single and multiple resize modes"""
@@ -1265,15 +1453,7 @@ class CommandPanel(QWidget):
 
     def update_dither_quality_label(self, value):
         """Update dither quality label based on slider value"""
-        labels = {
-            0: "0 (Lowest)",
-            1: "1 (Low)",
-            2: "2 (Medium)",
-            3: "3 (High)",
-            4: "4 (Higher)",
-            5: "5 (Best)"
-        }
-        self.gif_dither_quality_label.setText(f"Quality: {labels.get(value, str(value))}")
+        self.gif_dither_quality_label.setText(str(value))
 
     def get_dither_string_from_quality(self, quality):
         """Map integer quality (0-5) to FFmpeg dither string"""
@@ -1296,7 +1476,6 @@ class CommandPanel(QWidget):
         self.gif_max_size_label.setVisible(is_max_size)
         self.gif_max_size_spinbox.setVisible(is_max_size)
         self.gif_auto_resize_checkbox.setVisible(is_max_size)
-        self.gif_auto_resize_label.setVisible(is_max_size)
         self.gif_size_estimate_label.setVisible(is_max_size)
         
         if is_max_size:
@@ -1320,10 +1499,7 @@ class CommandPanel(QWidget):
             self.ffmpeg_gif_dither_variants_label.setVisible(False)
             self.ffmpeg_gif_dither_variants.setVisible(False)
             
-            self.gif_size_estimate_label.setText(
-                "Settings will be auto-optimized to fit target size. "
-                "Manual settings above are used as starting point."
-            )
+            self.gif_size_estimate_label.setText("")
         else:
             # Show manual controls in Manual mode
             self.gif_ffmpeg_variants.setVisible(True)
@@ -1348,6 +1524,74 @@ class CommandPanel(QWidget):
             self.ffmpeg_gif_dither_variants.setVisible(variants_enabled)
             
             self.gif_size_estimate_label.setText("")
+
+    def on_image_size_mode_changed(self, mode):
+        """Handle Image size mode change between Manual and Max Size"""
+        is_max_size = (mode == "Max Size")
+        self.image_size_mode_value = "max_size" if is_max_size else "manual"
+        
+        # Show/hide max size controls
+        self.image_max_size_label.setVisible(is_max_size)
+        self.image_max_size_spinbox.setVisible(is_max_size)
+        self.image_auto_resize_checkbox.setVisible(is_max_size)
+        
+        if is_max_size:
+            # Hide manual quality controls in Max Size mode
+            self.multiple_qualities.setChecked(False)
+            self.multiple_qualities.setVisible(False)
+            
+            self.image_quality.setVisible(False)
+            self.image_quality_label.setVisible(False)
+            self.image_quality_row_label.setVisible(False)
+            
+            self.quality_variants.setVisible(False)
+            self.quality_variants_label.setVisible(False)
+        else:
+            # Show manual controls in Manual mode
+            self.multiple_qualities.setVisible(True)
+            
+            # Show quality controls based on multiple_qualities state
+            variants_enabled = self.multiple_qualities.isChecked()
+            self.image_quality.setVisible(not variants_enabled)
+            self.image_quality_label.setVisible(not variants_enabled)
+            self.image_quality_row_label.setVisible(not variants_enabled)
+            
+            self.quality_variants.setVisible(variants_enabled)
+            self.quality_variants_label.setVisible(variants_enabled)
+
+    def on_video_size_mode_changed(self, mode):
+        """Handle Video size mode change between Manual and Max Size"""
+        is_max_size = (mode == "Max Size")
+        self.video_size_mode_value = "max_size" if is_max_size else "manual"
+        
+        # Show/hide max size controls
+        self.video_max_size_label.setVisible(is_max_size)
+        self.video_max_size_spinbox.setVisible(is_max_size)
+        self.video_auto_resize_checkbox.setVisible(is_max_size)
+        
+        if is_max_size:
+            # Hide manual quality controls in Max Size mode
+            self.multiple_video_qualities.setChecked(False)
+            self.multiple_video_qualities.setVisible(False)
+            
+            self.video_quality.setVisible(False)
+            self.video_quality_label.setVisible(False)
+            self.video_quality_value.setVisible(False)
+            
+            self.video_quality_variants.setVisible(False)
+            self.video_quality_variants_label.setVisible(False)
+        else:
+            # Show manual controls in Manual mode
+            self.multiple_video_qualities.setVisible(True)
+            
+            # Show quality controls based on multiple_qualities state
+            variants_enabled = self.multiple_video_qualities.isChecked()
+            self.video_quality.setVisible(not variants_enabled)
+            self.video_quality_label.setVisible(not variants_enabled)
+            self.video_quality_value.setVisible(not variants_enabled)
+            
+            self.video_quality_variants.setVisible(variants_enabled)
+            self.video_quality_variants_label.setVisible(variants_enabled)
 
     def toggle_video_variant_mode(self, checked):
         """Toggle between single and multiple video size variant modes"""
@@ -1509,6 +1753,8 @@ class CommandPanel(QWidget):
                 self.retime_slider.setVisible(checked)
             if hasattr(self, 'retime_value_label'):
                 self.retime_value_label.setVisible(checked)
+            if hasattr(self, 'retime_speed_label'):
+                self.retime_speed_label.setVisible(checked)
         except Exception as e:
             print(f"Error toggling retime: {e}")
     
@@ -1527,6 +1773,8 @@ class CommandPanel(QWidget):
                 self.gif_retime_slider.setVisible(checked)
             if hasattr(self, 'gif_retime_value_label'):
                 self.gif_retime_value_label.setVisible(checked)
+            if hasattr(self, 'gif_retime_speed_label'):
+                self.gif_retime_speed_label.setVisible(checked)
         except Exception as e:
             print(f"Error toggling GIF retime: {e}")
     

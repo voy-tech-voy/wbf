@@ -96,11 +96,10 @@ class EmergencyCrashReporter:
             
             # Basic logging setup
             logging.basicConfig(
-                level=logging.DEBUG,
+                level=logging.WARNING,
                 format='%(asctime)s - %(levelname)s - %(message)s',
                 handlers=[
-                    logging.FileHandler(str(self.log_file), encoding='utf-8'),
-                    logging.StreamHandler(sys.stdout)
+                    logging.FileHandler(str(self.log_file), encoding='utf-8')
                 ]
             )
             
