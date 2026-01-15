@@ -268,12 +268,17 @@ def main():
         QApplication.processEvents()  # Process events during window creation
         print("✅ Main window created")
         
-        # Ensure splash displays for exactly 3 seconds
+        # Ensure splash displays for minimum 2 seconds (non-blocking wait)
+        MIN_SPLASH_TIME = 2.0
         elapsed = time.time() - splash_start_time
-        if elapsed < 3.0:
-            remaining = 3.0 - elapsed
-            print(f"⏳ Waiting {remaining:.1f}s more for splash...")
-            time.sleep(remaining)
+        if elapsed < MIN_SPLASH_TIME:
+            remaining_ms = int((MIN_SPLASH_TIME - elapsed) * 1000)
+            print(f"⏳ Waiting {remaining_ms}ms more for splash (non-blocking)...")
+            # Non-blocking wait - keeps UI responsive
+            end_time = time.time() + (MIN_SPLASH_TIME - elapsed)
+            while time.time() < end_time:
+                QApplication.processEvents()
+                time.sleep(0.016)  # ~60fps update rate
         
         # Close splash and show main window simultaneously
         splash.close()

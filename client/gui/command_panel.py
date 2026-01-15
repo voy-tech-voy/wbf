@@ -6,7 +6,7 @@ Provides conversion commands and options for ffmpeg, gifsicle, and ImageMagick
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QLabel, QPushButton, QComboBox, QSpinBox, QDoubleSpinBox, QCheckBox, QLineEdit,
-    QGroupBox, QFormLayout, QTabWidget, QTextEdit, QSlider, QRadioButton, QSizePolicy
+    QGroupBox, QFormLayout, QTabWidget, QTextEdit, QSlider, QRadioButton, QSizePolicy, QButtonGroup
 )
 from client.utils.font_manager import AppFonts, FONT_FAMILY, FONT_SIZE_BUTTON
 from client.gui.custom_widgets import TimeRangeSlider, ResizeFolder, RotationOptions, CustomComboBox
@@ -184,6 +184,7 @@ class CommandPanel(QWidget):
                 getattr(self, 'gif_enable_time_cutting', None),
                 getattr(self, 'gif_enable_retime', None),
                 getattr(self, 'gif_ffmpeg_variants', None),
+                getattr(self, 'gif_auto_resize_checkbox', None),
                 getattr(self, 'ffmpeg_gif_blur', None),
                 getattr(self, 'output_mode_same', None),
                 getattr(self, 'output_mode_nested', None),
@@ -575,6 +576,79 @@ class CommandPanel(QWidget):
         self.ffmpeg_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         ffmpeg_layout = QFormLayout(self.ffmpeg_group)
 
+        # Mode selection buttons (inside GIF Settings)
+        mode_buttons_container = QWidget()
+        mode_buttons_layout = QHBoxLayout(mode_buttons_container)
+        mode_buttons_layout.setContentsMargins(0, 0, 0, 0)
+        mode_buttons_layout.setSpacing(8)
+
+        mode_button_style = (
+            "QPushButton { padding: 6px 14px; border-radius: 6px; border: 1px solid #555555; }"
+            "QPushButton:checked { background-color: #4CAF50; color: white; border-color: #43a047; }"
+        )
+
+        self.gif_mode_max_size_btn = QPushButton("Max Size")
+        self.gif_mode_max_size_btn.setCheckable(True)
+        self.gif_mode_max_size_btn.setStyleSheet(mode_button_style)
+        self.gif_mode_max_size_btn.setToolTip("Auto-optimize to fit target file size")
+
+        self.gif_mode_manual_btn = QPushButton("Manual")
+        self.gif_mode_manual_btn.setCheckable(True)
+        self.gif_mode_manual_btn.setStyleSheet(mode_button_style)
+        self.gif_mode_manual_btn.setToolTip("Set quality settings yourself")
+
+        self.gif_mode_button_group = QButtonGroup(self)
+        self.gif_mode_button_group.setExclusive(True)
+        self.gif_mode_button_group.addButton(self.gif_mode_max_size_btn)
+        self.gif_mode_button_group.addButton(self.gif_mode_manual_btn)
+
+        # Default: Max Size
+        self.gif_mode_max_size_btn.setChecked(True)
+
+        self.gif_mode_max_size_btn.toggled.connect(
+            lambda checked: checked and self.on_gif_size_mode_changed("Max Size")
+        )
+        self.gif_mode_manual_btn.toggled.connect(
+            lambda checked: checked and self.on_gif_size_mode_changed("Manual")
+        )
+
+        mode_buttons_layout.addWidget(self.gif_mode_max_size_btn)
+        mode_buttons_layout.addWidget(self.gif_mode_manual_btn)
+        ffmpeg_layout.addRow("Mode:", mode_buttons_container)
+
+        # Max size input (hidden by default)
+        self.gif_max_size_spinbox = QDoubleSpinBox()
+        self.gif_max_size_spinbox.setRange(0.5, 100.0)
+        self.gif_max_size_spinbox.setValue(5.0)
+        self.gif_max_size_spinbox.setSuffix("")
+        self.gif_max_size_spinbox.setDecimals(1)
+        self.gif_max_size_spinbox.setSingleStep(0.5)
+        self.gif_max_size_spinbox.setToolTip("Target maximum file size in megabytes")
+        self.gif_max_size_spinbox.setVisible(False)
+        self.gif_max_size_label = QLabel("Target Size (MB):")
+        self.gif_max_size_label.setVisible(False)
+        ffmpeg_layout.addRow(self.gif_max_size_label, self.gif_max_size_spinbox)
+
+        # Auto-resize checkbox (for Max Size mode)
+        self.gif_auto_resize_checkbox = QCheckBox("Auto-resize")
+        self.gif_auto_resize_checkbox.setChecked(True)  # Enabled by default
+        self.gif_auto_resize_checkbox.setStyleSheet(TOGGLE_STYLE)
+        self.gif_auto_resize_checkbox.setToolTip(
+            "Try resolution scaling (90%, 80%, 70%, 60%) before using very low quality settings.\n"
+            "This helps maintain visual quality while meeting the target size."
+        )
+        self.gif_auto_resize_checkbox.setVisible(False)
+        self.gif_auto_resize_label = QLabel("")  # Empty label for alignment
+        self.gif_auto_resize_label.setVisible(False)
+        ffmpeg_layout.addRow(self.gif_auto_resize_label, self.gif_auto_resize_checkbox)
+
+        # Estimation info label (hidden by default)
+        self.gif_size_estimate_label = QLabel("")
+        self.gif_size_estimate_label.setStyleSheet("color: #888; font-style: italic;")
+        self.gif_size_estimate_label.setVisible(False)
+        self.gif_size_estimate_label.setWordWrap(True)
+        ffmpeg_layout.addRow("", self.gif_size_estimate_label)
+
         # Multiple variants toggle
         self.gif_ffmpeg_variants = QCheckBox("Multiple Variants (FPS, Colors, Qualities)")
         self.gif_ffmpeg_variants.setStyleSheet(TOGGLE_STYLE)
@@ -637,7 +711,8 @@ class CommandPanel(QWidget):
         self.gif_dither_quality_label = QLabel("Quality: 3 (High)")
         self.gif_dither_quality_slider.valueChanged.connect(self.update_dither_quality_label)
         
-        ffmpeg_layout.addRow("Quality:", self.gif_dither_quality_slider)
+        self.gif_dither_quality_row_label = QLabel("Quality:")
+        ffmpeg_layout.addRow(self.gif_dither_quality_row_label, self.gif_dither_quality_slider)
         ffmpeg_layout.addRow("", self.gif_dither_quality_label)
 
         # Dither Variants
@@ -746,6 +821,9 @@ class CommandPanel(QWidget):
         gif_time_layout.addRow("Playback speed:", gif_retime_layout)
         
         layout.addWidget(gif_time_group)
+        
+        # Apply initial size mode visibility (Max Size default)
+        self.on_gif_size_mode_changed("Max Size")
         
         return tab
 
@@ -971,9 +1049,15 @@ class CommandPanel(QWidget):
             # Get resize values
             gif_resize_values = self.get_gif_resize_values()
             
+            # Get size mode settings
+            size_mode = getattr(self, 'gif_size_mode_value', 'max_size')
+            
             params.update({
                 'type': 'gif',
                 'use_ffmpeg_gif': True,  # Always use FFmpeg
+                'gif_size_mode': size_mode,  # 'manual' or 'max_size'
+                'gif_max_size_mb': self.gif_max_size_spinbox.value() if size_mode == 'max_size' else None,
+                'gif_auto_resize': self.gif_auto_resize_checkbox.isChecked() if size_mode == 'max_size' else False,
                 'ffmpeg_fps': int(self.ffmpeg_gif_fps.currentText()),
                 'ffmpeg_colors': int(self.ffmpeg_gif_colors.currentText()),
                 'ffmpeg_dither': self.get_dither_string_from_quality(self.gif_dither_quality_slider.value()),
@@ -1114,6 +1198,7 @@ class CommandPanel(QWidget):
         # self.ffmpeg_gif_dither.setVisible(not checked)
         # self.ffmpeg_gif_dither_label.setVisible(not checked)
         self.gif_dither_quality_slider.setVisible(not checked)
+        self.gif_dither_quality_row_label.setVisible(not checked)
         self.gif_dither_quality_label.setVisible(not checked)
         
         # Show/hide variant controls
@@ -1201,6 +1286,68 @@ class CommandPanel(QWidget):
             5: "floyd_steinberg"
         }
         return mapping.get(quality, "floyd_steinberg")
+
+    def on_gif_size_mode_changed(self, mode):
+        """Handle GIF size mode change between Manual and Max Size"""
+        is_max_size = (mode == "Max Size")
+        self.gif_size_mode_value = "max_size" if is_max_size else "manual"
+        
+        # Show/hide max size controls
+        self.gif_max_size_label.setVisible(is_max_size)
+        self.gif_max_size_spinbox.setVisible(is_max_size)
+        self.gif_auto_resize_checkbox.setVisible(is_max_size)
+        self.gif_auto_resize_label.setVisible(is_max_size)
+        self.gif_size_estimate_label.setVisible(is_max_size)
+        
+        if is_max_size:
+            # Hide manual quality controls in Max Size mode (auto-optimized)
+            self.gif_ffmpeg_variants.setChecked(False)
+            self.gif_ffmpeg_variants.setVisible(False)
+            
+            self.ffmpeg_gif_fps_label.setVisible(False)
+            self.ffmpeg_gif_fps.setVisible(False)
+            self.ffmpeg_gif_fps_variants_label.setVisible(False)
+            self.ffmpeg_gif_fps_variants.setVisible(False)
+            
+            self.ffmpeg_gif_colors_label.setVisible(False)
+            self.ffmpeg_gif_colors.setVisible(False)
+            self.ffmpeg_gif_colors_variants_label.setVisible(False)
+            self.ffmpeg_gif_colors_variants.setVisible(False)
+            
+            self.gif_dither_quality_slider.setVisible(False)
+            self.gif_dither_quality_row_label.setVisible(False)
+            self.gif_dither_quality_label.setVisible(False)
+            self.ffmpeg_gif_dither_variants_label.setVisible(False)
+            self.ffmpeg_gif_dither_variants.setVisible(False)
+            
+            self.gif_size_estimate_label.setText(
+                "Settings will be auto-optimized to fit target size. "
+                "Manual settings above are used as starting point."
+            )
+        else:
+            # Show manual controls in Manual mode
+            self.gif_ffmpeg_variants.setVisible(True)
+            
+            self.ffmpeg_gif_fps_label.setVisible(True)
+            self.ffmpeg_gif_fps.setVisible(True)
+            
+            self.ffmpeg_gif_colors_label.setVisible(True)
+            self.ffmpeg_gif_colors.setVisible(True)
+            
+            self.gif_dither_quality_slider.setVisible(True)
+            self.gif_dither_quality_row_label.setVisible(True)
+            self.gif_dither_quality_label.setVisible(True)
+            
+            # Variants visibility depends on toggle state
+            variants_enabled = self.gif_ffmpeg_variants.isChecked()
+            self.ffmpeg_gif_fps_variants_label.setVisible(variants_enabled)
+            self.ffmpeg_gif_fps_variants.setVisible(variants_enabled)
+            self.ffmpeg_gif_colors_variants_label.setVisible(variants_enabled)
+            self.ffmpeg_gif_colors_variants.setVisible(variants_enabled)
+            self.ffmpeg_gif_dither_variants_label.setVisible(variants_enabled)
+            self.ffmpeg_gif_dither_variants.setVisible(variants_enabled)
+            
+            self.gif_size_estimate_label.setText("")
 
     def toggle_video_variant_mode(self, checked):
         """Toggle between single and multiple video size variant modes"""

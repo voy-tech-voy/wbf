@@ -10,17 +10,20 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QEvent
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QPixmap, QIcon, QAction, QPainter, QColor, QCursor
 import os
+import subprocess
+import tempfile
 from pathlib import Path
 
 class FileListItemWidget(QWidget):
     """Custom widget for list items with hover-based remove button"""
     remove_clicked = pyqtSignal()
     
-    def __init__(self, text, parent=None):
+    def __init__(self, text, file_path=None, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover)
         self.installEventFilter(self)
         self._hovered = False
+        self.file_path = file_path
         
         # Set background for visibility
         self.setStyleSheet("background-color: transparent;")
@@ -28,6 +31,19 @@ class FileListItemWidget(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)  # Give more space vertically
         layout.setSpacing(10)
+        
+        # Thumbnail label (48x48 square)
+        self.thumbnail_label = QLabel()
+        self.thumbnail_label.setFixedSize(48, 48)
+        self.thumbnail_label.setScaledContents(False)
+        self.thumbnail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.thumbnail_label.setStyleSheet("background: #1a1a1a; border: 1px solid #444; border-radius: 4px;")
+        
+        # Load thumbnail if file_path provided
+        if file_path:
+            self.load_thumbnail(file_path)
+        
+        layout.addWidget(self.thumbnail_label)
         
         # Text label - expand to fill height
         self.text_label = QLabel(text)
@@ -68,6 +84,121 @@ class FileListItemWidget(QWidget):
                 self._hovered = False
                 self.remove_btn.setVisible(False)
         return super().eventFilter(obj, event)
+    
+    def load_thumbnail(self, file_path):
+        """Load and display thumbnail for the file"""
+        try:
+            from PyQt6.QtGui import QPixmap
+            from pathlib import Path
+            import subprocess
+            
+            file_ext = Path(file_path).suffix.lower()
+            pixmap = None
+            
+            # For images, load directly
+            if file_ext in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp', '.gif']:
+                pixmap = QPixmap(file_path)
+            
+            # For videos, extract first frame
+            elif file_ext in ['.mp4', '.avi', '.mov', '.mkv', '.flv', '.webm', '.m4v']:
+                pixmap = self.extract_video_thumbnail(file_path)
+            
+            # If thumbnail loaded successfully, scale and display
+            if pixmap and not pixmap.isNull():
+                scaled_pixmap = pixmap.scaled(
+                    48, 48,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                self.thumbnail_label.setPixmap(scaled_pixmap)
+            else:
+                # Show file type icon as fallback
+                self.set_fallback_icon(file_ext)
+        except Exception as e:
+            print(f"Failed to load thumbnail: {e}")
+            self.set_fallback_icon(Path(file_path).suffix.lower())
+    
+    def extract_video_thumbnail(self, video_path):
+        """Extract first frame from video as thumbnail"""
+        try:
+            # Get ffmpeg path from environment (set by init_bundled_tools)
+            ffmpeg_path = os.environ.get('FFMPEG_BINARY', 'ffmpeg')
+            
+            # Create temp file for thumbnail
+            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
+                thumb_path = tmp.name
+            
+            try:
+                # Extract frame at 0.5 seconds (safer than 1s for short videos)
+                cmd = [
+                    str(ffmpeg_path),
+                    '-ss', '0.5',
+                    '-i', str(video_path),
+                    '-vframes', '1',
+                    '-vf', 'scale=128:-1',
+                    '-q:v', '2',  # High quality JPEG
+                    '-y',
+                    thumb_path
+                ]
+                
+                result = subprocess.run(
+                    cmd, 
+                    capture_output=True, 
+                    timeout=5,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                )
+                
+                if os.path.exists(thumb_path) and os.path.getsize(thumb_path) > 0:
+                    pixmap = QPixmap(thumb_path)
+                    try:
+                        os.remove(thumb_path)
+                    except:
+                        pass
+                    
+                    if not pixmap.isNull():
+                        return pixmap
+                    else:
+                        print(f"Failed to load pixmap from thumbnail")
+                else:
+                    print(f"Thumbnail file not created or empty. Return code: {result.returncode}")
+                    if result.stderr:
+                        stderr_text = result.stderr.decode('utf-8', errors='ignore')[:300]
+                        print(f"FFmpeg stderr: {stderr_text}")
+                
+            finally:
+                # Clean up temp file if it exists
+                if os.path.exists(thumb_path):
+                    try:
+                        os.remove(thumb_path)
+                    except:
+                        pass
+            
+        except subprocess.TimeoutExpired:
+            print(f"Video thumbnail extraction timed out for {video_path}")
+        except Exception as e:
+            print(f"Video thumbnail extraction failed: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        return None
+    
+    def set_fallback_icon(self, file_ext):
+        """Set a fallback icon based on file type"""
+        # Simple text-based icon
+        if file_ext in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp', '.gif']:
+            icon_text = "🖼"
+        elif file_ext in ['.mp4', '.avi', '.mov', '.mkv', '.flv', '.webm', '.m4v']:
+            icon_text = "🎬"
+        elif file_ext in ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a']:
+            icon_text = "🎵"
+        else:
+            icon_text = "📄"
+        
+        self.thumbnail_label.setText(icon_text)
+        self.thumbnail_label.setStyleSheet(
+            "background: #1a1a1a; border: 1px solid #444; border-radius: 4px; "
+            "font-size: 24px; color: #888;"
+        )
     
     def update_button_style(self, is_dark_theme):
         """Update button styling based on theme"""
@@ -116,6 +247,19 @@ class FileListItemWidget(QWidget):
         
         self.remove_btn.setStyleSheet(btn_style)
         self.text_label.setStyleSheet(text_style)
+        
+        # Update thumbnail border color based on theme
+        current_thumb_style = self.thumbnail_label.styleSheet()
+        if is_dark_theme:
+            thumb_style = "background: #1a1a1a; border: 1px solid #444; border-radius: 4px;"
+            if "font-size" in current_thumb_style:  # Has emoji fallback
+                thumb_style += " font-size: 24px; color: #888;"
+        else:
+            thumb_style = "background: #f5f5f5; border: 1px solid #ddd; border-radius: 4px;"
+            if "font-size" in current_thumb_style:  # Has emoji fallback
+                thumb_style += " font-size: 24px; color: #666;"
+        
+        self.thumbnail_label.setStyleSheet(thumb_style)
 
 class DragDropArea(QWidget):
     files_added = pyqtSignal(list)  # Signal emitted when files are added
@@ -613,8 +757,8 @@ class DragDropArea(QWidget):
                     item = QListWidgetItem()
                     item.setToolTip(f"Full path: {file_path}\nSize: {file_size}")
                     
-                    # Create custom widget with remove button
-                    item_widget = FileListItemWidget(item_text, self)
+                    # Create custom widget with remove button and thumbnail
+                    item_widget = FileListItemWidget(item_text, file_path, self)
                     is_dark = self.theme_manager and self.theme_manager.current_theme == 'dark'
                     item_widget.update_button_style(is_dark)
                     

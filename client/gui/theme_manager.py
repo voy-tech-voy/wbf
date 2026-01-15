@@ -351,14 +351,14 @@ class ThemeManager(QObject):
                     background-color: #4CAF50;
                     border-radius: 4px;
                 }
-                QComboBox, QSpinBox, QLineEdit {
+                QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit {
                     background-color: #2b2b2b;
                     color: #ffffff;
                     border: 1px solid #555555;
                     border-radius: 4px;
                     padding: 4px 24px 4px 4px;
                 }
-                QComboBox:hover, QSpinBox:hover, QLineEdit:hover {
+                QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover, QLineEdit:hover {
                     border-color: #4CAF50;
                 }
                 QComboBox::drop-down {
@@ -518,14 +518,14 @@ class ThemeManager(QObject):
                     background-color: #4CAF50;
                     border-radius: 4px;
                 }
-                QComboBox, QSpinBox, QLineEdit {
+                QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit {
                     background-color: white;
                     color: #333333;
                     border: 1px solid #cccccc;
                     border-radius: 4px;
                     padding: 4px 24px 4px 4px;
                 }
-                QComboBox:hover, QSpinBox:hover, QLineEdit:hover {
+                QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover, QLineEdit:hover {
                     border-color: #4CAF50;
                 }
                 QComboBox::drop-down {

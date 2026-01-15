@@ -90,7 +90,12 @@ tools/*.so
 *.webm
 *.avi
 *.mov
+*.mkv
+*.flv
+*.wmv
+*.m4v
 test_images/
+test_videos/
 repro_*.mp4
 repro_*.webm
 
