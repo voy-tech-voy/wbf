@@ -114,7 +114,53 @@ else:
     print(f"⚠️  WARNING: ADMIN_API_KEY not set - admin endpoints disabled!")
 
 # ============================================================================
-# 7. CREATE THE FLASK APPLICATION INSTANCE
+# 7. SET MICROSOFT STORE CONFIGURATION (FOR FUTURE USE)
+# ============================================================================
+# These will be needed when you publish to Microsoft Store
+# Get these values from Azure Portal -> App registrations
+
+# Azure AD tenant ID (Directory ID)
+os.environ['MSSTORE_TENANT_ID'] = os.environ.get(
+    'MSSTORE_TENANT_ID',
+    ''  # SET THIS from Azure Portal
+)
+
+# Azure AD client ID (Application ID)
+os.environ['MSSTORE_CLIENT_ID'] = os.environ.get(
+    'MSSTORE_CLIENT_ID',
+    ''  # SET THIS from Azure Portal
+)
+
+# Azure AD client secret
+os.environ['MSSTORE_CLIENT_SECRET'] = os.environ.get(
+    'MSSTORE_CLIENT_SECRET',
+    ''  # SET THIS from Azure Portal
+)
+
+# Your MS Store seller/app identifiers
+os.environ['MSSTORE_STORE_ID'] = os.environ.get(
+    'MSSTORE_STORE_ID',
+    ''  # SET THIS from Partner Center
+)
+
+os.environ['MSSTORE_APP_ID'] = os.environ.get(
+    'MSSTORE_APP_ID',
+    ''  # SET THIS from Partner Center
+)
+
+# Enable MS Store webhook verification (disable for initial testing)
+os.environ['VERIFY_MSSTORE_WEBHOOK'] = os.environ.get(
+    'VERIFY_MSSTORE_WEBHOOK',
+    'false'  # Set to 'true' when ready for production
+)
+
+if os.environ.get('MSSTORE_CLIENT_ID'):
+    print(f"✅ Microsoft Store configured")
+else:
+    print(f"ℹ️  Microsoft Store not configured (optional)")
+
+# ============================================================================
+# 8. CREATE THE FLASK APPLICATION INSTANCE
 # ============================================================================
 # Import the factory function and create the app with current configuration
 # Note: We import from 'app' directly because server_dir is in sys.path
@@ -130,7 +176,7 @@ except Exception as e:
     raise
 
 # ============================================================================
-# 8. LOGGING FOR DEBUGGING
+# 9. LOGGING FOR DEBUGGING
 # ============================================================================
 # Log all environment-related info for troubleshooting
 print("=" * 70)

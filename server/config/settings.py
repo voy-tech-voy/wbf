@@ -5,6 +5,9 @@ class Config:
     DATA_FOLDER = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
     LICENSES_FILE = os.path.join(DATA_FOLDER, 'licenses.json')
     TRIALS_FILE = os.path.join(DATA_FOLDER, 'trials.json')
+    
+    # Debug mode
+    DEBUG = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
 
     # Email Configuration
     SMTP_SERVER = os.environ.get('SMTP_SERVER', 'smtp.gmail.com')
@@ -13,12 +16,32 @@ class Config:
     SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD')
     FROM_EMAIL = os.environ.get('FROM_EMAIL', 'noreply@imagewave.com')
     
-    # Security Configuration
+    # ========================================================================
+    # GUMROAD CONFIGURATION
+    # ========================================================================
     # Gumroad does NOT provide webhook signatures - we verify using seller_id instead
     GUMROAD_SELLER_ID = os.environ.get('GUMROAD_SELLER_ID')  # Your Gumroad seller ID
     GUMROAD_PRODUCT_ID = os.environ.get('GUMROAD_PRODUCT_ID')  # Optional: specific product ID
-    ADMIN_API_KEY = os.environ.get('ADMIN_API_KEY')  # Set in PythonAnywhere
     
     # Enable webhook seller verification (disable in dev if needed)
     VERIFY_WEBHOOK_SELLER = os.environ.get('VERIFY_WEBHOOK_SELLER', 'true').lower() == 'true'
-
+    
+    # ========================================================================
+    # MICROSOFT STORE CONFIGURATION
+    # ========================================================================
+    # Azure AD app registration for MS Store API
+    MSSTORE_TENANT_ID = os.environ.get('MSSTORE_TENANT_ID')  # Azure AD tenant ID
+    MSSTORE_CLIENT_ID = os.environ.get('MSSTORE_CLIENT_ID')  # Azure AD app client ID
+    MSSTORE_CLIENT_SECRET = os.environ.get('MSSTORE_CLIENT_SECRET')  # Azure AD app secret
+    
+    # Store-specific identifiers
+    MSSTORE_STORE_ID = os.environ.get('MSSTORE_STORE_ID')  # Your MS Store seller ID
+    MSSTORE_APP_ID = os.environ.get('MSSTORE_APP_ID')  # Your app's Store ID
+    
+    # Enable MS Store webhook verification
+    VERIFY_MSSTORE_WEBHOOK = os.environ.get('VERIFY_MSSTORE_WEBHOOK', 'true').lower() == 'true'
+    
+    # ========================================================================
+    # ADMIN & SECURITY
+    # ========================================================================
+    ADMIN_API_KEY = os.environ.get('ADMIN_API_KEY')  # Set in PythonAnywhere

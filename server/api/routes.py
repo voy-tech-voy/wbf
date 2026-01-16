@@ -302,3 +302,130 @@ def trial_status():
         return jsonify(result), 404
     
     return jsonify(result), 200
+
+# ============================================================================
+# ADMIN ENDPOINTS - PLATFORM MIGRATION
+# ============================================================================
+
+@api_bp.route('/admin/migrate-platforms', methods=['POST'])
+@require_admin_key
+def admin_migrate_platforms():
+    """
+    Migrate existing licenses to include platform field.
+    
+    This is a one-time operation to update licenses created before
+    multi-platform support was added. Safe to run multiple times.
+    
+    ADMIN ONLY - Requires X-Admin-Key header
+    """
+    try:
+        result = license_manager.migrate_existing_licenses_platform()
+        
+        logger.info(f"Platform migration completed: {result}")
+        
+        return jsonify({
+            'success': True,
+            'migration_result': result,
+            'message': f"Migrated {result['migrated']} licenses, {result['already_migrated']} already had platform, {result['errors']} errors"
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Platform migration failed: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'migration_failed',
+            'message': str(e)
+        }), 500
+
+
+@api_bp.route('/admin/platform-stats', methods=['GET'])
+@require_admin_key
+def admin_platform_stats():
+    """
+    Get statistics about licenses by platform.
+    
+    ADMIN ONLY - Requires X-Admin-Key header
+    """
+    try:
+        from services.license_manager import Platform
+        
+        stats = {
+            'total': 0,
+            'by_platform': {},
+            'no_platform': 0
+        }
+        
+        licenses = license_manager.load_licenses()
+        
+        for license_key, license_data in licenses.items():
+            stats['total'] += 1
+            platform = license_data.get('platform')
+            
+            if platform:
+                stats['by_platform'][platform] = stats['by_platform'].get(platform, 0) + 1
+            else:
+                stats['no_platform'] += 1
+        
+        return jsonify({
+            'success': True,
+            'stats': stats,
+            'platforms_available': Platform.all_values()
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Platform stats failed: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'stats_failed',
+            'message': str(e)
+        }), 500
+
+
+@api_bp.route('/admin/find-by-platform', methods=['GET'])
+@require_admin_key
+def admin_find_by_platform():
+    """
+    Find all licenses from a specific platform.
+    
+    Query params:
+        platform: Platform name ('gumroad', 'msstore', etc.)
+    
+    ADMIN ONLY - Requires X-Admin-Key header
+    """
+    try:
+        platform = request.args.get('platform')
+        
+        if not platform:
+            return jsonify({
+                'success': False,
+                'error': 'missing_platform',
+                'message': 'Platform query parameter required'
+            }), 400
+        
+        licenses = license_manager.find_licenses_by_platform(platform)
+        
+        # Sanitize output (don't expose full hardware IDs)
+        sanitized = {}
+        for key, data in licenses.items():
+            sanitized[key] = {
+                'email': data.get('email'),
+                'platform': data.get('platform'),
+                'is_active': data.get('is_active'),
+                'created_date': data.get('created_date'),
+                'expiry_date': data.get('expiry_date'),
+            }
+        
+        return jsonify({
+            'success': True,
+            'platform': platform,
+            'count': len(sanitized),
+            'licenses': sanitized
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Find by platform failed: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'lookup_failed',
+            'message': str(e)
+        }), 500

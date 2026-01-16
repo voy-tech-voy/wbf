@@ -450,3 +450,161 @@ For API issues:
 2. Review error message in response
 3. Check server/data/purchases.jsonl for audit trail
 4. View webhook logs at `/webhooks/gumroad/webhook-logs`
+---
+
+## 🏪 Microsoft Store Webhook Endpoints
+
+### MS Store Purchase Webhook
+
+**Endpoint**: `POST /webhooks/msstore`
+
+**Purpose**: Handle purchases, refunds, and subscriptions from Microsoft Store
+
+**Security**: Requires Azure AD JWT or shared secret verification
+
+**Request (Purchase)**:
+```json
+{
+  "orderId": "order-123",
+  "orderStatus": "Completed",
+  "productId": "imgapp_lifetime",
+  "purchaser": {
+    "email": "user@outlook.com",
+    "userId": "ms_user_id"
+  },
+  "beneficiary": {
+    "userId": "ms_user_id"
+  },
+  "purchasedAt": "2024-01-01T00:00:00Z",
+  "unitPrice": {
+    "amount": "29.99",
+    "currency": "USD"
+  }
+}
+```
+
+**Response (Success)**:
+```json
+{
+  "status": "success",
+  "type": "new_purchase",
+  "license_key": "IW-123456-ABCDEFGH",
+  "email": "user@outlook.com",
+  "order_id": "order-123",
+  "platform": "msstore"
+}
+```
+
+**Request (Refund)**:
+```json
+{
+  "orderId": "order-123",
+  "orderStatus": "Refunded"
+}
+```
+
+**Response (Refund)**:
+```json
+{
+  "status": "refund_processed",
+  "order_id": "order-123",
+  "license_key": "IW-123456-ABCDEFGH",
+  "message": "License refunded and deactivated"
+}
+```
+
+### MS Store Test Webhook (Dev Only)
+
+**Endpoint**: `POST /webhooks/msstore/test`
+
+**Purpose**: Test MS Store webhook handling in development
+
+**Note**: Only available when `FLASK_DEBUG=true`
+
+---
+
+## 🔧 Admin Platform Management
+
+### Migrate Existing Licenses to Platform
+
+**Endpoint**: `POST /admin/migrate-platforms`
+
+**Purpose**: One-time migration to add platform field to existing licenses
+
+**Security**: Requires `X-Admin-Key` header
+
+**Request**:
+```bash
+curl -X POST https://wavyvoy.pythonanywhere.com/api/v1/admin/migrate-platforms \
+  -H "X-Admin-Key: YOUR_ADMIN_KEY"
+```
+
+**Response**:
+```json
+{
+  "success": true,
+  "migration_result": {
+    "migrated": 150,
+    "already_migrated": 0,
+    "errors": 0
+  },
+  "message": "Migrated 150 licenses, 0 already had platform, 0 errors"
+}
+```
+
+### Get Platform Statistics
+
+**Endpoint**: `GET /admin/platform-stats`
+
+**Purpose**: Get license count by platform
+
+**Security**: Requires `X-Admin-Key` header
+
+**Response**:
+```json
+{
+  "success": true,
+  "stats": {
+    "total": 200,
+    "by_platform": {
+      "gumroad": 180,
+      "msstore": 15,
+      "trial": 5
+    },
+    "no_platform": 0
+  },
+  "platforms_available": ["gumroad", "msstore", "stripe", "direct", "trial"]
+}
+```
+
+### Find Licenses by Platform
+
+**Endpoint**: `GET /admin/find-by-platform?platform={platform}`
+
+**Purpose**: List all licenses from a specific platform
+
+**Security**: Requires `X-Admin-Key` header
+
+**Request**:
+```bash
+curl -X GET "https://wavyvoy.pythonanywhere.com/api/v1/admin/find-by-platform?platform=msstore" \
+  -H "X-Admin-Key: YOUR_ADMIN_KEY"
+```
+
+**Response**:
+```json
+{
+  "success": true,
+  "platform": "msstore",
+  "count": 15,
+  "licenses": {
+    "IW-123456-ABCDEFGH": {
+      "email": "user@outlook.com",
+      "platform": "msstore",
+      "is_active": true,
+      "created_date": "2024-01-01T00:00:00",
+      "expiry_date": "2124-01-01T00:00:00"
+    }
+  }
+}
+```

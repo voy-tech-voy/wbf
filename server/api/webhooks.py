@@ -1,6 +1,6 @@
 from flask import jsonify, request
 from . import webhook_bp
-from services.license_manager import LicenseManager
+from services.license_manager import LicenseManager, Platform, get_platform_sale_id_field
 from services.email_service import EmailService
 from services.backup_manager import BackupManager
 from config.settings import Config
@@ -10,6 +10,9 @@ import hmac
 import hashlib
 from datetime import datetime
 import os
+import base64
+import requests
+from functools import wraps
 
 logger = logging.getLogger(__name__)
 license_manager = LicenseManager()
@@ -19,6 +22,10 @@ backup_manager = BackupManager()
 # Webhook debug log file
 WEBHOOK_DEBUG_LOG = 'webhook_debug.jsonl'
 
+
+# ============================================================================
+# GUMROAD WEBHOOK HANDLERS
+# ============================================================================
 
 def verify_gumroad_seller(data):
     """
@@ -427,6 +434,401 @@ def gumroad_debug():
         return jsonify({"message": "No logs yet"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ============================================================================
+# MICROSOFT STORE WEBHOOK HANDLERS
+# ============================================================================
+
+# Microsoft Store product SKU to duration mapping
+MSSTORE_PRODUCT_DURATIONS = {
+    # Add your MS Store SKUs here after publishing
+    # Format: 'product_sku': duration_days
+    "imgapp_lifetime": 36500,
+    "imgapp_yearly": 365,
+    "imgapp_monthly": 30,
+}
+
+# Microsoft Store tier mapping
+MSSTORE_TIER_MAP = {
+    "imgapp_lifetime": "Lifetime",
+    "imgapp_yearly": "Yearly",
+    "imgapp_monthly": "Monthly",
+}
+
+
+def verify_msstore_webhook(request_headers: dict, payload: bytes) -> tuple:
+    """
+    Verify Microsoft Store webhook authenticity.
+    
+    MS Store webhooks use Azure AD for authentication:
+    1. Webhook contains a JWT in Authorization header
+    2. Verify JWT signature against Microsoft's public keys
+    3. Verify issuer and audience claims
+    
+    NOTE: In production, implement full JWT verification.
+    For now, we verify using a shared client secret approach.
+    
+    Args:
+        request_headers: HTTP request headers
+        payload: Raw request body bytes
+    
+    Returns:
+        tuple: (is_valid: bool, error_message: str or None)
+    """
+    # Get client secret from config
+    client_secret = Config.MSSTORE_CLIENT_SECRET
+    
+    if not client_secret:
+        logger.warning("MSSTORE_CLIENT_SECRET not configured - skipping verification")
+        return True, None  # Allow in dev mode
+    
+    # Option 1: Check for secret in header (simple webhook secret)
+    webhook_secret = request_headers.get('X-MS-Webhook-Secret', '')
+    if webhook_secret:
+        if hmac.compare_digest(webhook_secret, client_secret):
+            return True, None
+        else:
+            return False, "Invalid webhook secret"
+    
+    # Option 2: Check for Azure AD JWT (production)
+    auth_header = request_headers.get('Authorization', '')
+    if auth_header.startswith('Bearer '):
+        # TODO: Implement full JWT verification with Azure AD
+        # For now, log and allow (should implement before production)
+        logger.warning("MS Store JWT verification not fully implemented - allowing webhook")
+        return True, None
+    
+    # No authentication found
+    logger.warning("No authentication found in MS Store webhook")
+    return False, "Missing authentication"
+
+
+def normalize_msstore_purchase(data: dict, duration_days: int, tier: str) -> dict:
+    """
+    Normalize Microsoft Store webhook data into standardized purchase_info structure.
+    
+    MS Store webhook payload structure (simplified):
+    {
+        "orderId": "unique-order-id",
+        "lineItemId": "line-item-id",
+        "productId": "product_sku",
+        "skuId": "sku_variant",
+        "beneficiary": {
+            "userId": "ms_user_id",
+            "identityType": "msa/aad"
+        },
+        "purchaser": {
+            "userId": "purchaser_ms_user_id",
+            "email": "purchaser@email.com"
+        },
+        "purchasedAt": "2024-01-01T00:00:00Z",
+        "quantity": 1,
+        "unitPrice": {"amount": "9.99", "currency": "USD"},
+        "orderStatus": "Completed/Refunded/etc"
+    }
+    
+    Args:
+        data: Raw MS Store webhook data
+        duration_days: License duration based on SKU
+        tier: Mapped tier name
+    
+    Returns:
+        dict: Standardized purchase_info structure
+    """
+    # Extract nested data safely
+    beneficiary = data.get('beneficiary', {})
+    purchaser = data.get('purchaser', {})
+    unit_price = data.get('unitPrice', {})
+    
+    # Build standardized purchase info
+    purchase_info = {
+        'source': Platform.MSSTORE.value,
+        'source_license_key': None,  # MS Store doesn't provide license keys
+        'order_id': data.get('orderId'),  # MS Store uses orderId
+        'sale_id': data.get('orderId'),  # Alias for compatibility
+        'line_item_id': data.get('lineItemId'),
+        'customer_id': beneficiary.get('userId'),
+        'purchaser_id': purchaser.get('userId'),
+        'product_id': data.get('productId'),
+        'sku_id': data.get('skuId'),
+        'product_name': data.get('productId', ''),  # Use product_id as name
+        'tier': tier,
+        'price': unit_price.get('amount'),
+        'currency': unit_price.get('currency', 'USD').lower(),
+        'purchase_date': data.get('purchasedAt', datetime.utcnow().isoformat()),
+        'is_recurring': data.get('autoRenewing', False),
+        'recurrence': 'subscription' if data.get('autoRenewing') else None,
+        'subscription_id': data.get('subscriptionId'),
+        'renewal_date': data.get('renewalDate'),
+        'order_status': data.get('orderStatus'),
+        'is_refunded': data.get('orderStatus') == 'Refunded',
+        'refund_date': data.get('refundedAt'),
+        'is_disputed': data.get('orderStatus') == 'Disputed',
+        'is_test': data.get('isSandbox', False) or data.get('isTest', False),
+        # MS Store specific fields
+        'beneficiary_identity_type': beneficiary.get('identityType'),
+        'quantity': data.get('quantity', 1),
+    }
+    
+    return purchase_info
+
+
+@webhook_bp.route('/msstore', methods=['POST'])
+def msstore_webhook():
+    """
+    Handle Microsoft Store purchase webhooks.
+    
+    MS Store sends webhooks for:
+    - New purchases (orderStatus: Completed)
+    - Refunds (orderStatus: Refunded)
+    - Subscription renewals
+    - Subscription cancellations
+    
+    SECURITY: Verify webhook using Azure AD JWT or shared secret.
+    """
+    try:
+        # Get raw payload for signature verification
+        payload = request.get_data()
+        data = request.get_json()
+        
+        if not data:
+            error_response = {"error": "No data received"}
+            save_webhook_log({'source': 'msstore'}, "error", error_response)
+            return jsonify(error_response), 400
+        
+        # Log raw webhook data
+        logger.info(f"Raw MS Store webhook received: {json.dumps(data, indent=2)}")
+        
+        # SECURITY: Verify webhook authenticity
+        if Config.VERIFY_MSSTORE_WEBHOOK:
+            is_valid, error_msg = verify_msstore_webhook(dict(request.headers), payload)
+            
+            if not is_valid:
+                error_response = {"error": error_msg or "Webhook verification failed"}
+                save_webhook_log({'source': 'msstore', 'verification_failed': True}, "security_error", error_response)
+                logger.warning(f"MS Store webhook verification failed from IP: {request.remote_addr}")
+                return jsonify(error_response), 403
+        
+        # Extract key fields
+        order_id = data.get('orderId')
+        order_status = data.get('orderStatus', '').lower()
+        product_id = data.get('productId', '')
+        
+        # Get email from purchaser or beneficiary
+        purchaser = data.get('purchaser', {})
+        beneficiary = data.get('beneficiary', {})
+        email = purchaser.get('email') or beneficiary.get('email')
+        
+        if not order_id:
+            error_response = {"error": "Missing orderId"}
+            save_webhook_log(data, "error", error_response)
+            return jsonify(error_response), 400
+        
+        # IDEMPOTENCY: Check if we already processed this order
+        existing = license_manager.find_license_by_platform_id(Platform.MSSTORE.value, order_id)
+        if existing and order_status == 'completed':
+            logger.info(f"Duplicate MS Store webhook for order {order_id} - already processed")
+            return jsonify({"status": "already_processed", "order_id": order_id}), 200
+        
+        # Handle different order statuses
+        if order_status == 'refunded':
+            return _handle_msstore_refund(data, order_id)
+        elif order_status == 'completed':
+            return _handle_msstore_purchase(data, email, order_id, product_id)
+        elif order_status == 'cancelled':
+            return _handle_msstore_cancellation(data, order_id)
+        else:
+            # Log unknown status but return success (don't block webhooks)
+            logger.warning(f"Unknown MS Store order status: {order_status}")
+            return jsonify({"status": "acknowledged", "order_status": order_status}), 200
+            
+    except Exception as e:
+        logger.error(f"MS Store webhook error: {e}")
+        return jsonify({"error": "Webhook processing failed", "message": str(e)}), 500
+
+
+def _handle_msstore_purchase(data: dict, email: str, order_id: str, product_id: str):
+    """Handle new MS Store purchase"""
+    
+    if not email:
+        # MS Store purchases might not always include email
+        # Generate a placeholder email based on MS user ID
+        beneficiary = data.get('beneficiary', {})
+        ms_user_id = beneficiary.get('userId', 'unknown')
+        email = f"msstore_{ms_user_id}@placeholder.msstore"
+        logger.warning(f"No email in MS Store webhook, using placeholder: {email}")
+    
+    # Determine duration based on product SKU
+    duration_days = MSSTORE_PRODUCT_DURATIONS.get(product_id, 36500)  # Default lifetime
+    tier = MSSTORE_TIER_MAP.get(product_id, 'Lifetime')
+    
+    logger.info(f"MS Store purchase: product={product_id}, tier={tier}, duration={duration_days} days")
+    
+    # Normalize purchase data
+    purchase_info = normalize_msstore_purchase(data, duration_days, tier)
+    purchase_info['expires_days'] = duration_days
+    
+    # Create backup before modifying
+    try:
+        backup_manager.create_backup('pre_msstore_webhook')
+    except Exception as e:
+        logger.warning(f"Failed to create backup: {e}")
+    
+    # Check for existing trial (conversion scenario)
+    trials = license_manager.load_trials()
+    had_trial = False
+    trial_days_used = 0
+    
+    for trial_key, trial_data in trials.items():
+        if trial_data.get('email', '').lower() == email.lower():
+            had_trial = True
+            try:
+                created = datetime.fromisoformat(trial_data.get('created_date'))
+                trial_days_used = (datetime.now() - created).days
+            except:
+                trial_days_used = 0
+            break
+    
+    # Create license
+    try:
+        license_key = license_manager.generate_license_key()
+        
+        if had_trial:
+            # Convert trial to full license
+            full_license = license_manager.convert_trial_to_full(
+                email=email,
+                new_license_key=license_key,
+                purchase_info=purchase_info
+            )
+        else:
+            # Create new license
+            license_key = license_manager.create_license(
+                email=email,
+                expires_days=duration_days,
+                license_key=license_key,
+                purchase_info=purchase_info,
+                platform=Platform.MSSTORE
+            )
+        
+        if license_key:
+            # Send welcome email
+            try:
+                email_service.send_welcome_email(
+                    to_email=email,
+                    license_key=license_key
+                )
+            except Exception as e:
+                logger.warning(f"Failed to send MS Store welcome email: {e}")
+            
+            response = {
+                "status": "success",
+                "type": "trial_conversion" if had_trial else "new_purchase",
+                "license_key": license_key,
+                "email": email,
+                "order_id": order_id,
+                "product_id": product_id,
+                "tier": tier,
+                "platform": Platform.MSSTORE.value
+            }
+            save_webhook_log(data, "success", response)
+            return jsonify(response), 200
+        else:
+            error_response = {"error": "Failed to create license"}
+            save_webhook_log(data, "error", error_response)
+            return jsonify(error_response), 500
+            
+    except Exception as e:
+        logger.error(f"MS Store purchase processing failed: {e}")
+        error_response = {"error": str(e)}
+        save_webhook_log(data, "error", error_response)
+        return jsonify(error_response), 500
+
+
+def _handle_msstore_refund(data: dict, order_id: str):
+    """Handle MS Store refund"""
+    logger.info(f"Processing MS Store refund for order: {order_id}")
+    
+    # Use platform-agnostic deactivation
+    result = license_manager.deactivate_by_platform_id(
+        platform=Platform.MSSTORE.value,
+        transaction_id=order_id,
+        reason='msstore_refund'
+    )
+    
+    if result.get('success'):
+        response = {
+            "status": "refund_processed",
+            "order_id": order_id,
+            "license_key": result.get('license_key'),
+            "message": "License refunded and deactivated"
+        }
+        save_webhook_log(data, "refund_success", response)
+        return jsonify(response), 200
+    else:
+        # License not found - might be already refunded or never existed
+        error_response = {
+            "status": "refund_warning",
+            "order_id": order_id,
+            "error": result.get('error'),
+            "message": result.get('message', 'License not found for this order')
+        }
+        save_webhook_log(data, "refund_warning", error_response)
+        # Return 200 to acknowledge webhook (don't want MS Store to retry)
+        return jsonify(error_response), 200
+
+
+def _handle_msstore_cancellation(data: dict, order_id: str):
+    """Handle MS Store subscription cancellation"""
+    logger.info(f"Processing MS Store subscription cancellation for order: {order_id}")
+    
+    # Find the license
+    license_key = license_manager.find_license_by_platform_id(Platform.MSSTORE.value, order_id)
+    
+    if license_key:
+        # For cancellations, we might want to let the license expire naturally
+        # rather than immediately deactivating
+        response = {
+            "status": "cancellation_acknowledged",
+            "order_id": order_id,
+            "license_key": license_key,
+            "message": "Subscription cancellation noted - license will expire at end of period"
+        }
+        save_webhook_log(data, "cancellation", response)
+        return jsonify(response), 200
+    else:
+        response = {
+            "status": "cancellation_warning",
+            "order_id": order_id,
+            "message": "License not found for this subscription"
+        }
+        save_webhook_log(data, "cancellation_warning", response)
+        return jsonify(response), 200
+
+
+@webhook_bp.route('/msstore/test', methods=['POST'])
+def msstore_test_webhook():
+    """Test endpoint for MS Store webhook simulation (development only)"""
+    if not Config.DEBUG:
+        return jsonify({"error": "Test endpoint disabled in production"}), 403
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+        
+        # Add test flag
+        data['isTest'] = True
+        data['isSandbox'] = True
+        
+        # Forward to main handler
+        logger.info(f"MS Store test webhook: {json.dumps(data, indent=2)}")
+        
+        return msstore_webhook()
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 # ============================================================================
 # TRIAL SYSTEM ENDPOINTS

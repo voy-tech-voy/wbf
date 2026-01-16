@@ -4,6 +4,8 @@ import logging
 import secrets
 import threading
 from datetime import datetime, timedelta
+from typing import Optional, Dict, Any, Tuple, List
+from enum import Enum
 from config.settings import Config
 
 logger = logging.getLogger(__name__)
@@ -12,6 +14,53 @@ logger = logging.getLogger(__name__)
 _licenses_lock = threading.Lock()
 _trials_lock = threading.Lock()
 _purchases_lock = threading.Lock()
+
+
+class Platform(str, Enum):
+    """
+    Supported purchase/license platforms.
+    
+    Each platform has its own webhook handler and purchase normalization.
+    The license system is platform-agnostic - all platforms produce
+    the same license structure.
+    """
+    GUMROAD = "gumroad"
+    MSSTORE = "msstore"       # Microsoft Store
+    STRIPE = "stripe"         # Future: Direct Stripe integration
+    DIRECT = "direct"         # Manual/admin-created licenses
+    TRIAL = "trial"           # Free trials
+    
+    @classmethod
+    def is_valid(cls, platform: str) -> bool:
+        """Check if platform string is valid"""
+        return platform in [p.value for p in cls]
+    
+    @classmethod
+    def all_values(cls) -> List[str]:
+        """Get all platform values"""
+        return [p.value for p in cls]
+
+
+def get_platform_sale_id_field(platform: str) -> str:
+    """
+    Get the field name used for unique transaction ID per platform.
+    
+    Each platform uses different field names for their unique transaction ID:
+    - Gumroad: sale_id
+    - Microsoft Store: order_id or transaction_id  
+    - Stripe: payment_intent_id
+    
+    Returns:
+        str: The field name for this platform's unique transaction ID
+    """
+    platform_id_fields = {
+        Platform.GUMROAD.value: 'sale_id',
+        Platform.MSSTORE.value: 'order_id',
+        Platform.STRIPE.value: 'payment_intent_id',
+        Platform.DIRECT.value: 'admin_ref',
+        Platform.TRIAL.value: 'trial_id',
+    }
+    return platform_id_fields.get(platform, 'sale_id')
 
 
 class LicenseManager:
@@ -105,7 +154,7 @@ class LicenseManager:
         random_part = secrets.token_hex(8)
         return f"IW-{timestamp[-6:]}-{random_part.upper()[:8]}"
     
-    def create_license(self, email, expires_days=365, license_key=None, purchase_info=None):
+    def create_license(self, email, expires_days=365, license_key=None, purchase_info=None, platform=None):
         """Create a new license with optional purchase tracking
         
         Args:
@@ -114,9 +163,9 @@ class LicenseManager:
             license_key: Specific license key (optional, generates if not provided)
             purchase_info: Dict with purchase metadata for audit logging (optional):
                 {
-                    'source': 'gumroad' | 'stripe' | 'direct' | etc,
+                    'source': 'gumroad' | 'msstore' | 'stripe' | 'direct' | 'trial',
                     'source_license_key': License key from payment platform,
-                    'sale_id': Unique transaction ID,
+                    'sale_id': Unique transaction ID (platform-specific field name),
                     'customer_id': Platform-specific customer ID,
                     'product_id': Platform product ID,
                     'product_name': Product display name,
@@ -130,6 +179,7 @@ class LicenseManager:
                     'is_disputed': Boolean,
                     'is_test': Boolean
                 }
+            platform: Platform enum value or string (auto-detected from purchase_info if not provided)
         """
         try:
             licenses = self.load_licenses()
@@ -144,7 +194,25 @@ class LicenseManager:
 
             expiry_date = datetime.now() + timedelta(days=expires_days)
             
-            # Core license fields - LEAN & VALIDATION-FOCUSED (9 fields only)
+            # Determine platform - explicit > purchase_info.source > default
+            resolved_platform = None
+            if platform:
+                resolved_platform = platform.value if isinstance(platform, Platform) else platform
+            elif purchase_info and purchase_info.get('source'):
+                resolved_platform = purchase_info.get('source')
+            else:
+                resolved_platform = Platform.DIRECT.value
+            
+            # Validate platform
+            if not Platform.is_valid(resolved_platform):
+                logger.warning(f"Unknown platform '{resolved_platform}', defaulting to 'direct'")
+                resolved_platform = Platform.DIRECT.value
+            
+            # Get platform-specific transaction ID field
+            platform_id_field = get_platform_sale_id_field(resolved_platform)
+            platform_transaction_id = purchase_info.get(platform_id_field) if purchase_info else None
+            
+            # Core license fields - LEAN & VALIDATION-FOCUSED (10 fields)
             license_data = {
                 'email': email,
                 'created_date': datetime.now().isoformat(),
@@ -154,13 +222,16 @@ class LicenseManager:
                 'device_name': None,
                 'last_validation': None,
                 'validation_count': 0,
-                'source_license_key': purchase_info.get('source_license_key') if purchase_info else None
+                'source_license_key': purchase_info.get('source_license_key') if purchase_info else None,
+                # NEW: Platform tracking for multi-store support
+                'platform': resolved_platform,
+                'platform_transaction_id': platform_transaction_id,  # e.g., sale_id, order_id
             }
             
             licenses[license_key] = license_data
             
             if self.save_licenses(licenses):
-                logger.info(f"Created license {license_key} for {email}")
+                logger.info(f"Created license {license_key} for {email} (platform: {resolved_platform})")
                 
                 # Log full purchase details separately for audit trail
                 if purchase_info:
@@ -606,6 +677,215 @@ class LicenseManager:
             logger.error(f"Error finding license by sale_id: {e}")
             return None
     
+    def find_license_by_platform_id(self, platform: str, transaction_id: str) -> Optional[str]:
+        """
+        Find license by platform-specific transaction ID.
+        
+        This is the platform-agnostic lookup method that works across all platforms.
+        Each platform uses different ID fields:
+        - Gumroad: sale_id
+        - MS Store: order_id
+        - Stripe: payment_intent_id
+        
+        Args:
+            platform: Platform name ('gumroad', 'msstore', 'stripe', etc.)
+            transaction_id: The platform's unique transaction identifier
+        
+        Returns:
+            str: Our license key or None if not found
+        """
+        try:
+            if not transaction_id:
+                return None
+                
+            licenses = self.load_licenses()
+            
+            for our_key, license_data in licenses.items():
+                # Check platform match
+                license_platform = license_data.get('platform', '')
+                if license_platform != platform:
+                    continue
+                
+                # Check platform_transaction_id (new field)
+                if license_data.get('platform_transaction_id') == transaction_id:
+                    return our_key
+                
+                # Legacy support: Check old field names based on platform
+                id_field = get_platform_sale_id_field(platform)
+                if license_data.get(id_field) == transaction_id:
+                    return our_key
+                
+                # Also check in purchase_info for audit-logged data
+                purchase_info = license_data.get('purchase_info', {})
+                if purchase_info.get(id_field) == transaction_id:
+                    return our_key
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error finding license by platform ID: {e}")
+            return None
+    
+    def find_licenses_by_platform(self, platform: str) -> Dict[str, Dict]:
+        """
+        Find all licenses from a specific platform.
+        
+        Useful for:
+        - Platform-specific analytics
+        - Migration operations
+        - Debugging platform integrations
+        
+        Args:
+            platform: Platform name ('gumroad', 'msstore', 'stripe', etc.)
+        
+        Returns:
+            Dict[str, Dict]: Dictionary of {license_key: license_data} for matching platform
+        """
+        try:
+            licenses = self.load_licenses()
+            platform_licenses = {}
+            
+            for license_key, license_data in licenses.items():
+                # Check explicit platform field
+                if license_data.get('platform') == platform:
+                    platform_licenses[license_key] = license_data
+                    continue
+                
+                # Legacy fallback: Check source in purchase audit log
+                purchase_info = license_data.get('purchase_info', {})
+                if purchase_info.get('source') == platform:
+                    platform_licenses[license_key] = license_data
+            
+            return platform_licenses
+            
+        except Exception as e:
+            logger.error(f"Error finding licenses by platform: {e}")
+            return {}
+    
+    def deactivate_by_platform_id(self, platform: str, transaction_id: str, reason: str = "platform_refund") -> Dict[str, Any]:
+        """
+        Deactivate license by platform-specific transaction ID.
+        
+        Used primarily for refund webhooks from any platform.
+        
+        Args:
+            platform: Platform name ('gumroad', 'msstore', 'stripe', etc.)
+            transaction_id: The platform's unique transaction identifier
+            reason: Reason for deactivation (e.g., 'gumroad_refund', 'msstore_refund')
+        
+        Returns:
+            dict: {'success': bool, 'license_key': str, 'error': str}
+        """
+        try:
+            # Find the license first
+            license_key = self.find_license_by_platform_id(platform, transaction_id)
+            
+            if not license_key:
+                return {
+                    'success': False,
+                    'error': 'license_not_found',
+                    'message': f'No license found for {platform} transaction: {transaction_id}'
+                }
+            
+            # Deactivate using existing method
+            result = self.handle_refund(license_key, reason)
+            
+            if result.get('success'):
+                logger.info(f"Deactivated license {license_key} for {platform} transaction {transaction_id}")
+                result['license_key'] = license_key
+                result['platform'] = platform
+                result['transaction_id'] = transaction_id
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error deactivating by platform ID: {e}")
+            return {
+                'success': False,
+                'error': 'deactivation_failed',
+                'message': str(e)
+            }
+    
+    def migrate_existing_licenses_platform(self) -> Dict[str, Any]:
+        """
+        Migrate existing licenses to include platform field.
+        
+        Call this once to update licenses that were created before
+        platform tracking was added. Safe to run multiple times.
+        
+        Returns:
+            dict: {'migrated': int, 'already_migrated': int, 'errors': int}
+        """
+        try:
+            licenses = self.load_licenses()
+            stats = {'migrated': 0, 'already_migrated': 0, 'errors': 0}
+            
+            for license_key, license_data in licenses.items():
+                try:
+                    # Skip if already has platform field
+                    if license_data.get('platform'):
+                        stats['already_migrated'] += 1
+                        continue
+                    
+                    # Detect platform from existing data
+                    source = None
+                    
+                    # Check source_license_key format (Gumroad keys have specific format)
+                    source_key = license_data.get('source_license_key')
+                    if source_key:
+                        # Gumroad license keys are typically 32-35 chars
+                        if len(source_key) == 32 or len(source_key) == 35:
+                            source = Platform.GUMROAD.value
+                    
+                    # Check if it's a trial (short duration)
+                    if not source:
+                        try:
+                            created = datetime.fromisoformat(license_data.get('created_date', ''))
+                            expiry = datetime.fromisoformat(license_data.get('expiry_date', ''))
+                            days = (expiry - created).days
+                            if days <= 7:
+                                source = Platform.TRIAL.value
+                        except:
+                            pass
+                    
+                    # Default to gumroad for existing licenses (our primary platform)
+                    if not source:
+                        source = Platform.GUMROAD.value
+                    
+                    # Update license
+                    license_data['platform'] = source
+                    
+                    # Try to set platform_transaction_id from existing data
+                    if source == Platform.GUMROAD.value:
+                        # Check for sale_id in various locations
+                        sale_id = license_data.get('sale_id')
+                        if not sale_id:
+                            purchase_info = license_data.get('purchase_info', {})
+                            sale_id = purchase_info.get('sale_id')
+                        if sale_id:
+                            license_data['platform_transaction_id'] = sale_id
+                    
+                    stats['migrated'] += 1
+                    
+                except Exception as e:
+                    logger.error(f"Error migrating license {license_key}: {e}")
+                    stats['errors'] += 1
+            
+            # Save updated licenses
+            if stats['migrated'] > 0:
+                if self.save_licenses(licenses):
+                    logger.info(f"Platform migration complete: {stats}")
+                else:
+                    logger.error("Failed to save migrated licenses")
+                    stats['errors'] += stats['migrated']
+                    stats['migrated'] = 0
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Platform migration failed: {e}")
+            return {'migrated': 0, 'already_migrated': 0, 'errors': 1}
+    
     def handle_refund(self, license_key, refund_reason="customer_request"):
         """Handle license refund - deactivate the license
         
@@ -803,6 +1083,11 @@ class LicenseManager:
             # Create full license with trial history
             expiry_date = datetime.now() + timedelta(days=purchase_info.get('expires_days', 36500))
             
+            # Determine platform from purchase_info
+            platform = purchase_info.get('source', Platform.GUMROAD.value)
+            platform_id_field = get_platform_sale_id_field(platform)
+            platform_transaction_id = purchase_info.get(platform_id_field)
+            
             full_license = {
                 'email': email,
                 'created_date': datetime.now().isoformat(),
@@ -813,6 +1098,10 @@ class LicenseManager:
                 'last_validation': datetime.now().isoformat(),
                 'validation_count': 0,
                 'source_license_key': purchase_info.get('source_license_key'),
+                # Platform tracking
+                'platform': platform,
+                'platform_transaction_id': platform_transaction_id,
+                # Trial conversion tracking
                 'was_trial': trial_data is not None,
                 'trial_started': trial_data.get('created_date') if trial_data else None,
                 'trial_duration_days': trial_data.get('trial_duration_days', 0) if trial_data else 0

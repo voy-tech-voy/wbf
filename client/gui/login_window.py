@@ -1,6 +1,7 @@
 """
 Login Window for ImgApp
 Simple authentication dialog that appears before the main application
+Supports both Gumroad and Microsoft Store distribution.
 """
 
 from PyQt6.QtWidgets import (
@@ -14,6 +15,10 @@ import winreg
 import os
 import requests
 from client.utils.font_manager import AppFonts
+from client.utils.platform_detection import (
+    AppPlatform, get_cached_platform, should_show_gumroad_ui, 
+    should_use_store_license, MSStoreLicenseChecker, get_platform_display_name
+)
 import hashlib
 import uuid
 import platform
@@ -21,6 +26,9 @@ import socket
 import json
 from datetime import datetime, timedelta
 from client.version import APP_NAME
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Development mode detection
 DEVELOPMENT_MODE = getattr(sys, '_called_from_test', False) or __debug__ and not getattr(sys, 'frozen', False)
@@ -30,8 +38,21 @@ class LoginWindow(QDialog):
         super().__init__()
         self.authenticated = False
         self.is_trial = False
+        
+        # Detect distribution platform
+        self.app_platform = get_cached_platform()
+        self.is_msstore = self.app_platform == AppPlatform.MSSTORE
+        logger.info(f"LoginWindow initialized for platform: {self.app_platform.value}")
+        
+        # MS Store license checker (only available in Store apps)
+        self.msstore_license_checker = MSStoreLicenseChecker() if self.is_msstore else None
+        
         self.setup_ui()
         self.apply_styles()
+        
+        # For MS Store apps, try silent license check first
+        if self.is_msstore:
+            self._try_msstore_silent_auth()
         
         # Load saved credentials
         self.load_saved_credentials()
@@ -80,6 +101,62 @@ class LoginWindow(QDialog):
                         self.password_input.setText(data['license_key'])
         except Exception:
             pass
+    
+    def _try_msstore_silent_auth(self):
+        """
+        Attempt silent authentication for MS Store apps.
+        
+        MS Store apps can check license status without user interaction
+        using Windows.Services.Store APIs.
+        """
+        if not self.is_msstore or not self.msstore_license_checker:
+            return
+        
+        try:
+            logger.info("Attempting MS Store silent license check...")
+            result = self.msstore_license_checker.check_license()
+            
+            if result.get('success') and result.get('is_active'):
+                logger.info("MS Store license valid - proceeding with silent auth")
+                
+                # Store is active - auto-authenticate
+                self.authenticated = True
+                self.is_trial = result.get('is_trial', False)
+                
+                # Save pseudo-credentials for offline use
+                self._save_msstore_session(result)
+                
+                # Close dialog and proceed
+                self.accept()
+            else:
+                logger.info(f"MS Store license not active: {result.get('error', 'unknown')}")
+                # Show login UI for trial or purchase
+                
+        except Exception as e:
+            logger.error(f"MS Store silent auth failed: {e}")
+            # Fall back to standard login UI
+    
+    def _save_msstore_session(self, license_result: dict):
+        """Save MS Store license session for offline verification"""
+        try:
+            path = self.get_config_path()
+            if not path:
+                return
+            
+            data = {
+                'platform': 'msstore',
+                'is_active': license_result.get('is_active', False),
+                'is_trial': license_result.get('is_trial', False),
+                'sku_store_id': license_result.get('sku_store_id'),
+                'expiry_date': license_result.get('expiry_date'),
+                'last_check': datetime.now().isoformat()
+            }
+            
+            with open(path, 'w') as f:
+                json.dump(data, f)
+                
+        except Exception as e:
+            logger.error(f"Failed to save MS Store session: {e}")
 
     def attempt_auto_login(self):
         """
@@ -220,6 +297,13 @@ class LoginWindow(QDialog):
         password_layout.addWidget(self.password_input)
         form_layout.addLayout(password_layout)
         
+        # Platform indicator for MS Store users
+        if self.is_msstore:
+            platform_label = QLabel(f"📦 {get_platform_display_name()}")
+            platform_label.setStyleSheet("color: #0078D4; font-size: 11px;")
+            platform_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+            form_layout.addWidget(platform_label)
+        
         # Buttons
         button_layout = QHBoxLayout()
         
@@ -230,6 +314,7 @@ class LoginWindow(QDialog):
         button_layout.addWidget(self.exit_button)
         button_layout.addStretch()
         
+        # Trial button - show for both platforms (MS Store trials handled differently)
         self.trial_button = QPushButton("Trial")
         self.trial_button.setFixedSize(80, 30)
         self.trial_button.clicked.connect(self.handle_trial)
@@ -579,6 +664,74 @@ class LoginWindow(QDialog):
     
     def handle_trial(self):
         """Handle trial activation - show email dialog with custom styling"""
+        
+        # For MS Store apps, check if Store trial is available first
+        if self.is_msstore:
+            msstore_trial_result = self._try_msstore_trial()
+            if msstore_trial_result:
+                return  # MS Store trial handled
+        
+        # Standard Gumroad trial flow (server-based)
+        self._show_gumroad_trial_dialog()
+    
+    def _try_msstore_trial(self) -> bool:
+        """
+        Try to start MS Store trial.
+        
+        Returns True if MS Store trial was handled, False to fall back to standard trial.
+        """
+        if not self.msstore_license_checker:
+            return False
+        
+        try:
+            # Check current license status
+            license_result = self.msstore_license_checker.check_license()
+            
+            if license_result.get('success'):
+                if license_result.get('is_trial') and license_result.get('is_active'):
+                    # Already on trial - proceed
+                    self.authenticated = True
+                    self.is_trial = True
+                    self._save_msstore_session(license_result)
+                    self.accept()
+                    return True
+                elif license_result.get('is_active'):
+                    # Already licensed - no trial needed
+                    self.authenticated = True
+                    self.is_trial = False
+                    self._save_msstore_session(license_result)
+                    self.accept()
+                    return True
+            
+            # No active license - prompt to get trial from Store
+            reply = QMessageBox.question(
+                self,
+                "Microsoft Store Trial",
+                "Would you like to start a free trial through the Microsoft Store?\n\n"
+                "This will open the Store app where you can activate your trial.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                # Open Store to app page for trial
+                import subprocess
+                subprocess.run(['start', 'ms-windows-store://pdp/?ProductId=YOUR_APP_ID'], shell=True)
+                QMessageBox.information(
+                    self,
+                    "Trial Activation",
+                    "Please complete the trial activation in the Microsoft Store,\n"
+                    "then restart the application."
+                )
+                return True
+            
+            return False  # Fall back to server trial
+            
+        except Exception as e:
+            logger.error(f"MS Store trial check failed: {e}")
+            return False  # Fall back to server trial
+    
+    def _show_gumroad_trial_dialog(self):
+        """Standard Gumroad/server-based trial activation dialog"""
         dialog = QDialog(self)
         # Remove window decorations (title bar and frame) and set modal
         dialog.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
