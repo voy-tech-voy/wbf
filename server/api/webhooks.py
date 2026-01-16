@@ -155,6 +155,16 @@ def gumroad_webhook():
     # Try to get data from form first, then JSON
     data = request.form.to_dict() if request.form else request.get_json() or {}
     
+    # LOG EVERYTHING including seller_id for debugging
+    logger.info(f"=== GUMROAD WEBHOOK RAW DATA ===")
+    logger.info(f"Request method: {request.method}")
+    logger.info(f"Content-Type: {request.content_type}")
+    logger.info(f"Form data: {request.form.to_dict()}")
+    logger.info(f"JSON data: {request.get_json()}")
+    logger.info(f"Parsed data: {json.dumps(data, indent=2)}")
+    logger.info(f"seller_id in data: {data.get('seller_id', 'NOT FOUND')}")
+    logger.info(f"=== END RAW DATA ===")
+    
     if not data:
         error_response = {"error": "No data received"}
         save_webhook_log({}, "error", error_response)
