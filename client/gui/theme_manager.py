@@ -296,16 +296,14 @@ class ThemeManager(QObject):
                     background-color: #3c3c3c;
                     border: none;
                     border-radius: 8px;
-                    margin: 5px;
-                    padding: 15px 14px 14px 14px;
+                    margin: 0px;
+                    padding: 0px;
                     color: #ffffff;
                     font-weight: bold;
                 }
                 QGroupBox::title {
-                    subcontrol-origin: margin;
-                    left: 10px;
-                    padding: 5px 8px 0 8px;
-                    color: #ffffff;
+                    padding: 0px;
+                    margin: 0px;
                 }
                 QTabWidget::pane {
                     border: 1px solid #555555;
@@ -488,14 +486,13 @@ class ThemeManager(QObject):
                 QGroupBox {
                     border: 2px solid #cccccc;
                     border-radius: 8px;
-                    margin: 5px;
-                    padding: 15px 14px 14px 14px;
+                    margin: 0px;
+                    padding: 0px;
                     font-weight: bold;
                 }
                 QGroupBox::title {
-                    subcontrol-origin: margin;
-                    left: 10px;
-                    padding: 5px 8px 0 8px;
+                    padding: 0px;
+                    margin: 0px;
                 }
                 QTabWidget::pane {
                     border: 1px solid #cccccc;

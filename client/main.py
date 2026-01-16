@@ -137,7 +137,8 @@ def main():
         log_info("Starting ImgApp with crash protection", "startup")
     
     # Check for dev mode - skip login window
-    dev_mode = os.getenv('DEV_MODE', '0') == '1'
+    dev_mode = True  # Temporarily hardcoded for development
+    # dev_mode = os.getenv('DEV_MODE', '0') == '1'
     
     # Set AppUserModelID for Windows taskbar icon
     if os.name == 'nt':

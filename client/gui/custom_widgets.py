@@ -29,9 +29,12 @@ class ModeButtonsWidget(QWidget):
         """
         super().__init__(parent)
         
+        # DEBUG: Magenta border to show mode buttons container - COMMENTED OUT
+        # self.setStyleSheet("border: 2px solid magenta;")
+        
         # Set up layout with consistent padding
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 14, 14, 9)
+        layout.setContentsMargins(12, 0, 12, 0)
         layout.setSpacing(8)
         
         # Button style - consistent across all instances
@@ -67,11 +70,12 @@ class ModeButtonsWidget(QWidget):
             self.manual_btn.setChecked(True)
         
         # Connect signals
+        # DEBUG: Print mode changes - COMMENTED OUT
         self.max_size_btn.toggled.connect(
-            lambda checked: checked and self.modeChanged.emit("Max Size")
+            lambda checked: checked and self.modeChanged.emit("Max Size")  # (print(f"🟢 ModeButtons: Max Size"), ...)
         )
         self.manual_btn.toggled.connect(
-            lambda checked: checked and self.modeChanged.emit("Manual")
+            lambda checked: checked and self.modeChanged.emit("Manual")  # (print(f"🟢 ModeButtons: Manual"), ...)
         )
         
         # Add buttons to layout
@@ -174,6 +178,7 @@ class CustomComboBox(QComboBox):
                 border: 1px solid {border_color};
                 border-radius: 4px;
                 padding: 4px {dropdown_width}px 4px {text_offset}px;
+                min-height: 20px;
             }}
             QComboBox:hover {{
                 border-color: {hover_border};
@@ -274,6 +279,8 @@ class DragOverlay(QWidget):
         super().__init__(parent_spinbox_widget)
         self.parent_widget = parent_spinbox_widget
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)  # Prevent blank background
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)  # Make truly transparent
         self.setMouseTracking(True)
         
         # Drag state
@@ -428,6 +435,7 @@ class CustomTargetSizeSpinBox(QWidget):
         # Create overlay for drag handling (sits on top of spinbox)
         self.drag_overlay = DragOverlay(self)
         self.drag_overlay.setCursor(self.custom_drag_cursor)
+        self.drag_overlay.hide()  # Start hidden, will show in showEvent
         
         self._apply_custom_style(self.is_dark)
     
@@ -510,9 +518,11 @@ class CustomTargetSizeSpinBox(QWidget):
     
     def _update_overlay_geometry(self):
         """Update overlay geometry to match spinbox"""
-        spinbox_geo = self.spinbox.geometry()
-        self.drag_overlay.setGeometry(spinbox_geo)
-        self.drag_overlay.raise_()
+        if self.isVisible():
+            spinbox_geo = self.spinbox.geometry()
+            self.drag_overlay.setGeometry(spinbox_geo)
+            self.drag_overlay.show()
+            self.drag_overlay.raise_()
     
     def eventFilter(self, obj, event):
         """Filter events on spinbox and lineEdit to detect focus changes and key presses"""
@@ -786,8 +796,8 @@ class TimeRangeSlider(QWidget):
     
     def __init__(self, parent=None, is_dark_mode=True):
         super().__init__(parent)
-        self.setMinimumHeight(40)
-        self.setMaximumHeight(50)
+        self.setMinimumHeight(24)
+        self.setMaximumHeight(28)
         
         # Range settings
         self.min_value = 0.0
@@ -799,8 +809,8 @@ class TimeRangeSlider(QWidget):
         self.handle_radius = 8
         self.active_handle = None  # None, 'start', or 'end'
         
-        # Padding for text and handles
-        self.padding = 20  # Space from edges for text labels and handles - increased for safety
+        # Padding for handles only (no text labels)
+        self.padding = 10  # Reduced - only need space for handle radius
         
         # Theme colors (will be set based on mode)
         self.is_dark_mode = is_dark_mode

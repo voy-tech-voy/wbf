@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
 from client.utils.font_manager import AppFonts, FONT_FAMILY, FONT_SIZE_BUTTON
 from client.gui.custom_widgets import TimeRangeSlider, ResizeFolder, RotationOptions, CustomComboBox, CustomTargetSizeSpinBox, ModeButtonsWidget
 from client.gui.custom_spinbox import CustomSpinBox
+from client.gui.command_group import CommandGroup
 from PyQt6.QtCore import Qt, pyqtSignal, QRect, QPoint, QTimer
 from PyQt6.QtGui import QPainter, QPen, QColor, QBrush
 import json
@@ -179,6 +180,97 @@ class CommandPanel(QWidget):
         self.setup_ui()
         # Ensure the convert button starts in the blue (idle) style before first use
         self.set_conversion_state(False)
+    
+    def resizeEvent(self, event):
+        """Handle resize to keep tab bar stretched to full width"""
+        super().resizeEvent(event)
+        if hasattr(self, 'tabs'):
+            tab_bar = self.tabs.tabBar()
+            # Force tab bar to match tab widget width (account for borders)
+            new_width = self.tabs.width() - 6
+            if new_width > 0:
+                tab_bar.setFixedWidth(new_width)
+    
+    def showEvent(self, event):
+        """Handle show to ensure tabs are properly sized"""
+        super().showEvent(event)
+        QTimer.singleShot(0, self._update_tab_bar_width)
+    
+    def _update_tab_bar_width(self):
+        """Update tab bar width to fill the tab widget"""
+        if hasattr(self, 'tabs'):
+            tab_bar = self.tabs.tabBar()
+            new_width = self.tabs.width() - 6
+            if new_width > 0:
+                tab_bar.setFixedWidth(new_width)
+
+    def _create_label_with_icon(self, text, icon_path):
+        """Create a QLabel with an icon and text"""
+        from PyQt6.QtGui import QPixmap, QPainter
+        import os
+        
+        container = QWidget()
+        container.setMinimumHeight(28)
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        
+        # Create red square placeholder (16x16)
+        icon_label = QLabel()
+        icon_label.setFixedSize(16, 16)
+        icon_label.setStyleSheet("background-color: red;")
+        
+        # Create text label
+        text_label = QLabel(text)
+        text_label.setWordWrap(False)
+        
+        layout.addWidget(icon_label)
+        layout.addWidget(text_label)
+        layout.addStretch()
+        
+        return container
+
+    def _create_group_box(self, title, icon_path, size_policy=None):
+        """Create a standardized group box with icon and title.
+        
+        This ensures consistent styling across all tabs:
+        - Same padding and margins
+        - Same icon size and placement
+        - Same title styling
+        
+        Args:
+            title: The group box title text
+            icon_path: Path to the icon file
+            size_policy: Optional QSizePolicy.Policy for vertical sizing
+            
+        Returns:
+            tuple: (group_box, content_layout) - the group box and its form layout for content
+        """
+        group = QGroupBox()
+        group.setTitle("")  # Will add icon+text manually
+        
+        if size_policy:
+            group.setSizePolicy(group.sizePolicy().horizontalPolicy(), size_policy)
+        else:
+            group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        
+        # Outer layout for the group
+        outer_layout = QVBoxLayout(group)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+        
+        # Title widget with icon
+        title_widget = self._create_label_with_icon(title, icon_path)
+        title_widget.setStyleSheet("font-weight: bold; padding: 10px 12px; background-color: transparent;")
+        outer_layout.addWidget(title_widget)
+        
+        # Content form layout with consistent margins
+        content_layout = QFormLayout()
+        content_layout.setContentsMargins(12, 8, 12, 12)
+        content_layout.setVerticalSpacing(8)
+        outer_layout.addLayout(content_layout)
+        
+        return group, content_layout
         
     def update_theme(self, is_dark):
         """Update theme-dependent styles"""
@@ -302,6 +394,17 @@ class CommandPanel(QWidget):
     def setup_ui(self):
         """Setup the command panel interface"""
         layout = QVBoxLayout(self)
+        layout.setSpacing(0)  # We'll manually add spacers
+        layout.setContentsMargins(0, 0, 0, 0)  # Remove default margins
+        
+        # DEBUG: Color the main layout margins - COMMENTED OUT
+        # self.setStyleSheet("""
+        #     QWidget#CommandPanel { 
+        #         background-color: rgba(255, 0, 255, 100); 
+        #         border: 3px solid magenta; 
+        #     }
+        # """)
+        # self.setObjectName("CommandPanel")
         
         # Create tabbed interface for different conversion types
         self.tabs = QTabWidget()
@@ -325,38 +428,66 @@ class CommandPanel(QWidget):
         
         # Make tab buttons fill available width
         tab_bar = self.tabs.tabBar()
-        tab_bar.setExpanding(True)
-        tab_bar.setDocumentMode(True)
+        tab_bar.setExpanding(True)  # Key setting to expand tabs
         tab_bar.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        # Force tabs to use equal sizes
+        
         from PyQt6.QtWidgets import QTabBar
         tab_bar.setUsesScrollButtons(False)
+        self.tabs.setDocumentMode(False)  # Keep False to allow expanding
+        
+        # Force the tab bar to fill the width
+        tab_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        tab_bar.setMinimumWidth(0)  # Allow shrinking
+        
+        # Initial width update will happen in showEvent
+        
+        # Stylesheet for tabs
         self.tabs.setStyleSheet("""
             QTabBar::tab {
-                min-width: 0px;
-                max-width: 16777215px;
                 padding: 8px 16px 13px 16px;
                 min-height: 32px;
-                margin-bottom: 8px;
+                margin-bottom: 0px;
                 border-bottom: 2px solid #888888;
             }
             QTabBar::tab:selected {
                 border-bottom: 2px solid #00AA00;
-                margin-bottom: 6px;
+                margin-bottom: 0px;
             }
             QTabWidget::pane {
-                border-top: 2px solid palette(mid);
+                border: none;
                 margin-top: 0px;
                 padding-top: 2px;
-                margin-bottom: 5px;
+                padding-bottom: 0px;
+                margin-bottom: 0px;
+                background-color: transparent;
             }
         """)
+        # DEBUG: Tab colors - COMMENTED OUT
+        # QTabBar::tab { background-color: rgba(0, 255, 0, 100); }
+        # QTabBar::tab:selected { background-color: rgba(0, 255, 0, 200); }
+        # QTabWidget::pane { background-color: rgba(255, 128, 0, 150); }
+        # QTabWidget { border: 3px solid cyan; background-color: rgba(255, 255, 0, 200); }
         
         layout.addWidget(self.tabs)
+        
+        # DEBUG: Visual marker for tabs widget bottom edge
+        tabs_end_marker = QWidget()
+        tabs_end_marker.setFixedHeight(0)  # Set to 0
+        tabs_end_marker.setStyleSheet("background-color: rgba(255, 0, 0, 255);")  # Bright red line
+        tabs_end_label = QLabel("TABS-WIDGET-END", tabs_end_marker)
+        tabs_end_label.setStyleSheet("color: white; font-size: 9px; font-weight: bold;")
+        tabs_end_label.move(2, -6)
+        layout.addWidget(tabs_end_marker)
+        
+        # DEBUG: Gap between tabs and output folder
+        layout.addWidget(self._create_debug_spacer(8))
         
         # Output settings
         output_group = self.create_output_settings()
         layout.addWidget(output_group)
+        
+        # DEBUG: Gap between output folder and convert button
+        layout.addWidget(self._create_debug_spacer(9))
         
         # Control buttons
         button_layout = self.create_control_buttons()
@@ -396,8 +527,13 @@ class CommandPanel(QWidget):
         """Filter Enter key presses in input fields to switch focus to active tab button"""
         from PyQt6.QtCore import QEvent, Qt
         
-        # Check if this is a KeyPress event with Enter/Return key
+        # Check if this is a KeyPress event
         if event.type() == QEvent.Type.KeyPress:
+            # Explicitly allow arrow keys to propagate (for spinbox navigation)
+            if event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down, Qt.Key.Key_Left, Qt.Key.Key_Right):
+                return False  # Let arrow keys pass through
+            
+            # Handle Enter/Return keys only
             if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 # Check if the object is an input field
                 if isinstance(obj, QLineEdit):
@@ -409,8 +545,8 @@ class CommandPanel(QWidget):
                     
                     return True  # Event handled
         
-        # Let the event propagate normally
-        return super().eventFilter(obj, event)
+        # Let all other events propagate normally
+        return False  # Changed from super().eventFilter() to explicit False
     
     def _focus_active_tab(self):
         """Set focus to the currently active tab button"""
@@ -438,35 +574,42 @@ class CommandPanel(QWidget):
         separator.setStyleSheet("background-color: #555555; margin: 4px 0px;")
         separator.setFixedHeight(1)
         return separator
+    
+    def _create_debug_spacer(self, number):
+        """Create a spacer for gaps between sections"""
+        # DEBUG: Colored spacers - COMMENTED OUT
+        # colors = {
+        #     1: "rgba(255, 0, 0, 200)", 2: "rgba(255, 128, 0, 200)", 3: "rgba(255, 255, 0, 200)",
+        #     4: "rgba(0, 255, 0, 200)", 5: "rgba(0, 255, 255, 200)", 6: "rgba(0, 128, 255, 200)",
+        #     7: "rgba(128, 0, 255, 200)", 8: "rgba(255, 0, 255, 200)", 9: "rgba(255, 192, 203, 200)",
+        # }
+        spacer = QWidget()
+        spacer.setFixedHeight(8)
+        # DEBUG: Uncomment to show colored spacers
+        # spacer.setStyleSheet(f"background-color: {colors.get(number, 'rgba(128, 128, 128, 200)')};")
+        # label = QLabel(f"{number}-GAP-8px", spacer)
+        # label.setStyleSheet("color: black; font-size: 9px; font-weight: bold; background: rgba(255,255,255,180); padding: 1px;")
+        # label.move(2, -1)
+        return spacer
         
     def create_image_tab(self):
         """Create image conversion options tab"""
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(3)
+        layout.setSpacing(0)  # We'll manually add spacers
         
-        # Output format selection
-        format_group = QGroupBox("Settings")
-        format_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        format_group_layout = QVBoxLayout(format_group)
-        format_group_layout.setContentsMargins(0, 0, 0, 0)
-        format_group_layout.setSpacing(0)
+        # Settings group (Mode + Format + Quality)
+        format_group = CommandGroup("Settings", "client/assets/icons/settings.png")
         
-        # Mode buttons - uniform component
-        self.image_mode_buttons = ModeButtonsWidget(default_mode="Max Size")
+        # Add mode buttons
+        self.image_mode_buttons = format_group.add_mode_buttons(default_mode="Max Size")
         self.image_mode_buttons.modeChanged.connect(self.on_image_size_mode_changed)
-        format_group_layout.addWidget(self.image_mode_buttons)
         self.image_size_mode_value = "manual"
-        
-        # Form layout for settings
-        format_layout = QFormLayout()
-        format_layout.setContentsMargins(14, 9, 14, 14)
-        format_layout.setVerticalSpacing(8)
         
         # Target Size - FIRST (shown in Max Size mode)
         self.image_max_size_spinbox = CustomTargetSizeSpinBox(
-            default_value=0.3,
+            default_value=0.2,
             on_enter_callback=self._focus_active_tab
         )
         self.image_max_size_spinbox.setRange(0.01, 100.0)  # Allow smaller sizes for images
@@ -474,9 +617,9 @@ class CommandPanel(QWidget):
         self.image_max_size_spinbox.setSensitivity(0.0025)  # Lower sensitivity (40px = 0.1 value change)
         self.image_max_size_spinbox.setToolTip("Target maximum file size in megabytes")
         self.image_max_size_spinbox.setVisible(False)
-        self.image_max_size_label = QLabel("Max Size (MB):")
+        self.image_max_size_label = QLabel("Max Size (MB)")
         self.image_max_size_label.setVisible(False)
-        format_layout.addRow(self.image_max_size_label, self.image_max_size_spinbox)
+        format_group.add_row(self.image_max_size_label, self.image_max_size_spinbox)
 
         # Auto-resize checkbox (for Max Size mode)
         self.image_auto_resize_checkbox = QCheckBox("Auto-resize")
@@ -486,18 +629,18 @@ class CommandPanel(QWidget):
             "Change the resolution in pixels (width×height) to match desired file size in MB."
         )
         self.image_auto_resize_checkbox.setVisible(False)
-        format_layout.addRow(self.image_auto_resize_checkbox)
+        format_group.add_row(self.image_auto_resize_checkbox)
         
         # Format dropdown - SECOND
         self.image_format = CustomComboBox()
         self.image_format.addItems(["WebP", "JPG", "PNG", "TIFF", "BMP"])
-        format_layout.addRow("Format:", self.image_format)
+        format_group.add_row("Format", self.image_format)
 
         # Multiple qualities option - THIRD
         self.multiple_qualities = QCheckBox("Multiple qualities")
         self.multiple_qualities.toggled.connect(self.toggle_quality_mode)
         self.multiple_qualities.setStyleSheet(TOGGLE_STYLE)
-        format_layout.addRow(self.multiple_qualities)
+        format_group.add_row(self.multiple_qualities)
         
         # Quality settings
         self.image_quality = QSlider(Qt.Orientation.Horizontal)
@@ -509,70 +652,77 @@ class CommandPanel(QWidget):
         quality_layout = QHBoxLayout()
         quality_layout.addWidget(self.image_quality)
         quality_layout.addWidget(self.image_quality_label)
-        self.image_quality_row_label = QLabel("Quality:")
-        format_layout.addRow(self.image_quality_row_label, quality_layout)
+        self.image_quality_row_label = QLabel("Quality")
+        format_group.add_row(self.image_quality_row_label, quality_layout)
         
         # Quality variants input (hidden by default)
         self.quality_variants = QLineEdit()
         self.quality_variants.setPlaceholderText("e.g., 40, 60, 80, 95")
         self.quality_variants.setText("40, 60, 80, 95")
         self.quality_variants.setVisible(False)
-        self.quality_variants_label = QLabel("Quality variants:")
+        self.quality_variants_label = QLabel("Quality variants")
         self.quality_variants_label.setVisible(False)
-        format_layout.addRow(self.quality_variants_label, self.quality_variants)
-        
-        format_group_layout.addLayout(format_layout)
+        format_group.add_row(self.quality_variants_label, self.quality_variants)
         
         layout.addWidget(format_group)
         
-        # Resize options
-        resize_group = QGroupBox("Resize Options")
-        resize_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        resize_layout = QFormLayout(resize_group)
-        resize_layout.setVerticalSpacing(8)
+        # DEBUG: Gap between folders
+        layout.addWidget(self._create_debug_spacer(3))
         
-        # Resize mode selection - FIRST
-        self.resize_mode = CustomComboBox()
-        self.resize_mode.addItems(["No resize", "By width (pixels)", "By longer edge (pixels)", "By ratio (percent)"])
-        self.resize_mode.currentTextChanged.connect(self.on_resize_mode_changed)
-        resize_layout.addRow("Resize mode:", self.resize_mode)
+        # Transform options (Resize + Rotation combined)
+        transform_group = CommandGroup(
+            "Transform", "client/assets/icons/transform.svg", size_policy=QSizePolicy.Policy.Maximum
+        )
         
-        # Multiple resize option - SECOND
+        # Resize mode selection
+        self.image_resize_mode = CustomComboBox()
+        self.image_resize_mode.addItems(["No resize", "By width (pixels)", "By longer edge (pixels)", "By ratio (percent)"])
+        self.image_resize_mode.setStyleSheet(COMBOBOX_STYLE)
+        self.image_resize_mode.currentTextChanged.connect(self.on_image_resize_ui_changed)
+        transform_group.add_row("Resize", self.image_resize_mode, with_icon=True)
+        
+        # Multiple resize option
         self.multiple_resize = QCheckBox("Multiple resize variants")
         self.multiple_resize.toggled.connect(self.toggle_resize_mode)
         self.multiple_resize.setStyleSheet(TOGGLE_STYLE)
-        resize_layout.addRow(self.multiple_resize)
+        transform_group.add_row(self.multiple_resize)
         
         # Single resize value input
         self.resize_value = CustomSpinBox(on_enter_callback=self._focus_active_tab)
         self.resize_value.setRange(1, 10000)
         self.resize_value.setValue(720)  # Default for pixels
         self.resize_value.setVisible(False)
-        self.resize_value_label = QLabel("Width (pixels):")
+        self.resize_value_label = QLabel("Width (pixels)")
         self.resize_value_label.setVisible(False)
-        resize_layout.addRow(self.resize_value_label, self.resize_value)
+        transform_group.add_row(self.resize_value_label, self.resize_value)
         
         # Multiple resize input (hidden by default)
         self.resize_variants = QLineEdit()
         self.resize_variants.setPlaceholderText("e.g., 30,50,80 or 720,1280,1920")
         self.resize_variants.setText("720,1280,1920")
         self.resize_variants.setVisible(False)
-        self.resize_variants_label = QLabel("Resize values:")
+        self.resize_variants_label = QLabel("Resize values")
         self.resize_variants_label.setVisible(False)
-        resize_layout.addRow(self.resize_variants_label, self.resize_variants)
+        transform_group.add_row(self.resize_variants_label, self.resize_variants)
         
-        layout.addWidget(resize_group)
+        # Gray separator bar
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Plain)
+        separator.setStyleSheet("background-color: #555555; margin: 8px 0px;")
+        separator.setFixedHeight(1)
+        transform_group.add_row(separator)
         
         # Rotation options
-        rotation_group = QGroupBox("Rotation")
-        rotation_group.setSizePolicy(rotation_group.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Maximum)
-        rotation_layout = QFormLayout(rotation_group)
+        self.image_rotation_angle = CustomComboBox()
+        self.image_rotation_angle.addItems(["No rotation", "90° clockwise", "180°", "270° clockwise"])
+        self.image_rotation_angle.setStyleSheet(COMBOBOX_STYLE)
+        transform_group.add_row("Rotation", self.image_rotation_angle, with_icon=True)
         
-        self.rotation_angle = CustomComboBox()
-        self.rotation_angle.addItems(["No rotation", "90° clockwise", "180°", "270° clockwise"])
-        rotation_layout.addRow("Rotation:", self.rotation_angle)
+        # Set fixed height to prevent jumping when controls show/hide
+        transform_group.setFixedHeight(180)
         
-        layout.addWidget(rotation_group)
+        layout.addWidget(transform_group)
         
         return tab
         
@@ -581,26 +731,15 @@ class CommandPanel(QWidget):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(3)
+        layout.setSpacing(0)  # We'll manually add spacers
         
-        # Video codec selection (Mode + Settings unified)
-        codec_group = QGroupBox("Settings")
-        codec_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        codec_group_layout = QVBoxLayout(codec_group)
-        codec_group_layout.setContentsMargins(0, 0, 0, 0)
-        codec_group_layout.setSpacing(0)
+        # Settings group (Mode + Format + Quality)
+        codec_group = CommandGroup("Settings", "client/assets/icons/settings.png")
         
-        # Mode buttons - uniform component
-        self.video_mode_buttons = ModeButtonsWidget(default_mode="Max Size")
+        # Add mode buttons
+        self.video_mode_buttons = codec_group.add_mode_buttons(default_mode="Max Size")
         self.video_mode_buttons.modeChanged.connect(self.on_video_size_mode_changed)
-        codec_group_layout.addWidget(self.video_mode_buttons)
         self.video_size_mode_value = "manual"
-        
-        # Form layout for settings
-        codec_layout = QFormLayout()
-        codec_layout.setContentsMargins(14, 9, 14, 14)
-        codec_layout.setVerticalSpacing(8)
-        codec_group_layout.addLayout(codec_layout)
         
         # Target Size - FIRST (shown in Max Size mode)
         self.video_max_size_spinbox = CustomTargetSizeSpinBox(
@@ -609,9 +748,9 @@ class CommandPanel(QWidget):
         )
         self.video_max_size_spinbox.setToolTip("Target maximum file size in megabytes")
         self.video_max_size_spinbox.setVisible(False)
-        self.video_max_size_label = QLabel("Max Size (MB):")
+        self.video_max_size_label = QLabel("Max Size (MB)")
         self.video_max_size_label.setVisible(False)
-        codec_layout.addRow(self.video_max_size_label, self.video_max_size_spinbox)
+        codec_group.add_row(self.video_max_size_label, self.video_max_size_spinbox)
 
         # Auto-resize checkbox (for Max Size mode)
         self.video_auto_resize_checkbox = QCheckBox("Auto-resize")
@@ -621,13 +760,13 @@ class CommandPanel(QWidget):
             "Change the resolution in pixels (width×height) to match desired file size in MB."
         )
         self.video_auto_resize_checkbox.setVisible(False)
-        codec_layout.addRow(self.video_auto_resize_checkbox)
+        codec_group.add_row(self.video_auto_resize_checkbox)
         
         # Format dropdown - SECOND
         self.video_codec = CustomComboBox()
         self.video_codec.addItems(["WebM (VP9, faster)", "WebM (AV1, slower)", "MP4 (H.264)", "MP4 (H.265)", "MP4 (AV1)"])
         self.video_codec.currentTextChanged.connect(self.on_video_codec_changed)
-        codec_layout.addRow("Format:", self.video_codec)
+        codec_group.add_row("Format", self.video_codec)
 
         # Quality (CRF) slider for WebM
         self.video_quality = QSlider(Qt.Orientation.Horizontal)
@@ -636,7 +775,7 @@ class CommandPanel(QWidget):
         self.video_quality.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.video_quality.setTickInterval(10)
         self.video_quality.setToolTip("Quality: 0=lossless, 100=worst quality\nRecommended: 30-50 for WebM")
-        self.video_quality_label = QLabel("Quality:")
+        self.video_quality_label = QLabel("Quality")
         self.video_quality_value = QLabel("30")
         self.video_quality.valueChanged.connect(lambda v: self.video_quality_value.setText(str(v)))
         
@@ -649,10 +788,10 @@ class CommandPanel(QWidget):
         self.multiple_video_qualities = QCheckBox("Multiple quality variants")
         self.multiple_video_qualities.toggled.connect(self.toggle_video_quality_mode)
         self.multiple_video_qualities.setStyleSheet(TOGGLE_STYLE)
-        codec_layout.addRow(self.multiple_video_qualities)
+        codec_group.add_row(self.multiple_video_qualities)
         
         # Quality controls
-        codec_layout.addRow(self.video_quality_label, quality_layout)
+        codec_group.add_row(self.video_quality_label, quality_layout)
         
         # Video quality variant inputs (hidden by default)
         self.video_quality_variants = QLineEdit()
@@ -660,73 +799,85 @@ class CommandPanel(QWidget):
         self.video_quality_variants.setText("15,23,31")
         self.video_quality_variants.setVisible(False)
         self.video_quality_variants.editingFinished.connect(self.validate_video_quality_variants)
-        self.video_quality_variants_label = QLabel("Quality variants:")
+        self.video_quality_variants_label = QLabel("Quality variants")
         self.video_quality_variants_label.setVisible(False)
-        codec_layout.addRow(self.video_quality_variants_label, self.video_quality_variants)
+        codec_group.add_row(self.video_quality_variants_label, self.video_quality_variants)
         
         # Set initial state for bitrate and quality visibility
         self.on_video_codec_changed(self.video_codec.currentText())
         
         layout.addWidget(codec_group)
         
-        # Video filters
-        filter_group = QGroupBox("Resize")
-        filter_layout = QFormLayout(filter_group)
-        filter_layout.setVerticalSpacing(8)
+        # DEBUG: Gap between folders
+        layout.addWidget(self._create_debug_spacer(4))
+        
+        # Transform options (Resize + Rotation combined)
+        transform_group = CommandGroup(
+            "Transform", "client/assets/icons/transform.svg", size_policy=QSizePolicy.Policy.Maximum
+        )
         
         # Resize mode selection
         self.video_resize_mode = CustomComboBox()
         self.video_resize_mode.addItems(["No resize", "By width (pixels)", "By longer edge (pixels)", "By ratio (percent)"])
-        self.video_resize_mode.currentTextChanged.connect(self.on_video_resize_mode_changed)
-        filter_layout.addRow("Resize mode:", self.video_resize_mode)
+        self.video_resize_mode.setStyleSheet(COMBOBOX_STYLE)
+        self.video_resize_mode.currentTextChanged.connect(self.on_video_resize_ui_changed)
+        transform_group.add_row("Resize", self.video_resize_mode, with_icon=True)
         
-        # Multiple video size variants option - SECOND
+        # Multiple video size variants option
         self.multiple_video_variants = QCheckBox("Multiple size variants")
         self.multiple_video_variants.toggled.connect(self.toggle_video_variant_mode)
         self.multiple_video_variants.setStyleSheet(TOGGLE_STYLE)
-        filter_layout.addRow(self.multiple_video_variants)
+        transform_group.add_row(self.multiple_video_variants)
         
         # Single resize value input (hidden by default)
         self.video_resize_value = CustomSpinBox(on_enter_callback=self._focus_active_tab)
         self.video_resize_value.setRange(1, 10000)
         self.video_resize_value.setValue(1920)
         self.video_resize_value.setVisible(False)
-        self.video_resize_value_label = QLabel("Width (pixels):")
+        self.video_resize_value_label = QLabel("Width (pixels)")
         self.video_resize_value_label.setVisible(False)
-        filter_layout.addRow(self.video_resize_value_label, self.video_resize_value)
+        transform_group.add_row(self.video_resize_value_label, self.video_resize_value)
         
         # Video size variant inputs (hidden by default)
         self.video_size_variants = QLineEdit()
         self.video_size_variants.setPlaceholderText("e.g., 480,720,1080 or 25%,50%,75%")
         self.video_size_variants.setText("480,720,1080")
         self.video_size_variants.setVisible(False)
-        self.video_size_variants_label = QLabel("Size variants:")
+        self.video_size_variants_label = QLabel("Size variants")
         self.video_size_variants_label.setVisible(False)
-        filter_layout.addRow(self.video_size_variants_label, self.video_size_variants)
+        transform_group.add_row(self.video_size_variants_label, self.video_size_variants)
         
-        layout.addWidget(filter_group)
+        # Gray separator bar
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Plain)
+        separator.setStyleSheet("background-color: #555555; margin: 8px 0px;")
+        separator.setFixedHeight(1)
+        transform_group.add_row(separator)
         
-        # Video rotation options
-        rotation_group = QGroupBox("Rotation")
-        rotation_layout = QFormLayout(rotation_group)
-        rotation_layout.setVerticalSpacing(8)
-        
+        # Rotation options
         self.video_rotation_angle = CustomComboBox()
         self.video_rotation_angle.addItems(["No rotation", "90° clockwise", "180°", "270° clockwise"])
-        rotation_layout.addRow("Rotation:", self.video_rotation_angle)
+        self.video_rotation_angle.setStyleSheet(COMBOBOX_STYLE)
+        transform_group.add_row("Rotation", self.video_rotation_angle, with_icon=True)
         
-        layout.addWidget(rotation_group)
+        # Set fixed height to prevent jumping when controls show/hide
+        transform_group.setFixedHeight(180)
         
-        # Video time options (cutting + retime)
-        time_group = QGroupBox("Time Options")
-        time_layout = QFormLayout(time_group)
-        time_layout.setVerticalSpacing(8)
+        layout.addWidget(transform_group)
+        
+        # DEBUG: Gap between folders
+        layout.addWidget(self._create_debug_spacer(5))
+        
+        # Time Options group
+        time_group = CommandGroup(
+            "Time Options", "client/assets/icons/time.png", size_policy=QSizePolicy.Policy.Maximum
+        )
         
         # Time range toggle (controls range slider visibility)
         self.enable_time_cutting = QCheckBox("Time range")
         self.enable_time_cutting.setStyleSheet(TOGGLE_STYLE)
         self.enable_time_cutting.toggled.connect(self.toggle_time_cutting)
-        time_layout.addRow(self.enable_time_cutting)
         
         # Time range slider with dark mode support
         self.time_range_slider = TimeRangeSlider(is_dark_mode=self.is_dark_mode)
@@ -735,13 +886,18 @@ class CommandPanel(QWidget):
         self.time_range_slider.setEndValue(1.0)
         self.time_range_slider.setToolTip("Drag the handles to set start and end times (0% = beginning, 100% = end)")
         self.time_range_slider.setVisible(False)
-        time_layout.addRow(self.time_range_slider)
+        
+        # Put toggle and slider on same row
+        time_range_row = QHBoxLayout()
+        time_range_row.addWidget(self.enable_time_cutting)
+        time_range_row.addSpacing(8)  # Small gap between toggle and slider
+        time_range_row.addWidget(self.time_range_slider, 1)  # stretch=1
+        time_group.add_row(time_range_row)
 
         # Retime controls
-        self.enable_retime = QCheckBox("Enable retime")
+        self.enable_retime = QCheckBox("Retime")
         self.enable_retime.setStyleSheet(TOGGLE_STYLE)
         self.enable_retime.toggled.connect(self.toggle_retime)
-        time_layout.addRow(self.enable_retime)
 
         self.retime_slider = QSlider(Qt.Orientation.Horizontal)
         self.retime_slider.setRange(10, 30)  # 1.0x to 3.0x in 0.1 steps
@@ -752,14 +908,13 @@ class CommandPanel(QWidget):
         self.retime_value_label.setVisible(False)
         self.retime_slider.valueChanged.connect(lambda v: self.retime_value_label.setText(f"{v/10:.1f}x"))
         
-        retime_layout = QHBoxLayout()
-        retime_layout.addWidget(self.retime_slider)
-        retime_layout.addWidget(self.retime_value_label)
-        
-        # Store label reference for visibility control
-        self.retime_speed_label = QLabel("Playback speed:")
-        self.retime_speed_label.setVisible(False)
-        time_layout.addRow(self.retime_speed_label, retime_layout)
+        # Put toggle and slider on same row
+        retime_row = QHBoxLayout()
+        retime_row.addWidget(self.enable_retime)
+        retime_row.addSpacing(8)  # Small gap between toggle and slider
+        retime_row.addWidget(self.retime_slider, 1)  # stretch=1
+        retime_row.addWidget(self.retime_value_label)
+        time_group.add_row(retime_row)
         
         layout.addWidget(time_group)
         
@@ -770,26 +925,14 @@ class CommandPanel(QWidget):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(3)
+        layout.setSpacing(0)  # We'll manually add spacers
         
-        # ffmpeg GIF options (Mode + Settings unified)
-        self.ffmpeg_group = QGroupBox("Settings")
-        self.ffmpeg_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        ffmpeg_group_layout = QVBoxLayout(self.ffmpeg_group)
-        ffmpeg_group_layout.setContentsMargins(0, 0, 0, 0)
-        ffmpeg_group_layout.setSpacing(0)
+        # Settings group (Mode + Format + Quality)
+        self.ffmpeg_group = CommandGroup("Settings", "client/assets/icons/settings.png")
         
-        # Mode buttons - uniform component
-        self.gif_mode_buttons = ModeButtonsWidget(default_mode="Max Size")
+        # Add mode buttons
+        self.gif_mode_buttons = self.ffmpeg_group.add_mode_buttons(default_mode="Max Size")
         self.gif_mode_buttons.modeChanged.connect(self.on_gif_size_mode_changed)
-        ffmpeg_group_layout.addWidget(self.gif_mode_buttons)
-        
-        # Form layout for settings
-        ffmpeg_layout = QFormLayout()
-        ffmpeg_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
-        ffmpeg_layout.setContentsMargins(14, 9, 14, 14)
-        ffmpeg_layout.setVerticalSpacing(8)
-        ffmpeg_group_layout.addLayout(ffmpeg_layout)
 
         # Target Size - SECOND
         self.gif_max_size_spinbox = CustomTargetSizeSpinBox(
@@ -798,9 +941,9 @@ class CommandPanel(QWidget):
         )
         self.gif_max_size_spinbox.setToolTip("Target maximum file size in megabytes")
         self.gif_max_size_spinbox.setVisible(False)
-        self.gif_max_size_label = QLabel("Max Size (MB):")
+        self.gif_max_size_label = QLabel("Max Size (MB)")
         self.gif_max_size_label.setVisible(False)
-        ffmpeg_layout.addRow(self.gif_max_size_label, self.gif_max_size_spinbox)
+        self.ffmpeg_group.add_row(self.gif_max_size_label, self.gif_max_size_spinbox)
 
         # Auto-resize checkbox (for Max Size mode)
         self.gif_auto_resize_checkbox = QCheckBox("Auto-resize")
@@ -810,50 +953,51 @@ class CommandPanel(QWidget):
             "Change the resolution in pixels (width×height) to match desired file size in MB."
         )
         self.gif_auto_resize_checkbox.setVisible(False)
-        ffmpeg_layout.addRow(self.gif_auto_resize_checkbox)
+        self.ffmpeg_group.add_row(self.gif_auto_resize_checkbox)
 
         # Estimation info label (hidden by default)
         self.gif_size_estimate_label = QLabel("")
         self.gif_size_estimate_label.setStyleSheet("color: #888; font-style: italic;")
         self.gif_size_estimate_label.setVisible(False)
         self.gif_size_estimate_label.setWordWrap(True)
-        ffmpeg_layout.addRow("", self.gif_size_estimate_label)
+        # Don't add to layout - we'll manage visibility separately to avoid empty row space
+        # self.ffmpeg_group.add_row("", self.gif_size_estimate_label)
 
         # Multiple variants toggle
         self.gif_ffmpeg_variants = QCheckBox("Multiple Variants (FPS, Colors, Qualities)")
         self.gif_ffmpeg_variants.setStyleSheet(TOGGLE_STYLE)
         self.gif_ffmpeg_variants.toggled.connect(self.toggle_gif_ffmpeg_variants)
-        ffmpeg_layout.addRow(self.gif_ffmpeg_variants)
+        self.ffmpeg_group.add_row(self.gif_ffmpeg_variants)
 
         # FPS
         self.ffmpeg_gif_fps = CustomComboBox()
         self.ffmpeg_gif_fps.addItems(["10", "12", "15", "18", "24"])
         self.ffmpeg_gif_fps.setCurrentText("15")
-        self.ffmpeg_gif_fps_label = QLabel("FPS:")
-        ffmpeg_layout.addRow(self.ffmpeg_gif_fps_label, self.ffmpeg_gif_fps)
+        self.ffmpeg_gif_fps_label = QLabel("FPS")
+        self.ffmpeg_group.add_row(self.ffmpeg_gif_fps_label, self.ffmpeg_gif_fps)
 
         # FPS Variants
         self.ffmpeg_gif_fps_variants = QLineEdit()
         self.ffmpeg_gif_fps_variants.setPlaceholderText("e.g., 10,15,24")
         self.ffmpeg_gif_fps_variants.setVisible(False)
-        self.ffmpeg_gif_fps_variants_label = QLabel("FPS variants:")
+        self.ffmpeg_gif_fps_variants_label = QLabel("FPS variants")
         self.ffmpeg_gif_fps_variants_label.setVisible(False)
-        ffmpeg_layout.addRow(self.ffmpeg_gif_fps_variants_label, self.ffmpeg_gif_fps_variants)
+        self.ffmpeg_group.add_row(self.ffmpeg_gif_fps_variants_label, self.ffmpeg_gif_fps_variants)
 
         # Colors
         self.ffmpeg_gif_colors = CustomComboBox()
         self.ffmpeg_gif_colors.addItems(["8", "16", "32", "64", "128", "256"])
         self.ffmpeg_gif_colors.setCurrentText("256")
-        self.ffmpeg_gif_colors_label = QLabel("Colors:")
-        ffmpeg_layout.addRow(self.ffmpeg_gif_colors_label, self.ffmpeg_gif_colors)
+        self.ffmpeg_gif_colors_label = QLabel("Colors")
+        self.ffmpeg_group.add_row(self.ffmpeg_gif_colors_label, self.ffmpeg_gif_colors)
 
         # Colors Variants
         self.ffmpeg_gif_colors_variants = QLineEdit()
         self.ffmpeg_gif_colors_variants.setPlaceholderText("e.g., 64,128,256")
         self.ffmpeg_gif_colors_variants.setVisible(False)
-        self.ffmpeg_gif_colors_variants_label = QLabel("Colors variants:")
+        self.ffmpeg_gif_colors_variants_label = QLabel("Colors variants")
         self.ffmpeg_gif_colors_variants_label.setVisible(False)
-        ffmpeg_layout.addRow(self.ffmpeg_gif_colors_variants_label, self.ffmpeg_gif_colors_variants)
+        self.ffmpeg_group.add_row(self.ffmpeg_gif_colors_variants_label, self.ffmpeg_gif_colors_variants)
 
         # Dither
         # self.ffmpeg_gif_dither = CustomComboBox()
@@ -869,7 +1013,7 @@ class CommandPanel(QWidget):
         # self.ffmpeg_gif_dither.setCurrentText("sierra2_4a")
         # self.ffmpeg_gif_dither.setToolTip("Dithering algorithm to use. sierra2_4a is generally good for animations.")
         # self.ffmpeg_gif_dither_label = QLabel("Dithering:")
-        # ffmpeg_layout.addRow(self.ffmpeg_gif_dither_label, self.ffmpeg_gif_dither)
+        # self.ffmpeg_group.add_row(self.ffmpeg_gif_dither_label, self.ffmpeg_gif_dither)
 
         # Dither Quality Slider
         self.gif_dither_quality_slider = QSlider(Qt.Orientation.Horizontal)
@@ -884,87 +1028,94 @@ class CommandPanel(QWidget):
         dither_quality_layout = QHBoxLayout()
         dither_quality_layout.addWidget(self.gif_dither_quality_slider)
         dither_quality_layout.addWidget(self.gif_dither_quality_label)
-        self.gif_dither_quality_row_label = QLabel("Quality:")
-        ffmpeg_layout.addRow(self.gif_dither_quality_row_label, dither_quality_layout)
+        self.gif_dither_quality_row_label = QLabel("Quality")
+        self.ffmpeg_group.add_row(self.gif_dither_quality_row_label, dither_quality_layout)
 
         # Dither Variants
         self.ffmpeg_gif_dither_variants = QLineEdit()
         self.ffmpeg_gif_dither_variants.setPlaceholderText("e.g., 0,3,5")
         self.ffmpeg_gif_dither_variants.setVisible(False)
-        self.ffmpeg_gif_dither_variants_label = QLabel("Quality variants (0-5):")
+        self.ffmpeg_gif_dither_variants_label = QLabel("Quality variants (0-5)")
         self.ffmpeg_gif_dither_variants_label.setVisible(False)
-        ffmpeg_layout.addRow(self.ffmpeg_gif_dither_variants_label, self.ffmpeg_gif_dither_variants)
+        self.ffmpeg_group.add_row(self.ffmpeg_gif_dither_variants_label, self.ffmpeg_gif_dither_variants)
 
         # Blur
         self.ffmpeg_gif_blur = QCheckBox("Reduce banding")
         self.ffmpeg_gif_blur.setStyleSheet(TOGGLE_STYLE)
-        ffmpeg_layout.addRow(self.ffmpeg_gif_blur)
+        self.ffmpeg_group.add_row(self.ffmpeg_gif_blur)
 
         layout.addWidget(self.ffmpeg_group)
         
-        # Resize options - SECOND
-        resize_group = QGroupBox("Resize")
-        resize_group.setSizePolicy(resize_group.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Maximum)
-        resize_layout = QFormLayout(resize_group)
-        resize_layout.setVerticalSpacing(8)
+        # DEBUG: Gap between folders
+        layout.addWidget(self._create_debug_spacer(6))
         
-        # Resize mode selection - FIRST
+        # Transform options (Resize + Rotation combined)
+        transform_group = CommandGroup(
+            "Transform", "client/assets/icons/transform.svg", size_policy=QSizePolicy.Policy.Maximum
+        )
+        
+        # Resize mode selection
         self.gif_resize_mode = CustomComboBox()
         self.gif_resize_mode.addItems(["No resize", "By width (pixels)", "By longer edge (pixels)", "By ratio (percent)"])
         self.gif_resize_mode.setStyleSheet(COMBOBOX_STYLE)
-        self.gif_resize_mode.currentTextChanged.connect(self.on_gif_resize_mode_changed)
-        resize_layout.addRow("Resize mode:", self.gif_resize_mode)
+        self.gif_resize_mode.currentTextChanged.connect(self.on_gif_resize_ui_changed)
+        transform_group.add_row("Resize", self.gif_resize_mode, with_icon=True)
         
-        # Multiple resize variants option - SECOND
+        # Multiple resize variants option
         self.gif_multiple_resize = QCheckBox("Multiple size variants")
         self.gif_multiple_resize.toggled.connect(self.toggle_gif_resize_variant_mode)
         self.gif_multiple_resize.setStyleSheet(TOGGLE_STYLE)
-        resize_layout.addRow(self.gif_multiple_resize)
+        transform_group.add_row(self.gif_multiple_resize)
         
         # Single resize value input (hidden by default)
         self.gif_resize_value = CustomSpinBox(on_enter_callback=self._focus_active_tab)
         self.gif_resize_value.setRange(1, 10000)
         self.gif_resize_value.setValue(720)
         self.gif_resize_value.setVisible(False)
-        self.gif_resize_value_label = QLabel("Width (pixels):")
+        self.gif_resize_value_label = QLabel("Width (pixels)")
         self.gif_resize_value_label.setVisible(False)
-        resize_layout.addRow(self.gif_resize_value_label, self.gif_resize_value)
+        transform_group.add_row(self.gif_resize_value_label, self.gif_resize_value)
         
         # Resize variant inputs (hidden by default)
         self.gif_resize_variants = QLineEdit()
         self.gif_resize_variants.setPlaceholderText("e.g., 480,720,1080")
         self.gif_resize_variants.setText("480,720,1080")
         self.gif_resize_variants.setVisible(False)
-        self.gif_resize_variants_label = QLabel("Size variants:")
+        self.gif_resize_variants_label = QLabel("Size variants")
         self.gif_resize_variants_label.setVisible(False)
-        resize_layout.addRow(self.gif_resize_variants_label, self.gif_resize_variants)
+        transform_group.add_row(self.gif_resize_variants_label, self.gif_resize_variants)
         
-        layout.addWidget(resize_group)
+        # Gray separator bar
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Plain)
+        separator.setStyleSheet("background-color: #555555; margin: 8px 0px;")
+        separator.setFixedHeight(1)
+        transform_group.add_row(separator)
         
-        # GIF rotation options - THIRD
-        rotation_group = QGroupBox("Rotation")
-        rotation_group.setSizePolicy(rotation_group.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Maximum)
-        rotation_layout = QFormLayout(rotation_group)
-        rotation_layout.setVerticalSpacing(8)
-        
+        # Rotation options
         self.gif_rotation_angle = CustomComboBox()
         self.gif_rotation_angle.addItems(["No rotation", "90° clockwise", "180°", "270° clockwise"])
         self.gif_rotation_angle.setStyleSheet(COMBOBOX_STYLE)
-        rotation_layout.addRow("Rotation:", self.gif_rotation_angle)
+        transform_group.add_row("Rotation", self.gif_rotation_angle, with_icon=True)
         
-        layout.addWidget(rotation_group)
+        # Set fixed height to prevent jumping when controls show/hide
+        transform_group.setFixedHeight(180)
         
-        # GIF time options (cutting + retime) - FOURTH
-        gif_time_group = QGroupBox("Time Options")
-        gif_time_group.setSizePolicy(gif_time_group.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Maximum)
-        gif_time_layout = QFormLayout(gif_time_group)
-        gif_time_layout.setVerticalSpacing(8)
+        layout.addWidget(transform_group)
+        
+        # DEBUG: Gap between folders
+        layout.addWidget(self._create_debug_spacer(7))
+        
+        # Time Options group
+        gif_time_group = CommandGroup(
+            "Time Options", "client/assets/icons/time.png", size_policy=QSizePolicy.Policy.Maximum
+        )
         
         # Time range toggle
         self.gif_enable_time_cutting = QCheckBox("Time range")
         self.gif_enable_time_cutting.setStyleSheet(TOGGLE_STYLE)
         self.gif_enable_time_cutting.toggled.connect(self.toggle_gif_time_cutting)
-        gif_time_layout.addRow(self.gif_enable_time_cutting)
         
         # Time range slider with dark mode support
         self.gif_time_range_slider = TimeRangeSlider(is_dark_mode=self.is_dark_mode)
@@ -973,13 +1124,18 @@ class CommandPanel(QWidget):
         self.gif_time_range_slider.setEndValue(1.0)
         self.gif_time_range_slider.setToolTip("Drag the handles to set start and end times (0% = beginning, 100% = end)")
         self.gif_time_range_slider.setVisible(False)
-        gif_time_layout.addRow(self.gif_time_range_slider)
+        
+        # Put toggle and slider on same row
+        gif_time_range_row = QHBoxLayout()
+        gif_time_range_row.addWidget(self.gif_enable_time_cutting)
+        gif_time_range_row.addSpacing(8)  # Small gap between toggle and slider
+        gif_time_range_row.addWidget(self.gif_time_range_slider, 1)  # stretch=1
+        gif_time_group.add_row(gif_time_range_row)
 
         # Retime controls for GIF conversion
-        self.gif_enable_retime = QCheckBox("Enable retime")
+        self.gif_enable_retime = QCheckBox("Retime")
         self.gif_enable_retime.setStyleSheet(TOGGLE_STYLE)
         self.gif_enable_retime.toggled.connect(self.toggle_gif_retime)
-        gif_time_layout.addRow(self.gif_enable_retime)
 
         self.gif_retime_slider = QSlider(Qt.Orientation.Horizontal)
         self.gif_retime_slider.setRange(10, 30)
@@ -990,16 +1146,26 @@ class CommandPanel(QWidget):
         self.gif_retime_value_label.setVisible(False)
         self.gif_retime_slider.valueChanged.connect(lambda v: self.gif_retime_value_label.setText(f"{v/10:.1f}x"))
 
-        gif_retime_layout = QHBoxLayout()
-        gif_retime_layout.addWidget(self.gif_retime_slider)
-        gif_retime_layout.addWidget(self.gif_retime_value_label)
-        
-        # Store label reference for visibility control
-        self.gif_retime_speed_label = QLabel("Playback speed:")
-        self.gif_retime_speed_label.setVisible(False)
-        gif_time_layout.addRow(self.gif_retime_speed_label, gif_retime_layout)
+        # Put toggle and slider on same row
+        gif_retime_row = QHBoxLayout()
+        gif_retime_row.addWidget(self.gif_enable_retime)
+        gif_retime_row.addSpacing(8)  # Small gap between toggle and slider
+        gif_retime_row.addWidget(self.gif_retime_slider, 1)  # stretch=1
+        gif_retime_row.addWidget(self.gif_retime_value_label)
+        gif_time_group.add_row(gif_retime_row)
         
         layout.addWidget(gif_time_group)
+        
+        # DEBUG: Spacer at end of tab content - COMMENTED OUT
+        # end_spacer = QWidget()
+        # end_spacer.setFixedHeight(0)
+        # end_spacer.setStyleSheet("background-color: rgba(255, 255, 255, 200);")
+        # end_label = QLabel("TAB-END", end_spacer)
+        # end_label.setStyleSheet("color: black; font-size: 9px; font-weight: bold;")
+        # end_label.move(2, -1)
+        # layout.addWidget(end_spacer)
+        
+        # STRETCH-AREA removed
         
         # Apply initial size mode visibility (Max Size default)
         self.on_gif_size_mode_changed("Max Size")
@@ -1008,12 +1174,11 @@ class CommandPanel(QWidget):
 
     def create_output_settings(self):
         """Create output directory and naming settings"""
-        group = QGroupBox("Output Settings")
-        layout = QFormLayout(group)
+        group = CommandGroup("Output", "client/assets/icons/output.png")
         
         # Output location options
         self.output_mode_same = QRadioButton("Same folder as source")
-        self.output_mode_nested = QRadioButton("Nested folder inside source:")
+        self.output_mode_nested = QRadioButton("Nested folder inside source")
         self.output_mode_same.setChecked(True)
 
         # Apply shared green toggle styling and white text
@@ -1030,10 +1195,12 @@ class CommandPanel(QWidget):
         
         nested_layout = QHBoxLayout()
         nested_layout.addWidget(self.output_mode_nested)
+        nested_layout.addSpacing(10)  # Add 10px spacing between label and input
         nested_layout.addWidget(self.nested_output_name)
+        nested_layout.setContentsMargins(0, 10, 0, 0)  # Add 10px top margin
 
-        layout.addRow(self.output_mode_same)
-        layout.addRow(nested_layout)
+        group.add_row(self.output_mode_same)
+        group.add_row(nested_layout)
 
         # Toggle for custom output directory (as radio button)
         self.output_mode_custom = QRadioButton("Custom")
@@ -1041,7 +1208,6 @@ class CommandPanel(QWidget):
         self.output_mode_custom.toggled.connect(self.on_custom_output_toggled)
         # Apply shared green toggle styling
         self.output_mode_custom.setStyleSheet(TOGGLE_STYLE)
-        layout.addRow(self.output_mode_custom)
         
         # Custom output directory section (hidden by default)
         self.output_dir = QLineEdit()
@@ -1052,11 +1218,13 @@ class CommandPanel(QWidget):
         self.browse_output_btn.clicked.connect(self.browse_output_directory)
         self.browse_output_btn.setVisible(False)
         
-        output_layout = QHBoxLayout()
-        output_layout.addWidget(self.output_dir)
-        output_layout.addWidget(self.browse_output_btn)
+        custom_layout = QHBoxLayout()
+        custom_layout.addWidget(self.output_mode_custom)
+        custom_layout.addSpacing(10)  # Add 10px spacing between toggle and input
+        custom_layout.addWidget(self.output_dir)
+        custom_layout.addWidget(self.browse_output_btn)
         
-        layout.addRow(output_layout)
+        group.add_row(custom_layout)
         
         return group
         
@@ -1164,7 +1332,7 @@ class CommandPanel(QWidget):
                 'multiple_qualities': self.multiple_qualities.isChecked(),
                 'resize_variants': resize_values,
                 'current_resize': current_resize,
-                'rotation_angle': self.rotation_angle.currentText(),
+                'rotation_angle': self.image_rotation_angle.currentText(),
             })
         elif current_tab == 1:  # Videos
             # Handle video quality variants
@@ -1318,10 +1486,34 @@ class CommandPanel(QWidget):
     def toggle_resize_mode(self, checked):
         """Toggle between single and multiple resize modes"""
         # Show/hide appropriate controls
-        self.resize_enabled.setVisible(not checked)
-        self.resize_width.setVisible(not checked)
+        self.resize_value.setVisible(not checked)
+        self.resize_value_label.setVisible(not checked)
         self.resize_variants.setVisible(checked)
         self.resize_variants_label.setVisible(checked)
+        
+        # Update default values and placeholder based on current mode
+        if checked:
+            current_mode = self.image_resize_mode.currentText()
+            # Auto-select "By longer edge" if currently "No resize"
+            if current_mode == "No resize":
+                self.image_resize_mode.setCurrentText("By longer edge (pixels)")
+                current_mode = "By longer edge (pixels)"
+            
+            if current_mode == "By ratio (percent)":
+                self.resize_variants.setPlaceholderText("e.g., 33,66,90")
+                self.resize_variants.setText("33,66")
+            else:
+                self.resize_variants.setPlaceholderText("e.g., 720,1280,1920")
+                self.resize_variants.setText("720,1280,1920")
+        else:
+            # Set single resize default based on mode
+            current_mode = self.image_resize_mode.currentText()
+            if current_mode == "By width (pixels)" or current_mode == "By longer edge (pixels)":
+                if self.resize_value.value() != 720:
+                    self.resize_value.setValue(720)
+            elif current_mode == "By ratio (percent)":
+                if self.resize_value.value() != 50:
+                    self.resize_value.setValue(50)
     
     def on_resize_value_changed(self, value):
         """Save the current resize value based on the current mode"""
@@ -1330,8 +1522,10 @@ class CommandPanel(QWidget):
             self.last_pixel_value = value
         elif current_mode == "By ratio (percent)":
             self.last_percent_value = value
+    
+    def get_resize_values(self):
         """Get list of resize values from input - simplified version"""
-        resize_mode = self.resize_mode.currentText()
+        resize_mode = self.image_resize_mode.currentText()
         
         if resize_mode == "No resize":
             return []
@@ -1354,6 +1548,11 @@ class CommandPanel(QWidget):
                         percent = float(value)
                         if 1 <= percent <= 200:
                             values.append(f"{percent}%")
+                    elif resize_mode == "By longer edge (pixels)":
+                        # Prefix with "L" for longer edge
+                        width = int(value)
+                        if width > 0:
+                            values.append(f"L{width}")
                     else:  # By width (pixels)
                         # Validate pixel width (positive integer)
                         width = int(value)
@@ -1366,11 +1565,14 @@ class CommandPanel(QWidget):
         else:
             # Single resize mode - get value from input
             if resize_mode == "By ratio (percent)":
-                value = self.video_resize_value.value() if hasattr(self, 'video_resize_value') else 100
+                value = self.resize_value.value() if hasattr(self, 'resize_value') else 100
                 return [f"{value}%"]
             elif resize_mode == "By width (pixels)":
-                value = self.video_resize_value.value() if hasattr(self, 'video_resize_value') else 1920
+                value = self.resize_value.value() if hasattr(self, 'resize_value') else 1920
                 return [str(value)]
+            elif resize_mode == "By longer edge (pixels)":
+                value = self.resize_value.value() if hasattr(self, 'resize_value') else 1920
+                return [f"L{value}"]
             else:
                 return []
     
@@ -1469,14 +1671,23 @@ class CommandPanel(QWidget):
 
     def on_gif_size_mode_changed(self, mode):
         """Handle GIF size mode change between Manual and Max Size"""
+        # DEBUG: Print mode changes - COMMENTED OUT
+        # print(f"🔵 DEBUG: on_gif_size_mode_changed called with mode='{mode}'")
+        
+        # Ignore if triggered by resize dropdown values (only care about Max Size vs Manual)
+        if mode not in ["Max Size", "Manual"]:
+            # print(f"🔵 DEBUG: Ignoring mode '{mode}' - not Max Size or Manual")
+            return
+
         is_max_size = (mode == "Max Size")
+        # print(f"🔵 DEBUG: is_max_size={is_max_size}")
         self.gif_size_mode_value = "max_size" if is_max_size else "manual"
         
         # Show/hide max size controls
         self.gif_max_size_label.setVisible(is_max_size)
         self.gif_max_size_spinbox.setVisible(is_max_size)
         self.gif_auto_resize_checkbox.setVisible(is_max_size)
-        self.gif_size_estimate_label.setVisible(is_max_size)
+        # self.gif_size_estimate_label.setVisible(is_max_size)  # REMOVED - not in layout anymore
         
         if is_max_size:
             # Hide manual quality controls in Max Size mode (auto-optimized)
@@ -1525,8 +1736,153 @@ class CommandPanel(QWidget):
             
             self.gif_size_estimate_label.setText("")
 
+    def on_image_resize_ui_changed(self, mode):
+        """Handle Image resize dropdown change - update UI visibility only"""
+        # Do not affect settings mode!
+        # Uncheck multi-variant toggle if switching to "No resize"
+        if mode == "No resize" and hasattr(self, 'multiple_resize') and self.multiple_resize.isChecked():
+            self.multiple_resize.blockSignals(True)
+            self.multiple_resize.setChecked(False)
+            self.multiple_resize.blockSignals(False)
+            # Manually trigger the toggle handler to update UI
+            self.toggle_resize_mode(False)
+        
+        # Only show/hide resize input when not in "multiple variants" mode
+        if hasattr(self, 'multiple_resize') and self.multiple_resize.isChecked():
+            # Update multi-resize defaults when mode changes
+            if mode == "By ratio (percent)":
+                self.resize_variants.setPlaceholderText("e.g., 33,66,90")
+                self.resize_variants.setText("33,66")
+            elif mode in ["By width (pixels)", "By longer edge (pixels)"]:
+                self.resize_variants.setPlaceholderText("e.g., 720,1280,1920")
+                self.resize_variants.setText("720,1280,1920")
+            return
+            
+        if mode == "No resize":
+            self.resize_value.setVisible(False)
+            self.resize_value_label.setVisible(False)
+        else:
+            self.resize_value.setVisible(True)
+            self.resize_value_label.setVisible(True)
+            
+            if mode == "By width (pixels)":
+                self.resize_value_label.setText("Width (pixels):")
+                current_val = self.resize_value.value()
+                self.resize_value.setRange(1, 10000)
+                if current_val < 1 or current_val > 10000 or current_val == 50:
+                    self.resize_value.setValue(720)
+            elif mode == "By longer edge (pixels)":
+                self.resize_value_label.setText("Longer edge (px):")
+                current_val = self.resize_value.value()
+                self.resize_value.setRange(1, 10000)
+                if current_val < 1 or current_val > 10000 or current_val == 50:
+                    self.resize_value.setValue(720)
+            elif mode == "By ratio (percent)":
+                self.resize_value_label.setText("Percentage:")
+                # Check value BEFORE changing range (Qt clamps automatically)
+                current_val = self.resize_value.value()
+                self.resize_value.setRange(1, 200)
+                if current_val < 1 or current_val > 200:
+                    self.resize_value.setValue(50)
+
+    def on_video_resize_ui_changed(self, mode):
+        """Handle Video resize dropdown change - update UI visibility only"""
+        # Do not affect settings mode!
+        # Uncheck multi-variant toggle if switching to "No resize"
+        if mode == "No resize" and hasattr(self, 'multiple_video_variants') and self.multiple_video_variants.isChecked():
+            self.multiple_video_variants.blockSignals(True)
+            self.multiple_video_variants.setChecked(False)
+            self.multiple_video_variants.blockSignals(False)
+            # Manually trigger the toggle handler to update UI
+            self.toggle_video_variant_mode(False)
+        
+        # Only show/hide resize input when not in "multiple variants" mode
+        if hasattr(self, 'multiple_video_variants') and self.multiple_video_variants.isChecked():
+            # Update multi-resize defaults when mode changes
+            if mode == "By ratio (percent)":
+                self.video_size_variants.setPlaceholderText("e.g., 33,66,90")
+                self.video_size_variants.setText("33,66")
+            elif mode in ["By width (pixels)", "By longer edge (pixels)"]:
+                self.video_size_variants.setPlaceholderText("e.g., 480,720,960")
+                self.video_size_variants.setText("480,720,960")
+            return
+            
+        if mode == "No resize":
+            self.video_resize_value.setVisible(False)
+            self.video_resize_value_label.setVisible(False)
+        else:
+            self.video_resize_value.setVisible(True)
+            self.video_resize_value_label.setVisible(True)
+            
+            if mode == "By width (pixels)":
+                self.video_resize_value_label.setText("Width (pixels):")
+                current_val = self.video_resize_value.value()
+                self.video_resize_value.setRange(1, 10000)
+                if current_val < 1 or current_val > 10000 or current_val == 50:
+                    self.video_resize_value.setValue(640)
+            elif mode == "By longer edge (pixels)":
+                self.video_resize_value_label.setText("Longer edge (px):")
+                current_val = self.video_resize_value.value()
+                self.video_resize_value.setRange(1, 10000)
+                if current_val < 1 or current_val > 10000 or current_val == 50:
+                    self.video_resize_value.setValue(640)
+            elif mode == "By ratio (percent)":
+                self.video_resize_value_label.setText("Percentage:")
+                # Check value BEFORE changing range (Qt clamps automatically)
+                current_val = self.video_resize_value.value()
+                self.video_resize_value.setRange(1, 200)
+                if current_val < 1 or current_val > 200:
+                    self.video_resize_value.setValue(50)
+
+    def on_gif_resize_ui_changed(self, mode):
+        """Handle GIF resize dropdown change - update UI visibility only"""
+        # Do not affect settings mode!
+        # Uncheck multi-variant toggle if switching to "No resize"
+        if mode == "No resize" and hasattr(self, 'gif_multiple_resize') and self.gif_multiple_resize.isChecked():
+            # Uncheck the toggle and update UI
+            self.gif_multiple_resize.setChecked(False)
+            # Hide the variant controls
+            self.gif_resize_variants.setVisible(False)
+            self.gif_resize_variants_label.setVisible(False)
+            # Note: No need to show single resize controls since "No resize" hides them anyway
+        
+        # Only show/hide resize input when not in "multiple variants" mode
+        if hasattr(self, 'gif_multiple_resize') and self.gif_multiple_resize.isChecked():
+            return
+            
+        if mode == "No resize":
+            self.gif_resize_value.setVisible(False)
+            self.gif_resize_value_label.setVisible(False)
+        else:
+            self.gif_resize_value.setVisible(True)
+            self.gif_resize_value_label.setVisible(True)
+            
+            if mode == "By width (pixels)":
+                self.gif_resize_value_label.setText("Width (pixels):")
+                current_val = self.gif_resize_value.value()
+                self.gif_resize_value.setRange(1, 10000)
+                if current_val < 1 or current_val > 10000 or current_val == 33:
+                    self.gif_resize_value.setValue(360)
+            elif mode == "By longer edge (pixels)":
+                self.gif_resize_value_label.setText("Longer edge (px):")
+                current_val = self.gif_resize_value.value()
+                self.gif_resize_value.setRange(1, 10000)
+                if current_val < 1 or current_val > 10000 or current_val == 33:
+                    self.gif_resize_value.setValue(360)
+            elif mode == "By ratio (percent)":
+                self.gif_resize_value_label.setText("Percentage:")
+                # Check value BEFORE changing range (Qt clamps automatically)
+                current_val = self.gif_resize_value.value()
+                self.gif_resize_value.setRange(1, 200)
+                if current_val < 1 or current_val > 200:
+                    self.gif_resize_value.setValue(33)
+
     def on_image_size_mode_changed(self, mode):
         """Handle Image size mode change between Manual and Max Size"""
+        # Ignore if triggered by resize dropdown values (only care about Max Size vs Manual)
+        if mode not in ["Max Size", "Manual"]:
+            return
+            
         is_max_size = (mode == "Max Size")
         self.image_size_mode_value = "max_size" if is_max_size else "manual"
         
@@ -1561,6 +1917,10 @@ class CommandPanel(QWidget):
 
     def on_video_size_mode_changed(self, mode):
         """Handle Video size mode change between Manual and Max Size"""
+        # Ignore if triggered by resize dropdown values (only care about Max Size vs Manual)
+        if mode not in ["Max Size", "Manual"]:
+            return
+            
         is_max_size = (mode == "Max Size")
         self.video_size_mode_value = "max_size" if is_max_size else "manual"
         
@@ -1599,9 +1959,9 @@ class CommandPanel(QWidget):
         self.video_size_variants.setVisible(checked)
         self.video_size_variants_label.setVisible(checked)
         
-        # Auto-select first resize option if currently "No resize" when enabling variants
+        # Auto-select "By longer edge" if currently "No resize" when enabling variants
         if checked and self.video_resize_mode.currentText() == "No resize":
-            self.video_resize_mode.setCurrentIndex(1)  # Select "By width (pixels)"
+            self.video_resize_mode.setCurrentText("By longer edge (pixels)")
         
         # Hide single resize controls when using variants
         if checked:
@@ -1609,12 +1969,12 @@ class CommandPanel(QWidget):
             self.video_resize_value_label.setVisible(False)
             # Update placeholder and default values based on current mode
             current_mode = self.video_resize_mode.currentText()
-            if current_mode == "By width (pixels)":
-                self.video_size_variants.setPlaceholderText("e.g., 480,720,1080")
-                self.video_size_variants.setText("480,720,1080")
-            else:
+            if current_mode == "By ratio (percent)":
                 self.video_size_variants.setPlaceholderText("e.g., 33,66,90")
                 self.video_size_variants.setText("33,66")
+            else:
+                self.video_size_variants.setPlaceholderText("e.g., 480,720,960")
+                self.video_size_variants.setText("480,720,960")
         else:
             # Show single resize controls based on current mode
             current_mode = self.video_resize_mode.currentText()
@@ -1628,7 +1988,7 @@ class CommandPanel(QWidget):
                     # Set a reasonable default if current value is out of range
                     current_val = self.video_resize_value.value()
                     if current_val < 1 or current_val > 10000:
-                        self.video_resize_value.setValue(1920)
+                        self.video_resize_value.setValue(640)
                 elif current_mode == "By ratio (percent)":
                     self.video_resize_value_label.setText("Percentage:")
                     self.video_resize_value.setRange(1, 200)
@@ -1753,8 +2113,6 @@ class CommandPanel(QWidget):
                 self.retime_slider.setVisible(checked)
             if hasattr(self, 'retime_value_label'):
                 self.retime_value_label.setVisible(checked)
-            if hasattr(self, 'retime_speed_label'):
-                self.retime_speed_label.setVisible(checked)
         except Exception as e:
             print(f"Error toggling retime: {e}")
     
@@ -1773,8 +2131,6 @@ class CommandPanel(QWidget):
                 self.gif_retime_slider.setVisible(checked)
             if hasattr(self, 'gif_retime_value_label'):
                 self.gif_retime_value_label.setVisible(checked)
-            if hasattr(self, 'gif_retime_speed_label'):
-                self.gif_retime_speed_label.setVisible(checked)
         except Exception as e:
             print(f"Error toggling GIF retime: {e}")
     
@@ -1833,6 +2189,14 @@ class CommandPanel(QWidget):
     
     def on_gif_resize_mode_changed(self, mode):
         """Handle GIF resize mode change to update default values and labels"""
+        # Uncheck multi-variant toggle if switching to "No resize"
+        if mode == "No resize" and hasattr(self, 'gif_multiple_resize') and self.gif_multiple_resize.isChecked():
+            self.gif_multiple_resize.blockSignals(True)
+            self.gif_multiple_resize.setChecked(False)
+            self.gif_multiple_resize.blockSignals(False)
+            # Manually trigger the toggle handler to update UI
+            self.toggle_gif_resize_variant_mode(False)
+        
         # Check if multiple variants mode is active - if so, don't show single controls
         multiple_enabled = hasattr(self, 'gif_multiple_resize') and self.gif_multiple_resize.isChecked()
         
@@ -1843,16 +2207,20 @@ class CommandPanel(QWidget):
             self.gif_resize_value.setVisible(True)
             self.gif_resize_value_label.setVisible(True)
             self.gif_resize_value_label.setText("Percentage:")
-            self.gif_resize_value.setValue(50)  # Default 50%
-            self.gif_resize_value.setSuffix("")
+            current_val = self.gif_resize_value.value()
             self.gif_resize_value.setRange(1, 200)
+            if current_val < 1 or current_val > 200:
+                self.gif_resize_value.setValue(33)  # Default 33%
+            self.gif_resize_value.setSuffix("")
         elif mode == "By width (pixels)":
             self.gif_resize_value.setVisible(True)
             self.gif_resize_value_label.setVisible(True)
             self.gif_resize_value_label.setText("Width (pixels):")
-            self.gif_resize_value.setValue(720)  # Default 720px
-            self.gif_resize_value.setSuffix("")
+            current_val = self.gif_resize_value.value()
             self.gif_resize_value.setRange(1, 10000)
+            if current_val < 1 or current_val > 10000 or current_val == 33:
+                self.gif_resize_value.setValue(360)  # Default 360px
+            self.gif_resize_value.setSuffix("")
             
         # Update variants if multiple mode is enabled
         if multiple_enabled:
@@ -1860,8 +2228,8 @@ class CommandPanel(QWidget):
                 self.gif_resize_variants.setPlaceholderText("e.g., 33,66,90")
                 self.gif_resize_variants.setText("33,66")
             else:
-                self.gif_resize_variants.setPlaceholderText("e.g., 480,720,1080")
-                self.gif_resize_variants.setText("480,720,1080")
+                self.gif_resize_variants.setPlaceholderText("e.g., 240,360,480")
+                self.gif_resize_variants.setText("240,360,480")
                 
     def toggle_gif_resize_variant_mode(self, checked):
         """Toggle between single and multiple GIF resize variant modes"""
@@ -1869,9 +2237,9 @@ class CommandPanel(QWidget):
         self.gif_resize_variants.setVisible(checked)
         self.gif_resize_variants_label.setVisible(checked)
         
-        # Auto-select first resize option if currently "No resize" when enabling variants
+        # Auto-select "By longer edge" if currently "No resize" when enabling variants
         if checked and self.gif_resize_mode.currentText() == "No resize":
-            self.gif_resize_mode.setCurrentIndex(1)  # Select "By width (pixels)"
+            self.gif_resize_mode.setCurrentText("By longer edge (pixels)")
         
         # Hide single resize controls when using variants
         if checked:
@@ -1879,9 +2247,9 @@ class CommandPanel(QWidget):
             self.gif_resize_value_label.setVisible(False)
             # Update placeholder and default values based on current mode
             current_mode = self.gif_resize_mode.currentText()
-            if current_mode == "By width (pixels)":
-                self.gif_resize_variants.setPlaceholderText("e.g., 480,720,1080")
-                self.gif_resize_variants.setText("480,720,1080")
+            if current_mode == "By width (pixels)" or current_mode == "By longer edge (pixels)":
+                self.gif_resize_variants.setPlaceholderText("e.g., 240,360,480")
+                self.gif_resize_variants.setText("240,360,480")
             else:
                 self.gif_resize_variants.setPlaceholderText("e.g., 33,66,90")
                 self.gif_resize_variants.setText("33,66")
@@ -1906,272 +2274,6 @@ class CommandPanel(QWidget):
                     current_val = self.gif_resize_value.value()
                     if current_val < 1 or current_val > 200:
                         self.gif_resize_value.setValue(50)
-                
-    def get_gif_resize_values(self):
-        """Get list of GIF resize values from input with size validation"""
-        # Check if multiple resize variants are enabled
-        if hasattr(self, 'gif_multiple_resize') and self.gif_multiple_resize.isChecked():
-            resize_text = self.gif_resize_variants.text().strip()
-            if not resize_text:
-                return []
-            
-            # Check current resize mode to determine how to interpret values
-            current_mode = self.gif_resize_mode.currentText() if hasattr(self, 'gif_resize_mode') else "By width (pixels)"
-            
-            sizes = []
-            for value in resize_text.split(','):
-                value = value.strip()
-                if value:
-                    try:
-                        if value.endswith('%'):
-                            percent = float(value[:-1])
-                            if 1 <= percent <= 200:
-                                sizes.append(f"{percent}%")
-                        else:
-                            # If mode is "By ratio (percent)", treat numeric values as percentages
-                            if current_mode == "By ratio (percent)":
-                                percent = float(value)
-                                if 1 <= percent <= 200:
-                                    sizes.append(f"{percent}%")
-                            else:
-                                # Mode is "By width (pixels)", treat as pixel width
-                                width = int(value)
-                                if width > 0:
-                                    sizes.append(str(width))
-                    except (ValueError, TypeError):
-                        continue
-            return sizes
-        else:
-            # Single resize mode - check if resize is enabled
-            if hasattr(self, 'gif_resize_mode') and self.gif_resize_mode.currentText() != "No resize":
-                mode = self.gif_resize_mode.currentText()
-                value = self.gif_resize_value.value()
-                
-                if mode == "By ratio (percent)":
-                    return [f"{value}%"]
-                elif mode == "By width (pixels)":
-                    # Add size validation here if needed
-                    return [str(value)]
-            
-            return []
-    
-    def on_video_resize_mode_changed(self, mode):
-        """Handle video resize mode change to update default values and labels"""
-        # Check if multiple variants mode is active - if so, don't show single controls
-        multiple_enabled = hasattr(self, 'multiple_video_variants') and self.multiple_video_variants.isChecked()
-        
-        if mode == "No resize" or multiple_enabled:
-            self.video_resize_value.setVisible(False)
-            self.video_resize_value_label.setVisible(False)
-        elif mode == "By width (pixels)":
-            self.video_resize_value.setVisible(True)
-            self.video_resize_value_label.setVisible(True)
-            self.video_resize_value_label.setText("Width (pixels):")
-            self.video_resize_value.setValue(1920)  # Default 1920px
-            self.video_resize_value.setSuffix("")
-            self.video_resize_value.setRange(1, 10000)
-        elif mode == "By longer edge (pixels)":
-            self.video_resize_value.setVisible(True)
-            self.video_resize_value_label.setVisible(True)
-            self.video_resize_value_label.setText("Longer edge (pixels):")
-            self.video_resize_value.setValue(1080)  # Default 1080px
-            self.video_resize_value.setSuffix("")
-            self.video_resize_value.setRange(1, 10000)
-        elif mode == "By ratio (percent)":
-            self.video_resize_value.setVisible(True)
-            self.video_resize_value_label.setVisible(True)
-            self.video_resize_value_label.setText("Percentage:")
-            self.video_resize_value.setValue(50)  # Default 50%
-            self.video_resize_value.setSuffix("")
-            self.video_resize_value.setRange(1, 200)
-            
-        # Update variants if multiple mode is enabled
-        if multiple_enabled:
-            if mode == "By width (pixels)":
-                self.video_size_variants.setPlaceholderText("e.g., 480,720,1080")
-                self.video_size_variants.setText("480,720,1080")
-            elif mode == "By longer edge (pixels)":
-                self.video_size_variants.setPlaceholderText("e.g., 720,1080,1440")
-                self.video_size_variants.setText("720,1080,1440")
-            else:
-                self.video_size_variants.setPlaceholderText("e.g., 33,66,90")
-                self.video_size_variants.setText("33,66")
-    
-    def toggle_resize_mode(self, checked):
-        """Toggle between single and multiple resize variant modes"""
-        # Show/hide resize variant controls
-        self.resize_variants.setVisible(checked)
-        self.resize_variants_label.setVisible(checked)
-        
-        # Hide single resize controls when using variants
-        if checked:
-            # Auto-select first non-"No resize" option when enabling multiple variants
-            if self.resize_mode.currentText() == "No resize":
-                self.resize_mode.setCurrentText("By width (pixels)")
-            
-            self.resize_value.setVisible(False)
-            self.resize_value_label.setVisible(False)
-            # Update placeholder and default values based on current mode
-            current_mode = self.resize_mode.currentText()
-            if current_mode == "By width (pixels)":
-                self.resize_variants.setPlaceholderText("e.g., 480,720,1080")
-                self.resize_variants.setText("480,720,1080")
-            else:
-                self.resize_variants.setPlaceholderText("e.g., 33,66,90")
-                self.resize_variants.setText("33,66")
-        else:
-            # Show single resize controls based on current mode
-            current_mode = self.resize_mode.currentText()
-            if current_mode != "No resize":
-                self.resize_value.setVisible(True)
-                self.resize_value_label.setVisible(True)
-                # Configure the control based on current mode
-                if current_mode == "By width (pixels)":
-                    self.resize_value_label.setText("Width (pixels):")
-                    self.resize_value.setRange(1, 10000)
-                    self.resize_value.setValue(720)  # Always set default
-                elif current_mode == "By ratio (percent)":
-                    self.resize_value_label.setText("Percentage:")
-                    self.resize_value.setRange(1, 200)
-                    self.resize_value.setValue(50)  # Always set default
-        
-    def on_resize_mode_changed(self, mode):
-        """Handle resize mode change to update default values and labels"""
-        # Check if multiple variants mode is active - if so, don't show single controls
-        multiple_enabled = hasattr(self, 'multiple_resize') and self.multiple_resize.isChecked()
-        
-        if mode == "No resize" or multiple_enabled:
-            self.resize_value.setVisible(False)
-            self.resize_value_label.setVisible(False)
-        elif mode == "By width (pixels)":
-            self.resize_value.setVisible(True)
-            self.resize_value_label.setVisible(True)
-            self.resize_value_label.setText("Width (pixels):")
-            self.resize_value.setValue(720)  # Always use default value
-            self.resize_value.setSuffix("")
-            self.resize_value.setRange(1, 10000)
-        elif mode == "By longer edge (pixels)":
-            self.resize_value.setVisible(True)
-            self.resize_value_label.setVisible(True)
-            self.resize_value_label.setText("Longer edge (pixels):")
-            self.resize_value.setValue(960)  # Always use default value
-            self.resize_value.setSuffix("")
-            self.resize_value.setRange(1, 10000)
-        elif mode == "By ratio (percent)":
-            self.resize_value.setVisible(True)
-            self.resize_value_label.setVisible(True)
-            self.resize_value_label.setText("Percentage:")
-            self.resize_value.setValue(50)  # Always use default value
-            self.resize_value.setSuffix("")
-            self.resize_value.setRange(1, 200)
-            
-        # Update variants if multiple mode is enabled
-        if multiple_enabled:
-            if mode == "By width (pixels)":
-                self.resize_variants.setPlaceholderText("e.g., 720,1280,1920")
-                self.resize_variants.setText("720,1280,1920")
-            elif mode == "By longer edge (pixels)":
-                self.resize_variants.setPlaceholderText("e.g., 720,960,1080")
-                self.resize_variants.setText("720,960,1080")
-            else:
-                self.resize_variants.setPlaceholderText("e.g., 33,66,90")
-                self.resize_variants.setText("33,66")
-            
-    def get_resize_values(self):
-        """Get list of resize values from input"""
-        # Check if multiple resize variants are enabled
-        if hasattr(self, 'multiple_resize') and self.multiple_resize.isChecked():
-            resize_text = self.resize_variants.text().strip()
-            if not resize_text:
-                return []
-            
-            # Check current resize mode to determine how to interpret values
-            current_mode = self.resize_mode.currentText() if hasattr(self, 'resize_mode') else "By width (pixels)"
-            
-            sizes = []
-            for value in resize_text.split(','):
-                value = value.strip()
-                if value:
-                    try:
-                        if value.endswith('%'):
-                            percent = float(value[:-1])
-                            if 1 <= percent <= 200:
-                                sizes.append(f"{percent}%")
-                        else:
-                            # If mode is "By ratio (percent)", treat numeric values as percentages
-                            if current_mode == "By ratio (percent)":
-                                percent = float(value)
-                                if 1 <= percent <= 200:
-                                    sizes.append(f"{percent}%")
-                            elif current_mode == "By longer edge (pixels)":
-                                # Mode is "By longer edge (pixels)", prefix with "L"
-                                width = int(value)
-                                if width > 0:
-                                    sizes.append(f"L{width}")
-                            else:
-                                # Mode is "By width (pixels)", treat as pixel width
-                                width = int(value)
-                                if width > 0:
-                                    sizes.append(str(width))
-                    except (ValueError, TypeError):
-                        continue
-            return sizes
-        else:
-            # Single resize mode - check if resize is enabled
-            if hasattr(self, 'resize_mode') and self.resize_mode.currentText() != "No resize":
-                mode = self.resize_mode.currentText()
-                value = self.resize_value.value()
-                
-                if mode == "By ratio (percent)":
-                    return [f"{value}%"]
-                elif mode == "By width (pixels)":
-                    return [str(value)]
-                elif mode == "By longer edge (pixels)":
-                    return [f"L{value}"]
-            
-            return []
-            
-    def on_gif_resize_mode_changed(self, mode):
-        """Handle GIF resize mode change to update default values and labels"""
-        # Check if multiple variants mode is active - if so, don't show single controls
-        multiple_enabled = hasattr(self, 'gif_multiple_resize') and self.gif_multiple_resize.isChecked()
-        
-        if mode == "No resize" or multiple_enabled:
-            self.gif_resize_value.setVisible(False)
-            self.gif_resize_value_label.setVisible(False)
-        elif mode == "By width (pixels)":
-            self.gif_resize_value.setVisible(True)
-            self.gif_resize_value_label.setVisible(True)
-            self.gif_resize_value_label.setText("Width (pixels):")
-            self.gif_resize_value.setValue(720)  # Default 720px
-            self.gif_resize_value.setSuffix("")
-            self.gif_resize_value.setRange(1, 10000)
-        elif mode == "By longer edge (pixels)":
-            self.gif_resize_value.setVisible(True)
-            self.gif_resize_value_label.setVisible(True)
-            self.gif_resize_value_label.setText("Longer edge (pixels):")
-            self.gif_resize_value.setValue(720)  # Default 720px
-            self.gif_resize_value.setSuffix("")
-            self.gif_resize_value.setRange(1, 10000)
-        elif mode == "By ratio (percent)":
-            self.gif_resize_value.setVisible(True)
-            self.gif_resize_value_label.setVisible(True)
-            self.gif_resize_value_label.setText("Percentage:")
-            self.gif_resize_value.setValue(50)  # Default 50%
-            self.gif_resize_value.setSuffix("")
-            self.gif_resize_value.setRange(1, 200)
-            
-        # Update variants if multiple mode is enabled
-        if multiple_enabled:
-            if mode == "By width (pixels)":
-                self.gif_resize_variants.setPlaceholderText("e.g., 480,720,1080")
-                self.gif_resize_variants.setText("480,720,1080")
-            elif mode == "By longer edge (pixels)":
-                self.gif_resize_variants.setPlaceholderText("e.g., 480,720,1080")
-                self.gif_resize_variants.setText("480,720,1080")
-            else:
-                self.gif_resize_variants.setPlaceholderText("e.g., 33,66,90")
-                self.gif_resize_variants.setText("33,66")
                 
     def get_gif_resize_values(self):
         """Get list of GIF resize values from input with size validation"""
