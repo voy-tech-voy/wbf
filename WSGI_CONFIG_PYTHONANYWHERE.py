@@ -71,7 +71,43 @@ os.environ['FROM_EMAIL'] = os.environ.get(
 print(f"✅ SMTP configured: {os.environ.get('SMTP_USERNAME')}")
 
 # ============================================================================
-# 6. CREATE THE FLASK APPLICATION INSTANCE
+# 6. SET SECURITY CONFIGURATION (GUMROAD WEBHOOKS & ADMIN API)
+# ============================================================================
+# !!! IMPORTANT: Set these values below after deployment !!!
+
+# Gumroad webhook signature verification
+# Get this from: https://app.gumroad.com/settings/advanced#webhooks
+os.environ['GUMROAD_WEBHOOK_SECRET'] = os.environ.get(
+    'GUMROAD_WEBHOOK_SECRET',
+    ''  # SET THIS to your Gumroad webhook secret
+)
+
+# Admin API key for protected endpoints like /license/create
+# Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
+# Generated key: 9u3jbn1X9npKbltLQ7WCGr_Fgl8Luok9r_adGbnGoKk
+os.environ['ADMIN_API_KEY'] = os.environ.get(
+    'ADMIN_API_KEY',
+    ''  # SET THIS to your admin API key
+)
+
+# Enable webhook signature verification in production
+os.environ['VERIFY_WEBHOOK_SIGNATURE'] = os.environ.get(
+    'VERIFY_WEBHOOK_SIGNATURE',
+    'true'  # Set to 'false' for testing without webhook signature
+)
+
+if os.environ.get('GUMROAD_WEBHOOK_SECRET'):
+    print(f"✅ Gumroad webhook secret configured")
+else:
+    print(f"⚠️  WARNING: GUMROAD_WEBHOOK_SECRET not set - webhooks will not be verified!")
+
+if os.environ.get('ADMIN_API_KEY'):
+    print(f"✅ Admin API key configured")
+else:
+    print(f"⚠️  WARNING: ADMIN_API_KEY not set - admin endpoints disabled!")
+
+# ============================================================================
+# 7. CREATE THE FLASK APPLICATION INSTANCE
 # ============================================================================
 # Import the factory function and create the app with current configuration
 # Note: We import from 'app' directly because server_dir is in sys.path
@@ -87,7 +123,7 @@ except Exception as e:
     raise
 
 # ============================================================================
-# 7. LOGGING FOR DEBUGGING
+# 8. LOGGING FOR DEBUGGING
 # ============================================================================
 # Log all environment-related info for troubleshooting
 print("=" * 70)

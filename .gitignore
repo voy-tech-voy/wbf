@@ -78,6 +78,9 @@ dist/
 # BINARY TOOLS & MEDIA (LARGE FILES)
 # ============================================================================
 
+# Client assets (fonts, icons) - not needed in repo, bundled during build
+client/assets/
+
 # FFmpeg tools (can be downloaded separately)
 tools/*.exe
 tools/*.dll
