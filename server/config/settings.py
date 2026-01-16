@@ -12,4 +12,11 @@ class Config:
     SMTP_USERNAME = os.environ.get('SMTP_USERNAME')
     SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD')
     FROM_EMAIL = os.environ.get('FROM_EMAIL', 'noreply@imagewave.com')
+    
+    # Security Configuration
+    GUMROAD_WEBHOOK_SECRET = os.environ.get('GUMROAD_WEBHOOK_SECRET')  # Set in PythonAnywhere
+    ADMIN_API_KEY = os.environ.get('ADMIN_API_KEY')  # Set in PythonAnywhere
+    
+    # Webhook signature verification (disable in dev if needed)
+    VERIFY_WEBHOOK_SIGNATURE = os.environ.get('VERIFY_WEBHOOK_SIGNATURE', 'true').lower() == 'true'
 

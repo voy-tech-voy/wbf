@@ -100,44 +100,45 @@ class LoginWindow(QDialog):
             if not email or not key:
                 return False
                 
-            # Verify with server
-            # We duplicate the validation logic here to run it silently
-            # Use the same validation logic as handle_login but without UI feedback
-            
             # Development bypass
             if DEVELOPMENT_MODE and email == "dev":
                 self.authenticated = True
                 self.is_trial = False
                 return True
-                
-            # Real validation
+            
+            # Real server validation (silent - no UI feedback)
             try:
-                # Get hardware ID
-                hwid = self.get_hardware_id()
-                device_name = socket.gethostname()
+                result = self.validate_with_server(email, key)
                 
-                # API endpoint
-                api_url = "https://api.imgapp.com/v1/validate"  # Replace with actual API URL
-                # For now, using the mock validation logic from handle_login
-                
-                # MOCK VALIDATION (Replace with actual API call when ready)
-                # Simulate server check
-                is_valid = True  # Assume valid for now if we have credentials
-                
-                if is_valid:
+                if result.get('success'):
                     self.authenticated = True
-                    self.is_trial = False
+                    self.is_trial = result.get('is_trial', False)
                     return True
+                else:
+                    # Clear invalid credentials
+                    if result.get('error') in ['invalid_license', 'license_deactivated', 'license_expired']:
+                        self.clear_saved_credentials()
+                    return False
                     
-            except Exception:
-                # Network error or validation failure
+            except Exception as e:
+                # Network error - allow offline grace period for previously validated licenses
+                if DEVELOPMENT_MODE:
+                    print(f"Auto-login network error: {e}")
                 return False
                 
-            return False
-            
         except Exception as e:
-            print(f"Auto-login error: {e}")
+            if DEVELOPMENT_MODE:
+                print(f"Auto-login error: {e}")
             return False
+    
+    def clear_saved_credentials(self):
+        """Clear saved credentials when they become invalid"""
+        try:
+            path = self.get_config_path()
+            if path and os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
         
     def setup_ui(self):
         """Setup the login window UI"""
@@ -281,17 +282,105 @@ class LoginWindow(QDialog):
                 self.accept()
                 return
 
-            # MOCK VALIDATION (Replace with actual API call when ready)
-            # Simulate server check
-            is_valid = True  # Assume valid for now
+            # Real server validation
+            validation_result = self.validate_with_server(email, key)
             
-            if is_valid:
+            if validation_result.get('success'):
                 self.authenticated = True
-                self.is_trial = False
+                self.is_trial = validation_result.get('is_trial', False)
                 self.save_credentials(email, key)
                 self.accept()
             else:
-                QMessageBox.warning(self, "Login Failed", "Invalid license key")
+                error = validation_result.get('error', 'unknown')
+                message = self.get_error_message(error, validation_result)
+                QMessageBox.warning(self, "Login Failed", message)
+                
+        except requests.exceptions.ConnectionError:
+            QMessageBox.warning(
+                self, 
+                "No Internet Connection",
+                "Unable to connect to the license server.\n\nPlease check your internet connection and try again."
+            )
+        except requests.exceptions.Timeout:
+            QMessageBox.warning(
+                self,
+                "Connection Timeout",
+                "The server took too long to respond.\n\nPlease try again later."
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"An error occurred: {str(e)}")
+        finally:
+            self.login_button.setEnabled(True)
+            self.login_button.setText("Login")
+    
+    def validate_with_server(self, email, license_key):
+        """
+        Validate license with the server.
+        
+        Args:
+            email: User's email
+            license_key: License key to validate
+        
+        Returns:
+            dict: Server response with success/error status
+        """
+        try:
+            from client.config.config import VALIDATE_URL
+            
+            hardware_id = self.get_hardware_id()
+            device_name = socket.gethostname()
+            
+            response = requests.post(
+                VALIDATE_URL,
+                json={
+                    'email': email,
+                    'license_key': license_key,
+                    'hardware_id': hardware_id,
+                    'device_name': device_name
+                },
+                timeout=15
+            )
+            
+            result = response.json()
+            
+            # Log validation attempt (for debugging)
+            if DEVELOPMENT_MODE:
+                print(f"Validation response: {result}")
+            
+            return result
+            
+        except requests.exceptions.RequestException as e:
+            raise  # Re-raise to be handled by caller
+        except json.JSONDecodeError:
+            return {'success': False, 'error': 'invalid_response', 'message': 'Invalid server response'}
+        except Exception as e:
+            return {'success': False, 'error': 'validation_failed', 'message': str(e)}
+    
+    def get_error_message(self, error_code, result):
+        """
+        Convert error codes to user-friendly messages.
+        
+        Args:
+            error_code: Error code from server
+            result: Full result dict for additional context
+        
+        Returns:
+            str: User-friendly error message
+        """
+        error_messages = {
+            'invalid_license': 'Invalid license key. Please check and try again.',
+            'email_mismatch': 'The email address does not match this license.',
+            'license_expired': 'Your license has expired. Please renew to continue.',
+            'license_deactivated': 'This license has been deactivated.',
+            'bound_to_other_device': f"This license is already activated on another device: {result.get('bound_device', 'Unknown')}.\n\nUse 'Transfer License' to move it to this device.",
+            'trial_requires_online': 'Trial licenses require an internet connection.',
+            'trial_converted': result.get('message', 'Your trial has been upgraded. Please use your full license key.'),
+            'offline_grace_expired': 'Please connect to the internet to validate your license.',
+            'requires_online_validation': 'First-time activation requires an internet connection.',
+            'validation_failed': 'Failed to validate license. Please try again.',
+        }
+        
+        return error_messages.get(error_code, result.get('message', f'Login failed: {error_code}'))
                 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"An error occurred: {str(e)}")

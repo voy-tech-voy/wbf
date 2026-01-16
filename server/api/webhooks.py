@@ -3,8 +3,11 @@ from . import webhook_bp
 from services.license_manager import LicenseManager
 from services.email_service import EmailService
 from services.backup_manager import BackupManager
+from config.settings import Config
 import logging
 import json
+import hmac
+import hashlib
 from datetime import datetime
 import os
 
@@ -15,6 +18,47 @@ backup_manager = BackupManager()
 
 # Webhook debug log file
 WEBHOOK_DEBUG_LOG = 'webhook_debug.jsonl'
+
+
+def verify_gumroad_signature(payload_body, signature):
+    """
+    Verify Gumroad webhook signature using HMAC-SHA256
+    
+    Gumroad sends signature in 'X-Gumroad-Signature' header
+    
+    Args:
+        payload_body: Raw request body (bytes or string)
+        signature: Signature from X-Gumroad-Signature header
+    
+    Returns:
+        bool: True if signature is valid
+    """
+    secret = Config.GUMROAD_WEBHOOK_SECRET
+    
+    if not secret:
+        logger.warning("GUMROAD_WEBHOOK_SECRET not configured - skipping signature verification")
+        return True  # Allow in dev mode when secret not set
+    
+    if not signature:
+        logger.warning("No signature provided in webhook request")
+        return False
+    
+    if isinstance(payload_body, str):
+        payload_body = payload_body.encode('utf-8')
+    
+    expected_signature = hmac.new(
+        secret.encode('utf-8'),
+        payload_body,
+        hashlib.sha256
+    ).hexdigest()
+    
+    # Use constant-time comparison to prevent timing attacks
+    is_valid = hmac.compare_digest(signature, expected_signature)
+    
+    if not is_valid:
+        logger.warning(f"Webhook signature mismatch. Expected: {expected_signature[:16]}..., Got: {signature[:16]}...")
+    
+    return is_valid
 
 # Map Gumroad Product Permalinks/IDs to duration in days
 PRODUCT_DURATIONS = {
@@ -94,6 +138,17 @@ def save_webhook_log(data, status, response):
 @webhook_bp.route('/gumroad', methods=['POST'])
 def gumroad_webhook():
     """Handle Gumroad purchase webhooks"""
+    
+    # SECURITY: Verify webhook signature first
+    if Config.VERIFY_WEBHOOK_SIGNATURE:
+        signature = request.headers.get('X-Gumroad-Signature', '')
+        raw_body = request.get_data(as_text=True)
+        
+        if not verify_gumroad_signature(raw_body, signature):
+            error_response = {"error": "Invalid webhook signature"}
+            save_webhook_log({'signature_failed': True}, "security_error", error_response)
+            logger.warning(f"Webhook signature verification failed from IP: {request.remote_addr}")
+            return jsonify(error_response), 403
     
     # Try to get data from form first, then JSON
     data = request.form.to_dict() if request.form else request.get_json() or {}

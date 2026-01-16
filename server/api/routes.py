@@ -1,9 +1,12 @@
 from flask import jsonify, request
+from functools import wraps
 from . import api_bp
 from services.trial_manager import TrialManager
 from services.license_manager import LicenseManager
 from services.email_service import EmailService
 from services.rate_limiter import rate_limiter
+from services.validation import validate_email, validate_license_key, validate_hardware_id, sanitize_string
+from config.settings import Config
 import logging
 
 logger = logging.getLogger(__name__)
@@ -11,6 +14,37 @@ logger = logging.getLogger(__name__)
 trial_manager = TrialManager()
 license_manager = LicenseManager()
 email_service = EmailService()
+
+
+def require_admin_key(f):
+    """
+    Decorator to require admin API key for protected endpoints.
+    
+    Checks X-Admin-Key header against ADMIN_API_KEY from environment.
+    Returns 401 Unauthorized if key is missing or invalid.
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        admin_key = Config.ADMIN_API_KEY
+        provided_key = request.headers.get('X-Admin-Key')
+        
+        if not admin_key:
+            logger.warning("ADMIN_API_KEY not configured - admin endpoint disabled")
+            return jsonify({'success': False, 'error': 'admin_not_configured'}), 503
+        
+        if not provided_key:
+            logger.warning(f"Admin endpoint access without key from IP: {request.remote_addr}")
+            return jsonify({'success': False, 'error': 'unauthorized', 'message': 'Admin key required'}), 401
+        
+        # Use constant-time comparison to prevent timing attacks
+        import hmac
+        if not hmac.compare_digest(provided_key, admin_key):
+            logger.warning(f"Invalid admin key attempt from IP: {request.remote_addr}")
+            return jsonify({'success': False, 'error': 'unauthorized', 'message': 'Invalid admin key'}), 401
+        
+        return f(*args, **kwargs)
+    return decorated_function
+
 
 @api_bp.route('/status', methods=['GET'])
 def status():
@@ -50,15 +84,27 @@ def validate_license():
     if not data:
         return jsonify({'success': False, 'error': 'no_data'}), 400
     
-    email = data.get('email')
-    license_key = data.get('license_key')
-    hardware_id = data.get('hardware_id')
-    device_name = data.get('device_name', 'Unknown Device')
+    # Validate inputs
+    email_result = validate_email(data.get('email', ''))
+    if not email_result['valid']:
+        return jsonify({'success': False, 'error': email_result['error'], 'message': email_result['message']}), 400
     
-    if not all([email, license_key, hardware_id]):
-        return jsonify({'success': False, 'error': 'missing_parameters'}), 400
+    key_result = validate_license_key(data.get('license_key', ''))
+    if not key_result['valid']:
+        return jsonify({'success': False, 'error': key_result['error'], 'message': key_result['message']}), 400
     
-    result = license_manager.validate_license(email, license_key, hardware_id, device_name)
+    hw_result = validate_hardware_id(data.get('hardware_id', ''))
+    if not hw_result['valid']:
+        return jsonify({'success': False, 'error': hw_result['error'], 'message': hw_result['message']}), 400
+    
+    device_name = sanitize_string(data.get('device_name', 'Unknown Device'), max_length=100)
+    
+    result = license_manager.validate_license(
+        email_result['email'], 
+        key_result['license_key'], 
+        hw_result['hardware_id'], 
+        device_name
+    )
     
     status_code = 200 if result.get('success') else 400
     return jsonify(result), status_code
@@ -69,45 +115,64 @@ def transfer_license():
     if not data:
         return jsonify({'success': False, 'error': 'no_data'}), 400
     
-    email = data.get('email')
-    license_key = data.get('license_key')
-    new_hardware_id = data.get('new_hardware_id')
-    new_device_name = data.get('new_device_name', 'Unknown Device')
+    # Validate inputs
+    email_result = validate_email(data.get('email', ''))
+    if not email_result['valid']:
+        return jsonify({'success': False, 'error': email_result['error'], 'message': email_result['message']}), 400
     
-    if not all([email, license_key, new_hardware_id]):
-        return jsonify({'success': False, 'error': 'missing_parameters'}), 400
+    key_result = validate_license_key(data.get('license_key', ''))
+    if not key_result['valid']:
+        return jsonify({'success': False, 'error': key_result['error'], 'message': key_result['message']}), 400
     
-    result = license_manager.transfer_license(email, license_key, new_hardware_id, new_device_name)
+    hw_result = validate_hardware_id(data.get('new_hardware_id', ''))
+    if not hw_result['valid']:
+        return jsonify({'success': False, 'error': hw_result['error'], 'message': hw_result['message']}), 400
+    
+    new_device_name = sanitize_string(data.get('new_device_name', 'Unknown Device'), max_length=100)
+    
+    result = license_manager.transfer_license(
+        email_result['email'], 
+        key_result['license_key'], 
+        hw_result['hardware_id'], 
+        new_device_name
+    )
     
     status_code = 200 if result.get('success') else 400
     return jsonify(result), status_code
 
 @api_bp.route('/license/create', methods=['POST'])
+@require_admin_key
 def create_license():
-    # Simple admin check - in production use proper auth
-    # For now, we'll just allow it or check a header if we had one configured
+    """Create a new license - ADMIN ONLY endpoint"""
     data = request.get_json()
     if not data:
         return jsonify({'success': False, 'error': 'no_data'}), 400
     
-    email = data.get('email')
-    customer_name = data.get('customer_name', '')
+    # Validate email
+    email_result = validate_email(data.get('email', ''))
+    if not email_result['valid']:
+        return jsonify({'success': False, 'error': email_result['error'], 'message': email_result['message']}), 400
+    
+    customer_name = sanitize_string(data.get('customer_name', ''), max_length=100)
     expires_days = data.get('expires_days', 365)
     
-    if not email:
-        return jsonify({'success': False, 'error': 'email_required'}), 400
+    # Validate expires_days
+    if not isinstance(expires_days, int) or expires_days < 1 or expires_days > 3650:
+        return jsonify({'success': False, 'error': 'invalid_expires_days', 'message': 'expires_days must be 1-3650'}), 400
     
-    license_key = license_manager.create_license(email, customer_name, expires_days)
+    license_key = license_manager.create_license(email_result['email'], customer_name, expires_days)
     
     if license_key:
+        logger.info(f"Admin created license for {email_result['email']}")
         return jsonify({
             'success': True,
             'license_key': license_key,
-            'email': email,
+            'email': email_result['email'],
             'expires_days': expires_days
         })
     else:
         return jsonify({'success': False, 'error': 'creation_failed'}), 500
+
 @api_bp.route('/license/forgot', methods=['POST'])
 def forgot_license():
     """Find and return a license key for a user who forgot it"""
@@ -115,10 +180,12 @@ def forgot_license():
     if not data:
         return jsonify({'success': False, 'error': 'no_data'}), 400
     
-    email = data.get('email')
+    # Validate email
+    email_result = validate_email(data.get('email', ''))
+    if not email_result['valid']:
+        return jsonify({'success': False, 'error': email_result['error'], 'message': email_result['message']}), 400
     
-    if not email:
-        return jsonify({'success': False, 'error': 'email_required'}), 400
+    email = email_result['email']  # Use validated/normalized email
     
     # Rate limiting check
     ip_address = request.remote_addr

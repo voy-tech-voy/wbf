@@ -2,10 +2,17 @@ import json
 import os
 import logging
 import secrets
+import threading
 from datetime import datetime, timedelta
 from config.settings import Config
 
 logger = logging.getLogger(__name__)
+
+# Thread locks for file operations (prevents race conditions)
+_licenses_lock = threading.Lock()
+_trials_lock = threading.Lock()
+_purchases_lock = threading.Lock()
+
 
 class LicenseManager:
     def __init__(self):
@@ -30,42 +37,67 @@ class LicenseManager:
                 json.dump({}, f)
     
     def load_licenses(self):
-        """Load licenses from file or database"""
-        try:
-            with open(self.license_file, 'r') as f:
-                return json.load(f)
-        except Exception as e:
-            logger.error(f"Failed to load licenses: {e}")
-            return {}
+        """Load licenses from file with thread safety"""
+        with _licenses_lock:
+            try:
+                with open(self.license_file, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.error(f"Failed to load licenses: {e}")
+                return {}
     
     def save_licenses(self, licenses):
-        """Save licenses to file or database"""
-        try:
-            with open(self.license_file, 'w') as f:
-                json.dump(licenses, f, indent=2)
-            return True
-        except Exception as e:
-            logger.error(f"Failed to save licenses: {e}")
-            return False
+        """Save licenses to file with thread safety and atomic write"""
+        with _licenses_lock:
+            try:
+                # Write to temp file first, then rename (atomic on most filesystems)
+                temp_file = self.license_file + '.tmp'
+                with open(temp_file, 'w') as f:
+                    json.dump(licenses, f, indent=2)
+                
+                # Atomic rename
+                os.replace(temp_file, self.license_file)
+                return True
+            except Exception as e:
+                logger.error(f"Failed to save licenses: {e}")
+                # Clean up temp file if it exists
+                try:
+                    if os.path.exists(temp_file):
+                        os.remove(temp_file)
+                except:
+                    pass
+                return False
     
     def load_trials(self):
-        """Load trials from file"""
-        try:
-            with open(self.trials_file, 'r') as f:
-                return json.load(f)
-        except Exception as e:
-            logger.error(f"Failed to load trials: {e}")
-            return {}
+        """Load trials from file with thread safety"""
+        with _trials_lock:
+            try:
+                with open(self.trials_file, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.error(f"Failed to load trials: {e}")
+                return {}
     
     def save_trials(self, trials):
-        """Save trials to file"""
-        try:
-            with open(self.trials_file, 'w') as f:
-                json.dump(trials, f, indent=2)
-            return True
-        except Exception as e:
-            logger.error(f"Failed to save trials: {e}")
-            return False
+        """Save trials to file with thread safety and atomic write"""
+        with _trials_lock:
+            try:
+                # Write to temp file first, then rename (atomic on most filesystems)
+                temp_file = self.trials_file + '.tmp'
+                with open(temp_file, 'w') as f:
+                    json.dump(trials, f, indent=2)
+                
+                # Atomic rename
+                os.replace(temp_file, self.trials_file)
+                return True
+            except Exception as e:
+                logger.error(f"Failed to save trials: {e}")
+                try:
+                    if os.path.exists(temp_file):
+                        os.remove(temp_file)
+                except:
+                    pass
+                return False
     
     def generate_license_key(self):
         """Generate a unique license key"""
@@ -143,22 +175,23 @@ class LicenseManager:
             return None
     
     def log_purchase(self, license_key, purchase_info):
-        """Log detailed purchase information to audit trail (purchases.jsonl)"""
-        try:
-            purchase_record = {
-                'timestamp': datetime.now().isoformat(),
-                'license_key': license_key,
-                **purchase_info  # Unpack all purchase details
-            }
-            
-            with open(self.purchases_file, 'a') as f:
-                f.write(json.dumps(purchase_record) + '\n')
-            
-            logger.info(f"Purchase logged for license {license_key}")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to log purchase: {e}")
-            return False
+        """Log detailed purchase information to audit trail (purchases.jsonl) with thread safety"""
+        with _purchases_lock:
+            try:
+                purchase_record = {
+                    'timestamp': datetime.now().isoformat(),
+                    'license_key': license_key,
+                    **purchase_info  # Unpack all purchase details
+                }
+                
+                with open(self.purchases_file, 'a') as f:
+                    f.write(json.dumps(purchase_record) + '\n')
+                
+                logger.info(f"Purchase logged for license {license_key}")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to log purchase: {e}")
+                return False
     
     def check_trial_eligibility(self, email, hardware_id):
         """Check if user is eligible for a trial (abuse prevention)
