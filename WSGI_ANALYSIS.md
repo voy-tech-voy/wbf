@@ -87,7 +87,7 @@ from api import api_bp, webhook_bp  # ✅ Relative import - CORRECT
 
 ## Merged WSGI Configuration
 
-See `WSGI_CONFIG_PYTHONANYWHERE.py` - this file:
+See `wbf_pythonanywhere_com_wsgi.py` - this file:
 
 ✅ Uses your **factory pattern** (`create_app()`)  
 ✅ Includes your **SMTP settings** (Gmail configuration)  
@@ -118,7 +118,7 @@ In PythonAnywhere Web tab:
 1. Go to **Web** section
 2. Click your web app
 3. Edit WSGI configuration file
-4. Copy content from `WSGI_CONFIG_PYTHONANYWHERE.py`
+4. Copy content from `wbf_pythonanywhere_com_wsgi.py`
 5. **Replace `/home/wavyvoy/` with your actual username** if different
 
 ### Step 2: Set Environment Variables (Recommended)
@@ -201,7 +201,7 @@ Expected: Error response (no valid license) - but **no 500 errors**
 ---
 
 **Next Steps:**
-1. Copy WSGI config from `WSGI_CONFIG_PYTHONANYWHERE.py` to PythonAnywhere
+1. Copy WSGI config from `wbf_pythonanywhere_com_wsgi.py` to PythonAnywhere
 2. Replace username paths if different from `wavyvoy`
 3. Push current code to GitHub
 4. Click **Reload** in Web tab
