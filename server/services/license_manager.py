@@ -582,6 +582,30 @@ class LicenseManager:
             logger.error(f"Error finding license by source key: {e}")
             return None
     
+    def find_license_by_sale_id(self, sale_id):
+        """Find our license key by Gumroad sale_id (idempotency check)
+        
+        Args:
+            sale_id: The sale_id from Gumroad webhook
+        
+        Returns:
+            str: Our license key or None if not found
+        """
+        try:
+            licenses = self.load_licenses()
+            for our_key, license_data in licenses.items():
+                # Check in purchase_info.sale_id
+                purchase_info = license_data.get('purchase_info', {})
+                if purchase_info.get('sale_id') == sale_id:
+                    return our_key
+                # Also check legacy format (direct sale_id field)
+                if license_data.get('sale_id') == sale_id:
+                    return our_key
+            return None
+        except Exception as e:
+            logger.error(f"Error finding license by sale_id: {e}")
+            return None
+    
     def handle_refund(self, license_key, refund_reason="customer_request"):
         """Handle license refund - deactivate the license
         

@@ -20,45 +20,47 @@ backup_manager = BackupManager()
 WEBHOOK_DEBUG_LOG = 'webhook_debug.jsonl'
 
 
-def verify_gumroad_signature(payload_body, signature):
+def verify_gumroad_seller(data):
     """
-    Verify Gumroad webhook signature using HMAC-SHA256
+    Verify Gumroad webhook by checking seller_id.
     
-    Gumroad sends signature in 'X-Gumroad-Signature' header
+    NOTE: Gumroad does NOT provide HMAC webhook signatures like Stripe.
+    We verify authenticity by checking seller_id matches our account.
     
     Args:
-        payload_body: Raw request body (bytes or string)
-        signature: Signature from X-Gumroad-Signature header
+        data: Webhook POST data dictionary
     
     Returns:
-        bool: True if signature is valid
+        tuple: (is_valid: bool, error_message: str or None)
     """
-    secret = Config.GUMROAD_WEBHOOK_SECRET
+    expected_seller_id = Config.GUMROAD_SELLER_ID
     
-    if not secret:
-        logger.warning("GUMROAD_WEBHOOK_SECRET not configured - skipping signature verification")
-        return True  # Allow in dev mode when secret not set
+    if not expected_seller_id:
+        logger.warning("GUMROAD_SELLER_ID not configured - skipping seller verification")
+        return True, None  # Allow in dev mode when not configured
     
-    if not signature:
-        logger.warning("No signature provided in webhook request")
-        return False
+    seller_id = data.get('seller_id', '')
     
-    if isinstance(payload_body, str):
-        payload_body = payload_body.encode('utf-8')
-    
-    expected_signature = hmac.new(
-        secret.encode('utf-8'),
-        payload_body,
-        hashlib.sha256
-    ).hexdigest()
+    if not seller_id:
+        logger.warning("No seller_id in webhook payload")
+        return False, "Missing seller_id in payload"
     
     # Use constant-time comparison to prevent timing attacks
-    is_valid = hmac.compare_digest(signature, expected_signature)
+    is_valid = hmac.compare_digest(str(seller_id), str(expected_seller_id))
     
     if not is_valid:
-        logger.warning(f"Webhook signature mismatch. Expected: {expected_signature[:16]}..., Got: {signature[:16]}...")
+        logger.warning(f"Webhook rejected: seller_id mismatch. Got '{seller_id}', expected '{expected_seller_id}'")
+        return False, "Invalid seller_id"
     
-    return is_valid
+    # Optional: Also verify product_id if configured
+    expected_product_id = Config.GUMROAD_PRODUCT_ID
+    if expected_product_id:
+        product_id = data.get('product_id', '')
+        if product_id and not hmac.compare_digest(str(product_id), str(expected_product_id)):
+            logger.warning(f"Webhook for unexpected product: {product_id}")
+            # Don't reject, just log - might be a different product
+    
+    return True, None
 
 # Map Gumroad Product Permalinks/IDs to duration in days
 PRODUCT_DURATIONS = {
@@ -137,21 +139,37 @@ def save_webhook_log(data, status, response):
 
 @webhook_bp.route('/gumroad', methods=['POST'])
 def gumroad_webhook():
-    """Handle Gumroad purchase webhooks"""
+    """Handle Gumroad purchase webhooks
     
-    # SECURITY: Verify webhook signature first
-    if Config.VERIFY_WEBHOOK_SIGNATURE:
-        signature = request.headers.get('X-Gumroad-Signature', '')
-        raw_body = request.get_data(as_text=True)
-        
-        if not verify_gumroad_signature(raw_body, signature):
-            error_response = {"error": "Invalid webhook signature"}
-            save_webhook_log({'signature_failed': True}, "security_error", error_response)
-            logger.warning(f"Webhook signature verification failed from IP: {request.remote_addr}")
-            return jsonify(error_response), 403
+    SECURITY NOTE: Gumroad does NOT provide webhook signatures.
+    We verify authenticity by checking seller_id matches our account.
+    """
     
     # Try to get data from form first, then JSON
     data = request.form.to_dict() if request.form else request.get_json() or {}
+    
+    if not data:
+        error_response = {"error": "No data received"}
+        save_webhook_log({}, "error", error_response)
+        return jsonify(error_response), 400
+    
+    # SECURITY: Verify webhook seller_id
+    if Config.VERIFY_WEBHOOK_SELLER:
+        is_valid, error_msg = verify_gumroad_seller(data)
+        
+        if not is_valid:
+            error_response = {"error": error_msg or "Webhook verification failed"}
+            save_webhook_log({'verification_failed': True, 'seller_id': data.get('seller_id')}, "security_error", error_response)
+            logger.warning(f"Webhook seller verification failed from IP: {request.remote_addr}")
+            return jsonify(error_response), 403
+    
+    # IDEMPOTENCY: Check if we already processed this sale_id
+    sale_id = data.get('sale_id')
+    if sale_id:
+        existing = license_manager.find_license_by_sale_id(sale_id)
+        if existing:
+            logger.info(f"Duplicate webhook for sale_id {sale_id} - already processed")
+            return jsonify({"status": "already_processed", "sale_id": sale_id}), 200
     
     if not data:
         error_response = {"error": "No data received"}

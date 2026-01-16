@@ -14,9 +14,11 @@ class Config:
     FROM_EMAIL = os.environ.get('FROM_EMAIL', 'noreply@imagewave.com')
     
     # Security Configuration
-    GUMROAD_WEBHOOK_SECRET = os.environ.get('GUMROAD_WEBHOOK_SECRET')  # Set in PythonAnywhere
+    # Gumroad does NOT provide webhook signatures - we verify using seller_id instead
+    GUMROAD_SELLER_ID = os.environ.get('GUMROAD_SELLER_ID')  # Your Gumroad seller ID
+    GUMROAD_PRODUCT_ID = os.environ.get('GUMROAD_PRODUCT_ID')  # Optional: specific product ID
     ADMIN_API_KEY = os.environ.get('ADMIN_API_KEY')  # Set in PythonAnywhere
     
-    # Webhook signature verification (disable in dev if needed)
-    VERIFY_WEBHOOK_SIGNATURE = os.environ.get('VERIFY_WEBHOOK_SIGNATURE', 'true').lower() == 'true'
+    # Enable webhook seller verification (disable in dev if needed)
+    VERIFY_WEBHOOK_SELLER = os.environ.get('VERIFY_WEBHOOK_SELLER', 'true').lower() == 'true'
 

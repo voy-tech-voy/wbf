@@ -75,11 +75,18 @@ print(f"✅ SMTP configured: {os.environ.get('SMTP_USERNAME')}")
 # ============================================================================
 # !!! IMPORTANT: Set these values below after deployment !!!
 
-# Gumroad webhook signature verification
-# Get this from: https://app.gumroad.com/settings/advanced#webhooks
-os.environ['GUMROAD_WEBHOOK_SECRET'] = os.environ.get(
-    'GUMROAD_WEBHOOK_SECRET',
-    ''  # SET THIS to your Gumroad webhook secret
+# Gumroad seller ID verification (Gumroad does NOT provide webhook signatures)
+# Find your seller ID at: https://app.gumroad.com/settings/advanced
+# Or check any Gumroad webhook payload for the 'seller_id' field
+os.environ['GUMROAD_SELLER_ID'] = os.environ.get(
+    'GUMROAD_SELLER_ID',
+    ''  # SET THIS to your Gumroad seller ID
+)
+
+# Optional: Your specific product ID to verify purchases
+os.environ['GUMROAD_PRODUCT_ID'] = os.environ.get(
+    'GUMROAD_PRODUCT_ID',
+    ''  # OPTIONAL: SET THIS if you want to verify product ID too
 )
 
 # Admin API key for protected endpoints like /license/create
@@ -87,19 +94,19 @@ os.environ['GUMROAD_WEBHOOK_SECRET'] = os.environ.get(
 # Generated key: 9u3jbn1X9npKbltLQ7WCGr_Fgl8Luok9r_adGbnGoKk
 os.environ['ADMIN_API_KEY'] = os.environ.get(
     'ADMIN_API_KEY',
-    ''  # SET THIS to your admin API key
+    '9u3jbn1X9npKbltLQ7WCGr_Fgl8Luok9r_adGbnGoKk'
 )
 
-# Enable webhook signature verification in production
-os.environ['VERIFY_WEBHOOK_SIGNATURE'] = os.environ.get(
-    'VERIFY_WEBHOOK_SIGNATURE',
-    'true'  # Set to 'false' for testing without webhook signature
+# Enable webhook seller verification in production
+os.environ['VERIFY_WEBHOOK_SELLER'] = os.environ.get(
+    'VERIFY_WEBHOOK_SELLER',
+    'true'  # Set to 'false' for testing
 )
 
-if os.environ.get('GUMROAD_WEBHOOK_SECRET'):
-    print(f"✅ Gumroad webhook secret configured")
+if os.environ.get('GUMROAD_SELLER_ID'):
+    print(f"✅ Gumroad seller ID configured")
 else:
-    print(f"⚠️  WARNING: GUMROAD_WEBHOOK_SECRET not set - webhooks will not be verified!")
+    print(f"⚠️  WARNING: GUMROAD_SELLER_ID not set - webhooks will not be verified!")
 
 if os.environ.get('ADMIN_API_KEY'):
     print(f"✅ Admin API key configured")
