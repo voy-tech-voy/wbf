@@ -24,7 +24,7 @@ class ModeButtonsWidget(QWidget):
     def __init__(self, default_mode="Manual", parent=None):
         """
         Args:
-            default_mode: Either "Max Size" or "Manual"
+            default_mode: "Max Size", "Presets", or "Manual"
             parent: Parent widget
         """
         super().__init__(parent)
@@ -50,6 +50,13 @@ class ModeButtonsWidget(QWidget):
         self.max_size_btn.setToolTip("Auto-optimize to fit target file size")
         self.max_size_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
+        # Presets button
+        self.presets_btn = QPushButton("Presets")
+        self.presets_btn.setCheckable(True)
+        self.presets_btn.setStyleSheet(button_style)
+        self.presets_btn.setToolTip("Select from social media and common aspect ratio presets")
+        self.presets_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        
         # Manual button
         self.manual_btn = QPushButton("Manual")
         self.manual_btn.setCheckable(True)
@@ -61,38 +68,50 @@ class ModeButtonsWidget(QWidget):
         self.button_group = QButtonGroup(self)
         self.button_group.setExclusive(True)
         self.button_group.addButton(self.max_size_btn)
+        self.button_group.addButton(self.presets_btn)
         self.button_group.addButton(self.manual_btn)
         
         # Set default mode
         if default_mode == "Max Size":
             self.max_size_btn.setChecked(True)
+        elif default_mode == "Presets":
+            self.presets_btn.setChecked(True)
         else:
             self.manual_btn.setChecked(True)
         
         # Connect signals
-        # DEBUG: Print mode changes - COMMENTED OUT
         self.max_size_btn.toggled.connect(
-            lambda checked: checked and self.modeChanged.emit("Max Size")  # (print(f"🟢 ModeButtons: Max Size"), ...)
+            lambda checked: checked and self.modeChanged.emit("Max Size")
+        )
+        self.presets_btn.toggled.connect(
+            lambda checked: checked and self.modeChanged.emit("Presets")
         )
         self.manual_btn.toggled.connect(
-            lambda checked: checked and self.modeChanged.emit("Manual")  # (print(f"🟢 ModeButtons: Manual"), ...)
+            lambda checked: checked and self.modeChanged.emit("Manual")
         )
         
         # Add buttons to layout
         layout.addWidget(self.max_size_btn)
+        layout.addWidget(self.presets_btn)
         layout.addWidget(self.manual_btn)
         
         # Fixed height for consistency
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     
     def get_mode(self):
-        """Get current mode: 'Max Size' or 'Manual'"""
-        return "Max Size" if self.max_size_btn.isChecked() else "Manual"
+        """Get current mode: 'Max Size', 'Presets', or 'Manual'"""
+        if self.max_size_btn.isChecked():
+            return "Max Size"
+        elif self.presets_btn.isChecked():
+            return "Presets"
+        return "Manual"
     
     def set_mode(self, mode):
         """Set the mode programmatically"""
         if mode == "Max Size":
             self.max_size_btn.setChecked(True)
+        elif mode == "Presets":
+            self.presets_btn.setChecked(True)
         else:
             self.manual_btn.setChecked(True)
 
@@ -1178,3 +1197,149 @@ class RotationOptions(QGroupBox):
         self.is_dark_mode = is_dark_mode
         self.combobox_style = combobox_style
         self.rotation_angle.update_theme(is_dark_mode)
+
+
+class SocialPresetButton(QPushButton):
+    """
+    Standardized button for social media presets with theme support.
+    """
+    def __init__(self, name, icon_path=None, parent=None):
+        # If icon is provided, we use it instead of text for a square look
+        super().__init__("" if icon_path else name, parent)
+        self.preset_name = name  # Always store the original name
+        self.setCheckable(True)
+        
+        # Enable heightForWidth to keep it square while filling width
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
+        self.setMinimumSize(40, 40)
+        
+        if icon_path:
+            from PyQt6.QtGui import QIcon
+            self.setIcon(QIcon(icon_path))
+            
+        self.setToolTip(f"Set settings for {name}")
+
+    def resizeEvent(self, event):
+        """Scale icon to fill button area on resize"""
+        super().resizeEvent(event)
+        if not self.icon().isNull():
+            from PyQt6.QtCore import QSize
+            # Fill with 80% of button area to leave some padding
+            side = int(min(self.width(), self.height()) * 0.8)
+            self.setIconSize(QSize(side, side))
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, w):
+        return w
+
+    def update_theme(self, is_dark):
+        """Update styling based on theme"""
+        if is_dark:
+            bg_color = "#333333"
+            border_color = "#444444"
+            text_color = "white"
+            hover_bg = "#404040"
+        else:
+            bg_color = "#f0f0f0"
+            border_color = "#cccccc"
+            text_color = "#333333"
+            hover_bg = "#e0e0e0"
+
+        checked_bg = "#4CAF50"
+        checked_border = "#43a047"
+
+        style = f"""
+            QPushButton {{
+                padding: 0px;
+                border-radius: 6px;
+                border: 1px solid {border_color};
+                background-color: {bg_color};
+                color: {text_color};
+                font-weight: 500;
+            }}
+            QPushButton:checked {{
+                background-color: {checked_bg};
+                border-color: {checked_border};
+                color: white;
+            }}
+            QPushButton:hover:!checked {{
+                background-color: {hover_bg};
+            }}
+        """
+        self.setStyleSheet(style)
+
+
+class RatioPresetButton(QPushButton):
+    """
+    Standardized button for aspect ratio presets with theme support.
+    """
+    def __init__(self, ratio, icon_path=None, parent=None):
+        # Use icon if provided for an icon-only square look
+        super().__init__("" if icon_path else ratio, parent)
+        self.preset_name = ratio
+        self.setCheckable(True)
+        
+        # Enable heightForWidth to keep it square while filling width
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
+        self.setMinimumSize(40, 40)
+        
+        if icon_path:
+            from PyQt6.QtGui import QIcon
+            self.setIcon(QIcon(icon_path))
+            
+        self.setToolTip(f"Set aspect ratio to {ratio}")
+
+    def resizeEvent(self, event):
+        """Scale icon to fill button area on resize"""
+        super().resizeEvent(event)
+        if not self.icon().isNull():
+            from PyQt6.QtCore import QSize
+            # Fill with 80% of button area to leave some padding
+            side = int(min(self.width(), self.height()) * 0.8)
+            self.setIconSize(QSize(side, side))
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, w):
+        return w
+
+    def update_theme(self, is_dark):
+        """Update styling based on theme"""
+        if is_dark:
+            bg_color = "#333333"
+            border_color = "#444444"
+            text_color = "white"
+            hover_bg = "#404040"
+        else:
+            bg_color = "#f0f0f0"
+            border_color = "#cccccc"
+            text_color = "#333333"
+            hover_bg = "#e0e0e0"
+
+        checked_bg = "#4CAF50"
+        checked_border = "#43a047"
+
+        style = f"""
+            QPushButton {{
+                padding: 0px;
+                border-radius: 6px;
+                border: 1px solid {border_color};
+                background-color: {bg_color};
+                color: {text_color};
+                font-weight: 500;
+            }}
+            QPushButton:checked {{
+                background-color: {checked_bg};
+                border-color: {checked_border};
+                color: white;
+            }}
+            QPushButton:hover:!checked {{
+                background-color: {hover_bg};
+            }}
+        """
+        self.setStyleSheet(style)

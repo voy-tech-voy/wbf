@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QMenuBar, QToolBar, QStatusBar, QSplitter,
     QListWidget, QTextEdit, QLabel, QPushButton,
-    QFrame, QGroupBox, QProgressBar, QMessageBox
+    QFrame, QGroupBox, QProgressBar, QMessageBox, QDialog, QApplication
 )
 from PyQt6.QtGui import QIcon, QDragEnterEvent, QDropEvent, QFont, QMouseEvent, QAction
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QSize, pyqtSlot, pyqtProperty
@@ -20,6 +20,7 @@ from .theme_manager import ThemeManager
 from client.core.conversion_engine import ConversionEngine, ToolChecker
 from client.utils.trial_manager import TrialManager
 from client.utils.font_manager import AppFonts
+from client.utils.resource_path import get_app_icon_path, get_resource_path
 from client.version import APP_NAME, AUTHOR
 
 class DraggableTitleBar(QFrame):
@@ -127,6 +128,7 @@ class MainWindow(QMainWindow):
         
         # Add custom title bar
         self.create_title_bar(main_layout)
+        QApplication.processEvents()
         
         # Content area with normal spacing
         content_layout = QVBoxLayout()
@@ -134,12 +136,17 @@ class MainWindow(QMainWindow):
         content_layout.setContentsMargins(5, 5, 5, 5)
         
         # Create the middle section with splitter
+        # Create the middle section with splitter
         self.create_middle_section(content_layout)
+        QApplication.processEvents()
         
         # Bottom section (status and progress)
         self.create_bottom_section(content_layout)
         
         main_layout.addLayout(content_layout)
+        
+        # Process events to keep splash screen animated
+        QApplication.processEvents()
         
     def create_title_bar(self, parent_layout):
         """Create custom title bar with logo, theme toggle, menu, and window controls"""
@@ -184,7 +191,7 @@ class MainWindow(QMainWindow):
         
         # Load SVG icon for theme toggle
         try:
-            svg_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'icons', 'sun-moon.svg')
+            svg_path = get_resource_path('client/assets/icons/sun-moon.svg')
             if os.path.exists(svg_path):
                 self.sun_moon_svg_path = svg_path
                 icon = QIcon(svg_path)
@@ -200,6 +207,11 @@ class MainWindow(QMainWindow):
         from PyQt6.QtWidgets import QMenu
         self.title_menu = QMenu()
         
+        
+        advanced_action = QAction("Advanced", self)
+        advanced_action.triggered.connect(self.show_advanced)
+        self.title_menu.addAction(advanced_action)
+
         about_action = QAction("About", self)
         about_action.triggered.connect(self.show_about)
         self.title_menu.addAction(about_action)
@@ -209,7 +221,11 @@ class MainWindow(QMainWindow):
         self.title_menu.addAction(show_log_action)
         
         self.title_menu.addSeparator()
-        
+
+        logout_action = QAction("Log Out", self)
+        logout_action.triggered.connect(self.logout)
+        self.title_menu.addAction(logout_action)
+
         exit_action = QAction("Exit", self)
         exit_action.triggered.connect(self.close)
         self.title_menu.addAction(exit_action)
@@ -899,6 +915,8 @@ class MainWindow(QMainWindow):
         QMessageBox {{
             background-color: {bg_color};
             color: {text_color};
+            border: 1px solid #555555;
+            border-radius: 8px;
         }}
         QMessageBox QLabel {{
             color: {text_color};
@@ -925,5 +943,96 @@ class MainWindow(QMainWindow):
         msg.resize(450, 400)
         
         msg.exec()
+
+    def show_advanced(self):
+        """Show the Advanced Settings dialog"""
+        from .advanced_settings_window import AdvancedSettingsWindow
+        
+        dialog = AdvancedSettingsWindow(parent=self, theme_manager=self.theme_manager)
+        result = dialog.exec()
+        
+        if result == QDialog.DialogCode.Accepted:
+            # Settings were saved, show confirmation
+            msg = QMessageBox(
+                QMessageBox.Icon.Information,
+                "Settings Saved",
+                "Advanced settings have been saved successfully.",
+                parent=self
+            )
+            msg.setWindowFlags(msg.windowFlags() | Qt.WindowType.FramelessWindowHint)
+            msg.setStyleSheet(self.theme_manager.get_dialog_styles())
+            msg.exec()
+    
+    def logout(self):
+        """Logout from the application and show login window"""
+        # Confirm logout
+        msg = QMessageBox(
+            QMessageBox.Icon.Question,
+            "Logout",
+            "Are you sure you want to logout?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            parent=self
+        )
+        msg.setWindowFlags(msg.windowFlags() | Qt.WindowType.FramelessWindowHint)
+        msg.setStyleSheet(self.theme_manager.get_dialog_styles())
+        msg.setDefaultButton(QMessageBox.StandardButton.No)
+        
+        if msg.exec() == QMessageBox.StandardButton.Yes:
+            # Stop any running conversions
+            if self.conversion_engine and self.conversion_engine.isRunning():
+                self.conversion_engine.stop_conversion()
+                self.conversion_engine.wait(1000)  # Wait up to 1 second
+            
+            # Clean up conversion engine
+            self.conversion_engine = None
+            
+            # Get the QApplication instance
+            from PyQt6.QtWidgets import QApplication
+            from PyQt6.QtCore import QTimer
+            app = QApplication.instance()
+            
+            # Prevent app from quitting when main window closes
+            app.setQuitOnLastWindowClosed(False)
+            
+            # Define function to show login window after main window closes
+            def show_login_after_close():
+                try:
+                    from client.gui.login_window_new import ModernLoginWindow
+                    login_window = ModernLoginWindow()
+                    
+                    # Store reference to prevent garbage collection
+                    app._login_window = login_window
+                    
+                    # Show login window modally
+                    result = login_window.exec()
+                    
+                    if result == QDialog.DialogCode.Accepted:
+                        # Login successful - create new main window
+                        is_trial = getattr(login_window, 'is_trial', False)
+                        
+                        # Use centralized initialization to ensure splash screen and tool checks run
+                        from client.main import initialize_main_window
+                        new_main_window = initialize_main_window(is_trial=is_trial)
+                        new_main_window.show()
+                        # Store reference to prevent garbage collection
+                        app._main_window = new_main_window
+                        # Re-enable quit on last window closed
+                        app.setQuitOnLastWindowClosed(True)
+                    else:
+                        # Login cancelled - exit application
+                        app.quit()
+                    
+                except Exception as e:
+                    print(f"Error showing login window: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # If login window fails, exit application
+                    app.quit()
+            
+            # Close main window
+            self.close()
+            
+            # Use QTimer to show login window after event loop processes the close
+            QTimer.singleShot(100, show_login_after_close)
 
 

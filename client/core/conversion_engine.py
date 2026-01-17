@@ -2301,6 +2301,25 @@ class ConversionEngine(QThread):
             width = clamp_resize_width(orig_w, int(width)) if width is not None else width
             stream = ffmpeg.filter(stream, 'scale', width, -1)
             
+        # Aspect Ratio Presets (Image)
+        preset_ratio = self.params.get('image_preset_ratio')
+        # Also check for Instagram preset for images
+        is_instagram = self.params.get('image_preset_social') == 'Instagram'
+        if is_instagram or preset_ratio:
+            target_ratio = preset_ratio or ('9:16' if is_instagram else None)
+            if target_ratio:
+                ratio_map = {
+                    '4:3': (1440, 1080),
+                    '1:1': (1080, 1080),
+                    '16:9': (1920, 1080),
+                    '9:16': (1080, 1920)
+                }
+                if target_ratio in ratio_map:
+                    tw, th = ratio_map[target_ratio]
+                    self.status_updated.emit(f"Applying image preset ratio: {target_ratio} ({tw}x{th})")
+                    stream = ffmpeg.filter(stream, 'scale', tw, th, force_original_aspect_ratio='decrease')
+                    stream = ffmpeg.filter(stream, 'pad', tw, th, '(ow-iw)/2', '(oh-ih)/2')
+            
         # Handle rotation (skip rotation when using longer edge resize unless explicitly toggled)
         rotation_angle = self.params.get('rotation_angle')
         # Skip rotation for longer edge mode UNLESS rotation is explicitly set to a real rotation value
@@ -2485,52 +2504,75 @@ class ConversionEngine(QThread):
             optimized_audio = self.params.get('_optimized_audio_bitrate')
             quality = self.params.get('quality')
             
-            # For WebM/VP9/AV1, we need to handle audio codec and format-specific parameters
-            if selected_codec in ['WebM (VP9, faster)', 'WebM (AV1, slower)']:
-                # WebM uses VP9/AV1 video codec and Opus audio codec
-                output_args['acodec'] = 'libopus'  # Use Opus audio codec for WebM
-                output_args['f'] = 'webm'          # WebM container format
-                
-                # Apply CRF quality - use optimized value if in Max Size mode
-                if optimized_crf is not None:
-                    output_args['crf'] = optimized_crf
-                    self.status_updated.emit(f"DEBUG: WebM CRF set to {optimized_crf} (max size optimized)")
-                elif quality is not None:
-                    crf_value = map_ui_quality_to_crf(quality, codec)
-                    output_args['crf'] = crf_value
-                    self.status_updated.emit(f"DEBUG: WebM CRF set to {crf_value} (quality: {quality})")
-                
-                # Apply optimized audio bitrate if in Max Size mode
-                if optimized_audio is not None:
-                    output_args['audio_bitrate'] = f'{optimized_audio}k'
-                    self.status_updated.emit(f"DEBUG: Audio bitrate set to {optimized_audio}k (max size optimized)")
-                
-                # Optimize AV1 speed
-                if codec == 'libaom-av1':
-                    output_args['cpu-used'] = 4
-                    self.status_updated.emit("DEBUG: Applied AV1 speed optimization (cpu-used=4)")
+            # Instagram Preset Overrides
+            is_instagram = self.params.get('video_preset_social') == 'Instagram'
+            if is_instagram:
+                self.status_updated.emit("Applying specialized Instagram export settings")
+                # Force H.264 for Instagram compatibility
+                output_args.update({
+                    'vcodec': 'libx264',
+                    'profile:v': 'high',
+                    'level:v': '4.2',
+                    'pix_fmt': 'yuv420p',
+                    'color_primaries': 'bt709',
+                    'color_trc': 'bt709',
+                    'colorspace': 'bt709',
+                    'acodec': 'aac',
+                    'ba': '128k', # Standard audio bitrate
+                    'r': '30',
+                    'g': '15',
+                    'b:v': '5000k',
+                    'maxrate:v': '8000k',
+                    'bufsize:v': '10000k',
+                    'f': 'mp4'
+                })
             else:
-                # For MP4 codecs, ensure MP4 format
-                output_args['f'] = 'mp4'
-                
-                # Optimize AV1 speed for MP4 container too
-                if codec == 'libaom-av1':
-                    output_args['cpu-used'] = 4
-                    self.status_updated.emit("DEBUG: Applied AV1 speed optimization (cpu-used=4)")
-                
-                # Apply CRF quality - use optimized value if in Max Size mode
-                if optimized_crf is not None:
-                    output_args['crf'] = optimized_crf
-                    self.status_updated.emit(f"DEBUG: MP4 CRF set to {optimized_crf} (max size optimized)")
-                elif quality is not None:
-                    crf_value = map_ui_quality_to_crf(quality, codec)
-                    output_args['crf'] = crf_value
-                    self.status_updated.emit(f"DEBUG: MP4 CRF set to {crf_value} (quality: {quality})")
-                
-                # Apply optimized audio bitrate if in Max Size mode
-                if optimized_audio is not None:
-                    output_args['audio_bitrate'] = f'{optimized_audio}k'
-                    self.status_updated.emit(f"DEBUG: Audio bitrate set to {optimized_audio}k (max size optimized)")
+                # For WebM/VP9/AV1, we need to handle audio codec and format-specific parameters
+                if selected_codec in ['WebM (VP9, faster)', 'WebM (AV1, slower)']:
+                    # WebM uses VP9/AV1 video codec and Opus audio codec
+                    output_args['acodec'] = 'libopus'  # Use Opus audio codec for WebM
+                    output_args['f'] = 'webm'          # WebM container format
+                    
+                    # Apply CRF quality - use optimized value if in Max Size mode
+                    if optimized_crf is not None:
+                        output_args['crf'] = optimized_crf
+                        self.status_updated.emit(f"DEBUG: WebM CRF set to {optimized_crf} (max size optimized)")
+                    elif quality is not None:
+                        crf_value = map_ui_quality_to_crf(quality, codec)
+                        output_args['crf'] = crf_value
+                        self.status_updated.emit(f"DEBUG: WebM CRF set to {crf_value} (quality: {quality})")
+                    
+                    # Apply optimized audio bitrate if in Max Size mode
+                    if optimized_audio is not None:
+                        output_args['audio_bitrate'] = f'{optimized_audio}k'
+                        self.status_updated.emit(f"DEBUG: Audio bitrate set to {optimized_audio}k (max size optimized)")
+                    
+                    # Optimize AV1 speed
+                    if codec == 'libaom-av1':
+                        output_args['cpu-used'] = 4
+                        self.status_updated.emit("DEBUG: Applied AV1 speed optimization (cpu-used=4)")
+                else:
+                    # For MP4 codecs, ensure MP4 format
+                    output_args['f'] = 'mp4'
+                    
+                    # Optimize AV1 speed for MP4 container too
+                    if codec == 'libaom-av1':
+                        output_args['cpu-used'] = 4
+                        self.status_updated.emit("DEBUG: Applied AV1 speed optimization (cpu-used=4)")
+                    
+                    # Apply CRF quality - use optimized value if in Max Size mode
+                    if optimized_crf is not None:
+                        output_args['crf'] = optimized_crf
+                        self.status_updated.emit(f"DEBUG: MP4 CRF set to {optimized_crf} (max size optimized)")
+                    elif quality is not None:
+                        crf_value = map_ui_quality_to_crf(quality, codec)
+                        output_args['crf'] = crf_value
+                        self.status_updated.emit(f"DEBUG: MP4 CRF set to {crf_value} (quality: {quality})")
+                    
+                    # Apply optimized audio bitrate if in Max Size mode
+                    if optimized_audio is not None:
+                        output_args['audio_bitrate'] = f'{optimized_audio}k'
+                        self.status_updated.emit(f"DEBUG: Audio bitrate set to {optimized_audio}k (max size optimized)")
                 
             # Frame rate (always use original as per user request)
             # fps = self.params.get('fps', 'Keep Original')
@@ -2544,6 +2586,29 @@ class ConversionEngine(QThread):
                 scale_h = f'trunc(ih*{max_size_scale}/2)*2'
                 video_stream = ffmpeg.filter(video_stream, 'scale', scale_w, scale_h)
                 self.status_updated.emit(f"DEBUG: Applied max size resolution scale: {int(max_size_scale * 100)}%")
+            
+            # Aspect Ratio Presets (Social or Manual)
+            preset_ratio = self.params.get('video_preset_ratio')
+            if is_instagram or preset_ratio:
+                # Default Instagram to 9:16 if no ratio selected
+                target_ratio = preset_ratio or ('9:16' if is_instagram else None)
+                
+                if target_ratio:
+                    ratio_map = {
+                        '4:3': (1440, 1080),
+                        '1:1': (1080, 1080),
+                        '16:9': (1920, 1080),
+                        '9:16': (1080, 1920)
+                    }
+                    if target_ratio in ratio_map:
+                        tw, th = ratio_map[target_ratio]
+                        self.status_updated.emit(f"Applying preset ratio: {target_ratio} ({tw}x{th})")
+                        # Scale to fit inside target dimensions, then pad
+                        # We use even dimensions to avoid codec issues
+                        video_stream = video_stream.filter('scale', tw, th, force_original_aspect_ratio='decrease')
+                        video_stream = video_stream.filter('pad', tw, th, '(ow-iw)/2', '(oh-ih)/2')
+                        # Disable other scaling as this takes precedence
+                        self.params['scale'] = False
             
             # Scaling
             if self.params.get('scale', False):
@@ -2797,6 +2862,24 @@ class ConversionEngine(QThread):
                 input_stream = ffmpeg.filter(input_stream, 'scale', scale_w, scale_h)
                 # Ensure even dimensions
                 input_stream = ffmpeg.filter(input_stream, 'scale', 'trunc(iw/2)*2', 'trunc(ih/2)*2')
+            
+            # Aspect Ratio Presets (GIF)
+            preset_ratio = self.params.get('gif_preset_ratio')
+            is_instagram = self.params.get('gif_preset_social') == 'Instagram'
+            if is_instagram or preset_ratio:
+                target_ratio = preset_ratio or ('9:16' if is_instagram else None)
+                if target_ratio:
+                    ratio_map = {
+                        '4:3': (1440, 1080),
+                        '1:1': (1080, 1080),
+                        '16:9': (1920, 1080),
+                        '9:16': (1080, 1920)
+                    }
+                    if target_ratio in ratio_map:
+                        tw, th = ratio_map[target_ratio]
+                        self.status_updated.emit(f"Applying GIF preset ratio: {target_ratio} ({tw}x{th})")
+                        input_stream = ffmpeg.filter(input_stream, 'scale', tw, th, force_original_aspect_ratio='decrease')
+                        input_stream = ffmpeg.filter(input_stream, 'pad', tw, th, '(ow-iw)/2', '(oh-ih)/2')
             
             # Rotation (skip rotation when using longer edge resize unless explicitly toggled)
             rotation_angle = self.params.get('rotation')

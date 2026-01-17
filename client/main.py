@@ -116,13 +116,211 @@ class ToolLoadingWindow(QWidget):
         # Position in bottom right corner with small padding
         padding = 8
         version_label.setGeometry(
+            # Move slightly higher to make room for progress bar
             width - 150,
-            height - 25,
+            height - 35,
             145,
             20
         )
         
-        print(f"✅ Splash window created: {width}x{height}")
+        # Create indeterminate progress bar
+        # Create dual progress bar container
+        # Increased height to accommodate two bars stacked
+        self.progress_bar = ProgressBarWidget(self)
+        self.progress_bar.setGeometry(0, height - 8, width, 8)
+        self.progress_bar.show()
+        self.progress_bar.raise_()  # Ensure it is on top of the label
+        
+        # Start "loading" the main progress
+        self.progress_bar.start_main_loading(total_time_ms=2500)
+
+class ProgressBarWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet("background-color: transparent;")
+        
+        # Blue bar (top) state
+        self.blue_progress = 0.0  # 0.0 to 1.0
+        self.blue_duration = 300  # Initial duration in ms
+        self.blue_start_time = 0
+        
+        # Green bar (bottom) state
+        self.green_progress = 0.0 # 0.0 to 1.0
+        self.green_duration = 3.0 # Default total load time
+        self.green_start_time = 0
+        
+        # Import random for blue bar timing
+        import random
+        self.random = random
+        
+        # Timer for animation
+        from PyQt6.QtCore import QTimer
+        import time
+        self.time = time
+        self.anim_timer = QTimer(self)
+        self.anim_timer.timeout.connect(self._animate_progress)
+        self.anim_timer.start(16)  # ~60fps
+        
+        self.blue_start_time = self.time.time()
+        
+    def start_main_loading(self, total_time_ms=2500):
+        """Start the main green progress bar loading"""
+        self.green_duration = total_time_ms / 1000.0
+        self.green_start_time = self.time.time()
+        
+    def _animate_progress(self):
+        current_time = self.time.time()
+        
+        # Update Blue Bar (Rapid cyclic loading with random duration)
+        # "random time 300-500ms" as requested
+        elapsed_blue = (current_time - self.blue_start_time) * 1000
+        if elapsed_blue >= self.blue_duration:
+            # Cycle complete, reset with new random duration
+            self.blue_start_time = current_time
+            self.blue_duration = self.random.randint(300, 500)
+            self.blue_progress = 0.0
+        else:
+            self.blue_progress = elapsed_blue / self.blue_duration
+            
+        # Update Green Bar (Overall loading)
+        if self.green_start_time > 0:
+            elapsed_green = current_time - self.green_start_time
+            self.green_progress = min(1.0, elapsed_green / self.green_duration)
+            
+        self.update()
+        
+    def paintEvent(self, event):
+        from PyQt6.QtGui import QPainter, QColor
+        painter = QPainter(self)
+        painter.setPen(Qt.PenStyle.NoPen)
+        
+        width = self.width()
+        height = self.height()
+        bar_height = height // 2
+        
+        # Draw Green Bar (Bottom, overall progress)
+        painter.setBrush(QColor("#4CAF50"))  # Green
+        green_width = int(width * self.green_progress)
+        painter.drawRect(0, bar_height, green_width, bar_height)
+        
+        # Draw Blue Bar (Top, rapid indeterminate)
+        # "Shooting" effect (left to right fill)
+        painter.setBrush(QColor("#2196F3"))  # Blue
+        blue_width = int(width * self.blue_progress)
+        painter.drawRect(0, 0, blue_width, bar_height)
+
+
+
+
+# ----------------------------------------------------------------------------
+# Background Worker for Startup Operations
+# ----------------------------------------------------------------------------
+from PyQt6.QtCore import QThread
+class StartupWorker(QThread):
+    def __init__(self):
+        super().__init__()
+        self.success = False
+        
+    def run(self):
+        try:
+            # Initialize and validate FFmpeg settings
+            from client.utils.ffmpeg_settings import get_ffmpeg_settings
+            ffmpeg_settings = get_ffmpeg_settings()
+            
+            # Validate FFmpeg on startup and apply settings
+            # This is the heavy blocking part
+            if not ffmpeg_settings.validate_on_startup():
+                print("Warning: FFmpeg validation failed, using bundled FFmpeg")
+            
+            # Apply the saved FFmpeg settings
+            ffmpeg_settings.apply_settings()
+            
+            # Check for FFmpeg (Critical for Lite versions)
+            if not os.environ.get('FFMPEG_BINARY'):
+                # Fallback to system FFmpeg
+                system_ffmpeg = shutil.which('ffmpeg')
+                if system_ffmpeg:
+                    os.environ['FFMPEG_BINARY'] = system_ffmpeg
+                    if CRASH_REPORTING_AVAILABLE:
+                        log_info(f"Using system FFmpeg: {system_ffmpeg}", "startup")
+            
+            self.success = True
+            
+        except Exception as e:
+            print(f"Startup validation error: {e}")
+            self.success = False
+
+# ----------------------------------------------------------------------------
+
+def initialize_main_window(is_trial=False):
+    """
+    Initialize the main window with splash screen and tool validation.
+    This logic is extracted so it can be reused during re-login.
+    
+    Args:
+        is_trial (bool): Whether to start in trial mode
+        
+    Returns:
+        MainWindow: The initialized main window (not yet shown)
+    """
+    # Show a lightweight splash while bundled tools initialize
+    version_text = get_version()
+    splash = ToolLoadingWindow(version_text)
+    splash.show()
+    splash.raise_()
+    splash.activateWindow()
+    
+    # Force the splash to render
+    splash.update()
+    splash.repaint()
+    for _ in range(5):
+        QApplication.processEvents()
+    
+    print(f"🪟 Splash visible: {splash.isVisible()}")
+    
+    # Record start time
+    splash_start_time = time.time()
+    
+    # ------------------------------------------------------------------------
+    # Start background validation
+    # ------------------------------------------------------------------------
+    worker = StartupWorker()
+    worker.start()
+    
+    # Wait for worker to complete while keeping UI responsive
+    while worker.isRunning():
+        QApplication.processEvents()
+        time.sleep(0.01)  # Yield CPU (10ms)
+        
+    # Check worker results (if we need to act on failure, we can check worker.success)
+    # But current logic just logs warnings and falls back, which is handled inside wrapper/settings
+    
+    # ------------------------------------------------------------------------
+    
+    # Create main window in background while splash is still visible
+    print("🔨 Creating main window in background...")
+    window = MainWindow(is_trial=is_trial)
+    set_dark_title_bar(window)  # Apply dark title bar to main window
+    QApplication.processEvents()  # Process events during window creation
+    print("✅ Main window created")
+    
+    # Ensure splash displays for minimum 2 seconds (non-blocking wait)
+    MIN_SPLASH_TIME = 2.0
+    elapsed = time.time() - splash_start_time
+    if elapsed < MIN_SPLASH_TIME:
+        remaining_ms = int((MIN_SPLASH_TIME - elapsed) * 1000)
+        print(f"⏳ Waiting {remaining_ms}ms more for splash (non-blocking)...")
+        # Non-blocking wait - keeps UI responsive
+        end_time = time.time() + (MIN_SPLASH_TIME - elapsed)
+        while time.time() < end_time:
+            QApplication.processEvents()
+            time.sleep(0.016)  # ~60fps update rate
+    
+    # Close splash
+    splash.close()
+    print("✅ Splash closed, returning main window")
+    
+    return window
 
 
 def main():
@@ -223,68 +421,12 @@ def main():
         if CRASH_REPORTING_AVAILABLE:
             log_info("Launching main application", "startup")
 
-        # Show a lightweight splash while bundled tools initialize
-        version_text = get_version()
-        splash = ToolLoadingWindow(version_text)
-        splash.show()
-        splash.raise_()
-        splash.activateWindow()
-        
-        # Force the splash to render
-        splash.update()
-        splash.repaint()
-        for _ in range(5):
-            QApplication.processEvents()
-        
-        print(f"🪟 Splash visible: {splash.isVisible()}")
-        
-        # Record start time
-        splash_start_time = time.time()
-        
-        # Initialize bundled tools with splash visible
-        init_bundled_tools()
-        QApplication.processEvents()  # Keep splash responsive
-        
-        # Check for FFmpeg (Critical for Lite versions)
-        if not os.environ.get('FFMPEG_BINARY'):
-            # Fallback to system FFmpeg
-            system_ffmpeg = shutil.which('ffmpeg')
-            if system_ffmpeg:
-                os.environ['FFMPEG_BINARY'] = system_ffmpeg
-                if CRASH_REPORTING_AVAILABLE:
-                    log_info(f"Using system FFmpeg: {system_ffmpeg}", "startup")
-            else:
-                # No FFmpeg found
-                splash.close()
-                QMessageBox.critical(None, "FFmpeg Missing", 
-                    "FFmpeg was not found.\n\n"
-                    "This version requires FFmpeg to be installed and available in your system PATH.\n"
-                    "Please install FFmpeg or use the Full version.")
-                sys.exit(1)
-        
-        # Create main window in background while splash is still visible
-        print("🔨 Creating main window in background...")
-        window = MainWindow(is_trial=is_trial)
-        set_dark_title_bar(window)  # Apply dark title bar to main window
-        QApplication.processEvents()  # Process events during window creation
-        print("✅ Main window created")
-        
-        # Ensure splash displays for minimum 2 seconds (non-blocking wait)
-        MIN_SPLASH_TIME = 2.0
-        elapsed = time.time() - splash_start_time
-        if elapsed < MIN_SPLASH_TIME:
-            remaining_ms = int((MIN_SPLASH_TIME - elapsed) * 1000)
-            print(f"⏳ Waiting {remaining_ms}ms more for splash (non-blocking)...")
-            # Non-blocking wait - keeps UI responsive
-            end_time = time.time() + (MIN_SPLASH_TIME - elapsed)
-            while time.time() < end_time:
-                QApplication.processEvents()
-                time.sleep(0.016)  # ~60fps update rate
-        
-        # Close splash and show main window simultaneously
-        splash.close()
+        # Use extracted initialization function
+        window = initialize_main_window(is_trial)
         window.show()
-        print("✅ Splash closed, main window displayed")
+        
+        if CRASH_REPORTING_AVAILABLE:
+            log_info("Main application window displayed", "startup")
         
         if CRASH_REPORTING_AVAILABLE:
             log_info("Main application window displayed", "startup")

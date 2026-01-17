@@ -375,6 +375,25 @@ class DragDropArea(QWidget):
         # Initialize with cleared state
         self.file_list_widget.clear()
         
+    def resizeEvent(self, event):
+        """Update placeholder size when the widget is resized"""
+        super().resizeEvent(event)
+        if hasattr(self, 'file_list_widget') and self.file_list_widget.count() == 1:
+            item = self.file_list_widget.item(0)
+            if item and item.data(Qt.ItemDataRole.UserRole) == "PLACEHOLDER":
+                # Set a timer to update size after layout settles
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(10, self.update_placeholder_size)
+
+    def update_placeholder_size(self):
+        """Specifically update the placeholder item size to match viewport"""
+        if hasattr(self, 'file_list_widget') and self.file_list_widget.count() == 1:
+            item = self.file_list_widget.item(0)
+            if item and item.data(Qt.ItemDataRole.UserRole) == "PLACEHOLDER":
+                viewport_size = self.file_list_widget.viewport().size()
+                if viewport_size.height() > 50:
+                    item.setSizeHint(viewport_size)
+
     def dragEnterEvent(self, event: QDragEnterEvent):
         """Handle drag enter events"""
         if event.mimeData().hasUrls():
@@ -579,6 +598,26 @@ class DragDropArea(QWidget):
                 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
                     background: none;
                 }
+                QScrollBar:horizontal {
+                    background: #1a1a1a;
+                    height: 10px;
+                    border: none;
+                    border-radius: 5px;
+                }
+                QScrollBar::handle:horizontal {
+                    background: #404040;
+                    border-radius: 5px;
+                    min-width: 30px;
+                }
+                QScrollBar::handle:horizontal:hover {
+                    background: #505050;
+                }
+                QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                    width: 0px;
+                }
+                QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+                    background: none;
+                }
             """
         else:
             return """
@@ -622,6 +661,26 @@ class DragDropArea(QWidget):
                     height: 0px;
                 }
                 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                    background: none;
+                }
+                QScrollBar:horizontal {
+                    background: #f0f0f0;
+                    height: 10px;
+                    border: none;
+                    border-radius: 5px;
+                }
+                QScrollBar::handle:horizontal {
+                    background: #c0c0c0;
+                    border-radius: 5px;
+                    min-width: 30px;
+                }
+                QScrollBar::handle:horizontal:hover {
+                    background: #a0a0a0;
+                }
+                QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                    width: 0px;
+                }
+                QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
                     background: none;
                 }
             """
@@ -881,11 +940,14 @@ class DragDropArea(QWidget):
             wrapper.setStyleSheet("background-color: transparent; border: none;")
             wrapper_layout = QVBoxLayout(wrapper)
             wrapper_layout.setContentsMargins(0, 0, 0, 0)
-            wrapper_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            # Align center vertically, but let it stretch horizontally
+            wrapper_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
             
             # Create small centered container with transparent background
             container = QWidget()
-            container.setFixedSize(200, 200)
+            # Remove fixed size to adapt to width
+            from PyQt6.QtWidgets import QSizePolicy
+            container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             container.setStyleSheet("background-color: transparent;")
             container_layout = QVBoxLayout(container)
             container_layout.setContentsMargins(0, 0, 0, 0)
@@ -925,7 +987,7 @@ class DragDropArea(QWidget):
             text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             container_layout.addWidget(text_label, alignment=Qt.AlignmentFlag.AlignCenter)
             
-            wrapper_layout.addWidget(container, alignment=Qt.AlignmentFlag.AlignCenter)
+            wrapper_layout.addWidget(container)
             
             # Get current style and completely override item styling
             if self.theme_manager:

@@ -20,6 +20,7 @@ from PyQt6.QtSvgWidgets import QSvgWidget
 from PyQt6.QtSvg import QSvgRenderer
 from client.utils.font_manager import AppFonts, FONT_FAMILY
 from client.utils.server_health import ServerHealthChecker
+from client.utils.resource_path import get_resource_path
 from client.version import APP_NAME
 import requests
 
@@ -357,7 +358,7 @@ class StoreButton(QPushButton):
     
     def reload_icon(self):
         """Reload SVG icon with current theme colors"""
-        icon_path = os.path.join(os.path.dirname(__file__), "../assets/icons", self.svg_filename)
+        icon_path = get_resource_path(f"client/assets/icons/{self.svg_filename}")
         if os.path.exists(icon_path):
             # Determine fill color based on dark mode
             dark_mode = is_dark_mode()
@@ -2579,10 +2580,7 @@ class ModernLoginWindow(QDialog):
         """Load and start playing the login animation video using OpenCV"""
         try:
             # Get path to the animation file
-            animation_path = os.path.join(
-                os.path.dirname(__file__), 
-                '..', 'assets', 'animations', 'login_anim.mp4'
-            )
+            animation_path = get_resource_path('client/assets/animations/login_anim.mp4')
             
             animation_path = os.path.abspath(animation_path)
             

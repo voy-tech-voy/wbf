@@ -4,6 +4,7 @@ from PyQt6.QtGui import QPixmap, QIcon, QPainter, QColor
 import os
 
 from client.gui.custom_widgets import ModeButtonsWidget
+from client.utils.resource_path import get_resource_path
 
 class CommandGroup(QGroupBox):
     """
@@ -18,9 +19,6 @@ class CommandGroup(QGroupBox):
         super().__init__(parent)
         self.setTitle("") # We use a custom header
         
-        # DEBUG: Show QGroupBox boundaries with red border - COMMENTED OUT
-        # self.setStyleSheet("QGroupBox { border: 2px solid red; background-color: rgba(255, 0, 0, 30); }")
-
         # Set size policy
         if size_policy:
             self.setSizePolicy(self.sizePolicy().horizontalPolicy(), size_policy)
@@ -34,10 +32,11 @@ class CommandGroup(QGroupBox):
 
         # 1. Header Section (Icon + Title) - STICKS TO TOP EDGE
         self.header_widget = QWidget()
-        # self.header_widget.setStyleSheet("border: 2px solid yellow;")  # DEBUG: Disabled
+        
         self.header_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.header_layout = QHBoxLayout(self.header_widget)
-        self.header_layout.setContentsMargins(12, 5, 12, 5) # Consistent padding
+        # Match the requested padding: 12px top/bottom, 12px left/right
+        self.header_layout.setContentsMargins(12, 12, 12, 12) 
         self.header_layout.setSpacing(8)
         
         # Icon - 24x24 centered on placeholder position
@@ -46,8 +45,11 @@ class CommandGroup(QGroupBox):
         self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         if icon_path:
+            # Resolve absolute path for the bundle
+            abs_icon_path = get_resource_path(icon_path)
             # Load SVG icon from assets (SVG preferred for crisp rendering)
-            svg_path = icon_path.replace('.png', '.svg')
+            svg_path = abs_icon_path.replace('.png', '.svg')
+            
             if os.path.exists(svg_path):
                 # Use QIcon for high-quality SVG rendering
                 icon = QIcon(svg_path)
@@ -63,8 +65,8 @@ class CommandGroup(QGroupBox):
                 painter.fillRect(grey_pixmap.rect(), QColor(136, 136, 136))  # #888888
                 painter.end()
                 self.icon_label.setPixmap(grey_pixmap)
-            elif os.path.exists(icon_path):
-                pixmap = QPixmap(icon_path)
+            elif os.path.exists(abs_icon_path):
+                pixmap = QPixmap(abs_icon_path)
                 if not pixmap.isNull():
                     scaled_pixmap = pixmap.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
                     self.icon_label.setPixmap(scaled_pixmap)
@@ -77,7 +79,6 @@ class CommandGroup(QGroupBox):
             self.icon_label.setVisible(False)
 
         # Title
-
         self.title_label = QLabel(title)
         self.title_label.setStyleSheet("font-weight: bold; background-color: transparent;")
         
@@ -99,12 +100,9 @@ class CommandGroup(QGroupBox):
 
         # 3. Content Section (QFormLayout)
         self.content_widget = QWidget()
-        # Using QFormLayout as requested for settings content
         self.content_layout = QFormLayout(self.content_widget)
         self.content_layout.setContentsMargins(12, 5, 12, 12)
-        self.content_layout.setVerticalSpacing(8)
-        # DEBUG: Blue tint to show content area - COMMENTED OUT
-        # self.content_widget.setStyleSheet("background-color: rgba(0, 0, 255, 50);")
+        self.content_layout.setVerticalSpacing(14)
         self.main_layout.addWidget(self.content_widget)
 
     def add_mode_buttons(self, default_mode="Max Size"):
@@ -156,8 +154,11 @@ class CommandGroup(QGroupBox):
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         if icon_path:
+            # Resolve absolute path for the bundle
+            abs_icon_path = get_resource_path(icon_path)
             # Prefer SVG over PNG for crisp rendering
-            svg_path = icon_path.replace('.png', '.svg')
+            svg_path = abs_icon_path.replace('.png', '.svg')
+            
             if os.path.exists(svg_path):
                 # Use QIcon for high-quality SVG rendering
                 icon = QIcon(svg_path)
@@ -173,8 +174,8 @@ class CommandGroup(QGroupBox):
                 painter.fillRect(grey_pixmap.rect(), QColor(136, 136, 136))  # #888888
                 painter.end()
                 icon_label.setPixmap(grey_pixmap)
-            elif os.path.exists(icon_path):
-                pixmap = QPixmap(icon_path)
+            elif os.path.exists(abs_icon_path):
+                pixmap = QPixmap(abs_icon_path)
                 if not pixmap.isNull():
                     scaled_pixmap = pixmap.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
                     icon_label.setPixmap(scaled_pixmap)
