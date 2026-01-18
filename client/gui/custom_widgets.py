@@ -7,9 +7,11 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, 
     QSpinBox, QLineEdit, QGroupBox, QFormLayout, QCheckBox, QSizePolicy, QApplication, QButtonGroup
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QRect, QPoint
-from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QPalette
+from PyQt6.QtCore import Qt, pyqtSignal, QRect, QPoint, QSize
+from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QPalette, QIcon, QPixmap
 from client.utils.font_manager import AppFonts
+from client.utils.resource_path import get_resource_path
+import os
 
 
 class ModeButtonsWidget(QWidget):
@@ -21,48 +23,80 @@ class ModeButtonsWidget(QWidget):
     # Signal emitted when mode changes: emits "Max Size" or "Manual"
     modeChanged = pyqtSignal(str)
     
-    def __init__(self, default_mode="Manual", parent=None):
+    def __init__(self, default_mode="Manual", orientation=Qt.Orientation.Horizontal, parent=None):
         """
         Args:
             default_mode: "Max Size", "Presets", or "Manual"
+            orientation: Qt.Orientation.Horizontal or Qt.Orientation.Vertical
             parent: Parent widget
         """
         super().__init__(parent)
+        self.orientation = orientation
         
-        # DEBUG: Magenta border to show mode buttons container - COMMENTED OUT
-        # self.setStyleSheet("border: 2px solid magenta;")
-        
-        # Set up layout with consistent padding
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 0, 12, 0)
-        layout.setSpacing(8)
+        # Set up layout based on orientation
+        if orientation == Qt.Orientation.Vertical:
+            layout = QVBoxLayout(self)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(10)
+            button_size = QSize(44, 44)
+        else:
+            layout = QHBoxLayout(self)
+            layout.setContentsMargins(12, 0, 12, 0)
+            layout.setSpacing(8)
+            button_size = None
         
         # Button style - consistent across all instances
-        button_style = (
-            "QPushButton { padding: 6px 14px; border-radius: 6px; border: 1px solid #555555; }"
-            "QPushButton:checked { background-color: #4CAF50; color: white; border-color: #43a047; }"
-        )
+        if orientation == Qt.Orientation.Vertical:
+            # Square buttons for vertical orientation - reflected horizontally
+            # (Rounded on left, straight on right where it touches the panel)
+            self.button_style_base = (
+                "QPushButton { padding: 4px; border-top-left-radius: 8px; border-bottom-left-radius: 8px; "
+                "border-top-right-radius: 0px; border-bottom-right-radius: 0px; "
+                "border: 1px solid #555555; border-right: none; background-color: transparent; }"
+                "QPushButton:hover { background-color: rgba(255, 255, 255, 0.1); }"
+                "QPushButton:checked { background-color: #4CAF50; color: white; border-color: #43a047; }"
+            )
+        else:
+            self.button_style_base = (
+                "QPushButton { padding: 8px; border-radius: 6px; border: 1px solid #555555; background-color: transparent; }"
+                "QPushButton:hover { background-color: rgba(255, 255, 255, 0.1); }"
+                "QPushButton:checked { background-color: #4CAF50; color: white; border-color: #43a047; }"
+            )
+        
+        icon_size = QSize(32, 32)  # Increased from 26x26
         
         # Max Size button
-        self.max_size_btn = QPushButton("Max Size")
+        self.max_size_btn = QPushButton()
+        self.max_size_btn.setIcon(QIcon(get_resource_path("client/assets/icons/target_icon.svg")))
+        self.max_size_btn.setIconSize(icon_size)
         self.max_size_btn.setCheckable(True)
-        self.max_size_btn.setStyleSheet(button_style)
-        self.max_size_btn.setToolTip("Auto-optimize to fit target file size")
-        self.max_size_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.max_size_btn.setToolTip("Max Size: Auto-optimize to fit target file size")
+        if button_size:
+            self.max_size_btn.setFixedSize(button_size)
+        else:
+            self.max_size_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
         # Presets button
-        self.presets_btn = QPushButton("Presets")
+        self.presets_btn = QPushButton()
+        self.presets_btn.setIcon(QIcon(get_resource_path("client/assets/icons/presets.svg")))
+        self.presets_btn.setIconSize(icon_size)
         self.presets_btn.setCheckable(True)
-        self.presets_btn.setStyleSheet(button_style)
-        self.presets_btn.setToolTip("Select from social media and common aspect ratio presets")
-        self.presets_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.presets_btn.setToolTip("Presets: Select from social media and common aspect ratio presets")
+        if button_size:
+            self.presets_btn.setFixedSize(button_size)
+        else:
+            self.presets_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
         # Manual button
-        self.manual_btn = QPushButton("Manual")
+        self.manual_btn = QPushButton()
+        self.manual_btn.setIcon(QIcon(get_resource_path("client/assets/icons/settings.svg")))
+        self.manual_btn.setIconSize(icon_size)
         self.manual_btn.setCheckable(True)
-        self.manual_btn.setStyleSheet(button_style)
-        self.manual_btn.setToolTip("Set quality settings yourself")
-        self.manual_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.manual_btn.setToolTip("Manual: Set quality settings yourself")
+        if button_size:
+            self.manual_btn.setFixedSize(button_size)
+        else:
+            self.manual_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
         # Button group for exclusive selection
         self.button_group = QButtonGroup(self)
@@ -95,8 +129,78 @@ class ModeButtonsWidget(QWidget):
         layout.addWidget(self.presets_btn)
         layout.addWidget(self.manual_btn)
         
-        # Fixed height for consistency
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        if orientation == Qt.Orientation.Vertical:
+            layout.addStretch()
+        
+        # Initial theme application
+        from client.utils.theme_utils import is_dark_mode
+        self.update_theme(is_dark_mode())
+        
+        # Fixed size for consistency
+        if orientation == Qt.Orientation.Vertical:
+            self.setFixedWidth(44)
+            self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        else:
+            self.setFixedHeight(42)
+            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    
+    def _get_tinted_icon(self, icon_path, color):
+        """Load SVG and apply tint color"""
+        abs_path = get_resource_path(icon_path)
+        if not os.path.exists(abs_path):
+            return QIcon()
+            
+        pixmap = QPixmap(abs_path)
+        if pixmap.isNull():
+            return QIcon()
+            
+        scaled_pixmap = pixmap.scaled(20, 20, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        tinted_pixmap = QPixmap(scaled_pixmap.size())
+        tinted_pixmap.fill(Qt.GlobalColor.transparent)
+        
+        painter = QPainter(tinted_pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.drawPixmap(0, 0, scaled_pixmap)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        painter.fillRect(tinted_pixmap.rect(), color)
+        painter.end()
+        
+        return QIcon(tinted_pixmap)
+
+    def update_theme(self, is_dark):
+        """Update button icons and styles based on theme"""
+        icon_color = QColor(255, 255, 255) if is_dark else QColor(0, 0, 0) # White or Pure Black
+        
+        self.max_size_btn.setIcon(self._get_tinted_icon("client/assets/icons/target_icon.svg", icon_color))
+        self.presets_btn.setIcon(self._get_tinted_icon("client/assets/icons/presets.svg", icon_color))
+        self.manual_btn.setIcon(self._get_tinted_icon("client/assets/icons/settings.svg", icon_color))
+        
+        if is_dark:
+            bg_hover = "rgba(255, 255, 255, 0.1)"
+            border_color = "#555555"
+        else:
+            bg_hover = "rgba(0, 0, 0, 0.05)"
+            border_color = "#cccccc"
+
+        if self.orientation == Qt.Orientation.Vertical:
+            button_style = (
+                f"QPushButton {{ padding: 4px; border-top-left-radius: 8px; border-bottom-left-radius: 8px; "
+                f"border-top-right-radius: 0px; border-bottom-right-radius: 0px; "
+                f"border: 1px solid {border_color}; border-right: none; background-color: transparent; }}"
+                f"QPushButton:hover {{ background-color: {bg_hover}; }}"
+                "QPushButton:checked { background-color: #4CAF50; color: white; border-color: #43a047; }"
+            )
+        else:
+            button_style = (
+                f"QPushButton {{ padding: 8px; border-radius: 6px; border: 1px solid {border_color}; background-color: transparent; }}"
+                f"QPushButton:hover {{ background-color: {bg_hover}; }}"
+                "QPushButton:checked { background-color: #4CAF50; color: white; border-color: #43a047; }"
+            )
+        
+        self.max_size_btn.setStyleSheet(button_style)
+        self.presets_btn.setStyleSheet(button_style)
+        self.manual_btn.setStyleSheet(button_style)
     
     def get_mode(self):
         """Get current mode: 'Max Size', 'Presets', or 'Manual'"""
@@ -115,6 +219,149 @@ class ModeButtonsWidget(QWidget):
         else:
             self.manual_btn.setChecked(True)
 
+
+class SideButtonGroup(QWidget):
+    """
+    General-purpose vertical side button group with custom icons.
+    Used for mode selection and transform/time options on the left sidebar.
+    Each button can have a custom icon, tooltip, and identifier.
+    """
+    
+    # Signal emitted when selection changes: emits the button identifier
+    selectionChanged = pyqtSignal(str)
+    
+    def __init__(self, buttons_config, default_selection=None, parent=None):
+        """
+        Args:
+            buttons_config: List of dicts with keys: 'id', 'icon_path', 'tooltip'
+                Example: [
+                    {'id': 'resize', 'icon_path': 'client/assets/icons/scale.png', 'tooltip': 'Resize Options'},
+                    {'id': 'rotate', 'icon_path': 'client/assets/icons/rotate.svg', 'tooltip': 'Rotation Options'},
+                ]
+            default_selection: ID of the button to select by default (first button if None)
+            parent: Parent widget
+        """
+        super().__init__(parent)
+        self.buttons = {}  # Store buttons by ID
+        self.buttons_config = buttons_config
+        
+        # Vertical layout with proper spacing
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 8, 0, 8)  # Top/bottom padding for breathing room
+        layout.setSpacing(8)  # Spacing between buttons
+        
+        # Button group for exclusive selection
+        self.button_group = QButtonGroup(self)
+        self.button_group.setExclusive(True)
+        
+        # Create buttons from config
+        for config in buttons_config:
+            btn = QPushButton()
+            btn.setCheckable(True)
+            btn.setFixedSize(QSize(44, 44))
+            btn.setIconSize(QSize(24, 24))
+            btn.setToolTip(config.get('tooltip', ''))
+            
+            # Store button by ID
+            btn_id = config.get('id', '')
+            self.buttons[btn_id] = btn
+            btn.setProperty('button_id', btn_id)
+            
+            # Add to button group and layout
+            self.button_group.addButton(btn)
+            layout.addWidget(btn)
+            
+            # Connect toggled signal
+            btn.toggled.connect(lambda checked, bid=btn_id: checked and self.selectionChanged.emit(bid))
+        
+        layout.addStretch()
+        
+        # Set default selection
+        if default_selection and default_selection in self.buttons:
+            self.buttons[default_selection].setChecked(True)
+        elif buttons_config:
+            first_id = buttons_config[0].get('id', '')
+            if first_id in self.buttons:
+                self.buttons[first_id].setChecked(True)
+        
+        # Fixed width for sidebar
+        self.setFixedWidth(44)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        
+        # Apply initial theme
+        from client.utils.theme_utils import is_dark_mode
+        self.update_theme(is_dark_mode())
+    
+    def _get_tinted_icon(self, icon_path, color):
+        """Create a tinted icon from the given path"""
+        abs_path = get_resource_path(icon_path)
+        if not os.path.exists(abs_path):
+            return QIcon()
+        
+        pixmap = QPixmap(abs_path)
+        if pixmap.isNull():
+            return QIcon()
+        
+        scaled_pixmap = pixmap.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        tinted_pixmap = QPixmap(scaled_pixmap.size())
+        tinted_pixmap.fill(Qt.GlobalColor.transparent)
+        
+        painter = QPainter(tinted_pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.drawPixmap(0, 0, scaled_pixmap)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        painter.fillRect(tinted_pixmap.rect(), color)
+        painter.end()
+        
+        return QIcon(tinted_pixmap)
+    
+    def update_theme(self, is_dark):
+        """Update button icons and styles based on theme"""
+        icon_color = QColor(255, 255, 255) if is_dark else QColor(0, 0, 0)
+        
+        # Update icons for all buttons
+        for config in self.buttons_config:
+            btn_id = config.get('id', '')
+            icon_path = config.get('icon_path', '')
+            if btn_id in self.buttons and icon_path:
+                self.buttons[btn_id].setIcon(self._get_tinted_icon(icon_path, icon_color))
+        
+        # Theme-aware styling
+        if is_dark:
+            bg_hover = "rgba(255, 255, 255, 0.1)"
+            border_color = "#555555"
+        else:
+            bg_hover = "rgba(0, 0, 0, 0.05)"
+            border_color = "#cccccc"
+        
+        button_style = (
+            f"QPushButton {{ padding: 6px; border-top-left-radius: 8px; border-bottom-left-radius: 8px; "
+            f"border-top-right-radius: 0px; border-bottom-right-radius: 0px; "
+            f"border: 1px solid {border_color}; border-right: none; background-color: transparent; }}"
+            f"QPushButton:hover {{ background-color: {bg_hover}; }}"
+            "QPushButton:checked { background-color: #2196F3; color: white; border-color: #1e88e5; }"
+        )
+        
+        for btn in self.buttons.values():
+            btn.setStyleSheet(button_style)
+    
+    def get_selection(self):
+        """Get the currently selected button ID"""
+        for btn_id, btn in self.buttons.items():
+            if btn.isChecked():
+                return btn_id
+        return None
+    
+    def set_selection(self, btn_id):
+        """Set the selected button by ID"""
+        if btn_id in self.buttons:
+            self.buttons[btn_id].setChecked(True)
+    
+    def set_button_visible(self, btn_id, visible):
+        """Show or hide a specific button"""
+        if btn_id in self.buttons:
+            self.buttons[btn_id].setVisible(visible)
 
 class CustomComboBox(QComboBox):
     """
@@ -265,13 +512,15 @@ class CustomComboBox(QComboBox):
 
 
 class SpinBoxLineEdit(QLineEdit):
-    """Custom QLineEdit for spinbox that intercepts Enter/Escape keys before default handling"""
+    """Custom QLineEdit for spinbox that intercepts Enter/Escape keys and handles suffix painting"""
     
     enterPressed = pyqtSignal()
     escapePressed = pyqtSignal()
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.suffix_text = ""
+        self.suffix_color = None
     
     def keyPressEvent(self, event):
         """Intercept Enter/Escape before default handling"""
@@ -289,6 +538,39 @@ class SpinBoxLineEdit(QLineEdit):
         
         # For all other keys, use default handling
         super().keyPressEvent(event)
+        
+    def paintEvent(self, event):
+        """Paint the suffix text after the content if set"""
+        super().paintEvent(event)
+        
+        if self.suffix_text and self.text():
+            from PyQt6.QtGui import QPainter, QColor
+            
+            painter = QPainter(self)
+            
+            # Use specified color or default to grey
+            color = self.suffix_color if self.suffix_color else QColor("#888888")
+            painter.setPen(color)
+            
+            # Simple calculation for Left-aligned text
+            fm = self.fontMetrics()
+            text_width = fm.horizontalAdvance(self.text())
+            
+            # Get content rect allowing for internal margins
+            cr = self.contentsRect()
+             # Adjust x based on text_width plus a small padding
+            x_pos = cr.left() + text_width + 3
+            
+            # Vertical centering logic for baseline
+            # Using rect based drawing is safer for vertical alignment
+            # But specific coordinate is fine
+            y_pos = (self.height() + fm.ascent() - fm.descent()) // 2
+            
+            # Only draw if it vaguely fits
+            if x_pos < self.width():
+                 painter.drawText(x_pos, y_pos, self.suffix_text)
+            
+            painter.end()
 
 
 class DragOverlay(QWidget):
@@ -388,6 +670,7 @@ class CustomTargetSizeSpinBox(QWidget):
         
         # Use custom lineEdit that intercepts Enter/Escape
         self.custom_line_edit = SpinBoxLineEdit()
+        self.custom_line_edit.suffix_text = " MB" # Set the visual suffix
         self.spinbox.setLineEdit(self.custom_line_edit)
         
         # Connect signals from custom lineEdit
@@ -735,6 +1018,12 @@ class CustomTargetSizeSpinBox(QWidget):
         self.custom_drag_cursor = self._create_custom_cursor(is_dark=is_dark)
         self.spinbox.lineEdit().setCursor(self.custom_drag_cursor)
         self.drag_overlay.setCursor(self.custom_drag_cursor)
+        
+        # Update suffix color
+        from PyQt6.QtGui import QColor
+        suffix_color = QColor("#aaaaaa") if is_dark else QColor("#888888")
+        self.custom_line_edit.suffix_color = suffix_color
+        
         self._apply_custom_style(is_dark)
     
     def _apply_custom_style(self, is_dark):

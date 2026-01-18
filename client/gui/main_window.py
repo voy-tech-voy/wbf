@@ -19,7 +19,7 @@ from .command_panel import CommandPanel
 from .theme_manager import ThemeManager
 from client.core.conversion_engine import ConversionEngine, ToolChecker
 from client.utils.trial_manager import TrialManager
-from client.utils.font_manager import AppFonts
+from client.utils.font_manager import AppFonts, FONT_FAMILY_APP_NAME
 from client.utils.resource_path import get_app_icon_path, get_resource_path
 from client.version import APP_NAME, AUTHOR
 
@@ -63,13 +63,13 @@ class MainWindow(QMainWindow):
         self.is_trial = is_trial
         
         # Development mode detection
-        DEVELOPMENT_MODE = getattr(sys, '_called_from_test', False) or __debug__ and not getattr(sys, 'frozen', False)
+        self.DEVELOPMENT_MODE = getattr(sys, '_called_from_test', False) or __debug__ and not getattr(sys, 'frozen', False)
         
         title = APP_NAME
         if self.is_trial:
-            title += " [TRIAL MODE]"
-        if DEVELOPMENT_MODE:
-            title += " [DEV MODE]"
+            title += " [TRIAL]"  # Shortened for title bar consistency
+        if self.DEVELOPMENT_MODE:
+            title += " [DEV]"
             
         self.setWindowTitle(title)
         
@@ -82,7 +82,7 @@ class MainWindow(QMainWindow):
         if self.is_trial:
             self.trial_manager = TrialManager()
             # Auto-reset trial in development mode
-            if DEVELOPMENT_MODE:
+            if self.DEVELOPMENT_MODE:
                 print("[DEV] Resetting trial usage...")
                 self.trial_manager.reset_trial_usage()
         
@@ -175,9 +175,21 @@ class MainWindow(QMainWindow):
             print(f"Could not load logo: {e}")
         
         # Title label (clickable)
-        title_label = ClickableLabel(self.windowTitle())
-        title_label.setFont(AppFonts.get_title_font())
-        title_label.setStyleSheet("color: #ffffff; font-weight: bold; border: none; padding: 0px; margin: 0px; text-decoration: none;")
+        from client.utils.font_manager import FONT_FAMILY
+        
+        # Explicitly apply App Name font via HTML to ensure it works
+        title_text = f'<span style="font-family: \'{FONT_FAMILY_APP_NAME}\'; font-weight: bold;">{APP_NAME}</span>'
+        
+        if self.is_trial:
+            title_text += f'&nbsp;&nbsp;<span style="font-family: \'{FONT_FAMILY}\'; font-weight: normal; font-size: 10pt;">[ TRIAL ]</span>'
+        if self.DEVELOPMENT_MODE:
+            title_text += f'&nbsp;&nbsp;<span style="font-family: \'{FONT_FAMILY}\'; font-weight: normal; font-size: 10pt;">[ DEV ]</span>'
+            
+        title_label = ClickableLabel(title_text)
+        title_label.setTextFormat(Qt.TextFormat.RichText)
+        # setFont is still useful as fallback or base sizing
+        title_label.setFont(AppFonts.get_app_name_font())
+        title_label.setStyleSheet("color: #ffffff; border: none; padding: 0px; margin: 0px; text-decoration: none;")
         title_label.setCursor(Qt.CursorShape.PointingHandCursor)
         title_layout.addWidget(title_label)
         
@@ -740,7 +752,7 @@ class MainWindow(QMainWindow):
         self.title_bar.setStyleSheet(title_bar_style)
         
         # Title label (clean styling without decoration)
-        self.title_label.setStyleSheet(f"color: {text_color}; font-weight: bold; border: none; padding: 0px; margin: 0px; text-decoration: none; outline: none;")
+        self.title_label.setStyleSheet(f"color: {text_color}; border: none; padding: 0px; margin: 0px; text-decoration: none; outline: none;")
         
         # Update theme toggle button icon color
         if hasattr(self, 'sun_moon_svg_path'):
@@ -875,7 +887,7 @@ class MainWindow(QMainWindow):
         
         about_text = f"""
         <div style="text-align: center; color: {text_color};">
-        <h2 style="color: {accent_color}; margin-bottom: 10px;">{APP_NAME}</h2>
+        <h2 style="font-family: '{FONT_FAMILY_APP_NAME}'; color: {accent_color}; margin-bottom: 10px;">{APP_NAME}</h2>
         <p><b>Version:</b> {version}</p>
         <p><b>Author:</b> <span style="color: {text_color};">{AUTHOR}</span></p>
         </div>

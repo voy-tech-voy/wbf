@@ -7,19 +7,20 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QLabel, QPushButton, QComboBox, QSpinBox, QDoubleSpinBox, QCheckBox, QLineEdit,
     QGroupBox, QFormLayout, QTabWidget, QTextEdit, QSlider, QRadioButton, QSizePolicy, QButtonGroup,
-    QProgressBar, QFrame
+    QProgressBar, QFrame, QStackedWidget
 )
-from client.utils.font_manager import AppFonts, FONT_FAMILY, FONT_SIZE_BUTTON
+from client.utils.font_manager import AppFonts, FONT_FAMILY, FONT_FAMILY_APP_NAME, FONT_SIZE_BUTTON
 from client.gui.custom_widgets import (
     TimeRangeSlider, ResizeFolder, RotationOptions, CustomComboBox, 
     CustomTargetSizeSpinBox, ModeButtonsWidget, SocialPresetButton, RatioPresetButton,
-    SquareButtonRow
+    SquareButtonRow, SideButtonGroup
 )
 from client.gui.custom_spinbox import CustomSpinBox
 from client.gui.command_group import CommandGroup
 from PyQt6.QtCore import Qt, pyqtSignal, QRect, QPoint, QTimer, QSize
-from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QIcon
+from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QIcon, QPixmap
 from client.utils.resource_path import get_resource_path
+from client.utils.theme_utils import is_dark_mode
 import json
 import winreg
 
@@ -63,15 +64,17 @@ class DynamicFontButton(QPushButton):
     def update_stylesheet(self):
         """Build stylesheet with CURRENT font values from font_manager"""
         # Get current font values
-        font_family = FONT_FAMILY
+        font_family = FONT_FAMILY_APP_NAME  # Use App Name font as requested
         font_size = FONT_SIZE_BUTTON
         
         # Build stylesheet with font properties included
-        if self.text() == "Stop Conversion":
+        # Check against new text values
+        text_upper = self.text().upper()
+        if "STOP" in text_upper:
             stylesheet = (
                 f"QPushButton {{ "
                 f"{self.base_style['stop_normal']} "
-                f"font-family: {font_family}; "
+                f"font-family: '{font_family}'; "
                 f"font-size: {font_size}px; "
                 f"}} "
                 f"QPushButton:hover {{ {self.base_style['stop_hover']} }} "
@@ -82,7 +85,7 @@ class DynamicFontButton(QPushButton):
             stylesheet = (
                 f"QPushButton {{ "
                 f"{self.base_style['normal']} "
-                f"font-family: {font_family}; "
+                f"font-family: '{font_family}'; "
                 f"font-size: {font_size}px; "
                 f"}} "
                 f"QPushButton:hover {{ {self.base_style['hover']} }} "
@@ -95,16 +98,6 @@ class DynamicFontButton(QPushButton):
             self._cached_stylesheet = stylesheet
             self.setStyleSheet(stylesheet)
 
-def is_dark_mode():
-    """Check if Windows is in dark mode"""
-    try:
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, 
-                           r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
-        apps_use_light_theme, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
-        winreg.CloseKey(key)
-        return apps_use_light_theme == 0
-    except Exception:
-        return False
 
 # Determine background color based on theme
 BG_COLOR = "#2b2b2b" if is_dark_mode() else "#ffffff"
@@ -303,6 +296,57 @@ class CommandPanel(QWidget):
         
         return group, content_layout
         
+    def _get_tinted_icon(self, icon_path, color):
+        """Create a tinted QIcon from an SVG path"""
+        abs_path = get_resource_path(icon_path)
+        
+        # Use QIcon to render SVG at target size (32x32) for sharpness
+        source_icon = QIcon(abs_path)
+        pixmap = source_icon.pixmap(32, 32)
+        
+        if pixmap.isNull():
+            return QIcon()
+            
+        tinted_pixmap = QPixmap(pixmap.size())
+        tinted_pixmap.fill(Qt.GlobalColor.transparent)
+        
+        painter = QPainter(tinted_pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.drawPixmap(0, 0, pixmap)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        painter.fillRect(tinted_pixmap.rect(), color)
+        painter.end()
+        
+        return QIcon(tinted_pixmap)
+
+    def update_tab_icons(self):
+        """Update tab icons based on selection state and theme"""
+        # Determine colors
+        if self.is_dark_mode:
+            normal_color = QColor(255, 255, 255) # White in dark mode
+        else:
+            normal_color = QColor(0, 0, 0) # Black in light mode
+        
+        selected_color = QColor(255, 255, 255) # Always white when selected (green bg)
+        
+        # Icon paths
+        icons = [
+            "client/assets/icons/pic_icon2.svg",
+            "client/assets/icons/vid_icon2.svg",
+            "client/assets/icons/loop_icon2.svg"
+        ]
+        
+        current_index = self.tabs.currentIndex()
+        
+        for i, icon_path in enumerate(icons):
+            if i == current_index:
+                color = selected_color
+            else:
+                color = normal_color
+                
+            self.tabs.setTabIcon(i, self._get_tinted_icon(icon_path, color))
+
     def update_theme(self, is_dark):
         """Update theme-dependent styles"""
         self.is_dark_mode = is_dark
@@ -370,12 +414,100 @@ class CommandPanel(QWidget):
         preset_buttons = self.findChildren((SocialPresetButton, RatioPresetButton))
         for btn in preset_buttons:
             btn.update_theme(is_dark)
+
+        # Update global side buttons
+        if hasattr(self, 'mode_buttons'):
+            self.mode_buttons.update_theme(is_dark)
+        if hasattr(self, 'transform_buttons'):
+            self.transform_buttons.update_theme(is_dark)
+        
+        # Update output side button icon and styling
+        if hasattr(self, 'output_side_btn'):
+            color = QColor("white") if is_dark else QColor("black")
+            self.output_side_btn.setIcon(self._get_tinted_icon("client/assets/icons/output.svg", color))
+            
+            # Update button styling for theme
+            bg_color = "#3c3c3c" if is_dark else "#f0f0f0"
+            hover_bg = "#4a4a4a" if is_dark else "#e8e8e8"
+            
+            self.output_side_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {bg_color};
+                    border: none;
+                    border-top-left-radius: 12px;
+                    border-top-right-radius: 0px;
+                    border-bottom-right-radius: 0px;
+                    border-bottom-left-radius: 12px;
+                    padding: 4px;
+                }}
+                QPushButton:hover {{
+                    background-color: {hover_bg};
+                }}
+            """)
+        
+        # Update output folder styling (square upper-right corner)
+        if hasattr(self, 'output_group'):
+            bg_color = "#3c3c3c" if is_dark else "#ffffff"
+            border_color = "none" if is_dark else "2px solid #cccccc"
+            self.output_group.setStyleSheet(f"""
+                QGroupBox {{
+                    background-color: {bg_color};
+                    border: {border_color};
+                    border-radius: 8px 0px 8px 8px;
+                    margin: 0px;
+                    padding: 0px;
+                }}
+            """)
+
+        # Tab icons remain at original size (no tinting)
+
+        # Update tab bar colors based on theme
+        tab_bg = "transparent"
+        tab_text = "#ffffff" if is_dark else "#000000"
+        tab_border = "#555555" if is_dark else "#cccccc"
+        
+        self.tabs.setStyleSheet(f"""
+            QTabBar::tab {{
+                padding: 8px 16px;
+                min-height: 36px;
+                margin: 2px;
+                color: {tab_text};
+                background-color: {tab_bg};
+                border: 1px solid rgba(128, 128, 128, 0.3);
+                border-radius: 6px;
+            }}
+            QTabBar::tab:selected {{
+                background-color: #00AA00;
+                color: white;
+                font-weight: bold;
+                border: 1px solid #008800;
+            }}
+            QTabBar::tab:hover:!selected {{
+                background-color: rgba(0, 170, 0, 0.2);
+            }}
+            QTabWidget::pane {{
+                border: none;
+                background-color: transparent;
+            }}
+        """)
+
+        # Update all ModeButtonsWidget and SideButtonGroup instances
+        mode_buttons = self.findChildren(ModeButtonsWidget)
+        for mb in mode_buttons:
+            mb.update_theme(is_dark)
+        
+        side_buttons = self.findChildren(SideButtonGroup)
+        for sb in side_buttons:
+            sb.update_theme(is_dark)
         
         # Update nested output name styling
         self._update_nested_output_style()
         
         # Update custom output directory field styling
         self._update_custom_output_style()
+        
+        # Update tab icons (tinting)
+        self.update_tab_icons()
     
     def _update_nested_output_style(self):
         """Update nested output name field styling based on enabled state and theme"""
@@ -430,111 +562,214 @@ class CommandPanel(QWidget):
     def setup_ui(self):
         """Setup the command panel interface"""
         layout = QVBoxLayout(self)
-        layout.setSpacing(0)  # We'll manually add spacers
-        layout.setContentsMargins(0, 0, 0, 0)  # Remove default margins
+        layout.setSpacing(0)
+        layout.setContentsMargins(0, 0, 0, 0)
         
-        # DEBUG: Color the main layout margins - COMMENTED OUT
-        # self.setStyleSheet("""
-        #     QWidget#CommandPanel { 
-        #         background-color: rgba(255, 0, 255, 100); 
-        #         border: 3px solid magenta; 
-        #     }
-        # """)
-        # self.setObjectName("CommandPanel")
+        # --- Row 1: Functionality (Sidebar Top + Tabs) ---
+        row1_widget = QWidget()
+        row1_layout = QHBoxLayout(row1_widget)
+        row1_layout.setContentsMargins(-12, 0, 0, 0) # Negative margin for sidebar protrusion
+        row1_layout.setSpacing(0)
         
-        # Create tabbed interface for different conversion types
+        # 1. Sidebar Top (Mode Buttons + Stack)
+        sidebar_top = QWidget()
+        sidebar_top.setFixedWidth(44) # Match Mode Buttons width
+        sb_top_layout = QVBoxLayout(sidebar_top)
+        sb_top_layout.setContentsMargins(0, 100, 0, 0) # 100px top margin
+        sb_top_layout.setSpacing(12)
+        
+        # Mode Buttons
+        self.mode_buttons = ModeButtonsWidget(default_mode="Max Size", orientation=Qt.Orientation.Vertical)
+        self.mode_buttons.modeChanged.connect(self._on_global_mode_changed)
+        sb_top_layout.addWidget(self.mode_buttons)
+        
+        # Spacer to push stack to bottom (aligned with Transform folder)
+        sb_top_layout.addStretch()
+        
+        # Side Buttons Stack
+        self.side_buttons_stack = QStackedWidget()
+        self.side_buttons_stack.setFixedHeight(198) # Match height of Transform folder
+        sb_top_layout.addWidget(self.side_buttons_stack)
+        
+        # Allow sidebar to be transparent/pass-through
+        sidebar_top.setStyleSheet("background: transparent;")
+        sidebar_top.raise_()
+        
+        row1_layout.addWidget(sidebar_top)
+        
+        # 2. Tabs (Right side of Row 1)
         self.tabs = QTabWidget()
+        self.tabs.setContentsMargins(0, 0, 0, 0)
+        row1_layout.addWidget(self.tabs)
         
-        # Image conversion tab
-        self.image_tab = self.create_image_tab()
-        self.tabs.addTab(self.image_tab, QIcon(get_resource_path("client/assets/icons/pic_icon.svg")), "")
+        layout.addWidget(row1_widget, 1)  # Stretch factor 1: expand to fill vertical space
         
-        # Video conversion tab
-        self.video_tab = self.create_video_tab()
-        self.tabs.addTab(self.video_tab, QIcon(get_resource_path("client/assets/icons/vid_icon.svg")), "")
-        
-        # GIF conversion tab
-        self.gif_tab = self.create_gif_tab()
-        self.tabs.addTab(self.gif_tab, QIcon(get_resource_path("client/assets/icons/loop_icon.svg")), "")
-        
-        # Select Video tab by default
-        self.tabs.setCurrentIndex(1)
-        
-        # Initialize UI state to match default mode selections
-        self.on_image_size_mode_changed("Max Size")
-        self.on_video_size_mode_changed("Max Size")
-        self.on_gif_size_mode_changed("Max Size")
-        
-        # Make tab buttons fill available width
-        tab_bar = self.tabs.tabBar()
-        tab_bar.setExpanding(True)  # Key setting to expand tabs
-        tab_bar.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        
-        from PyQt6.QtWidgets import QTabBar
-        tab_bar.setUsesScrollButtons(False)
-        self.tabs.setDocumentMode(False)  # Keep False to allow expanding
-        
-        # Force the tab bar to fill the width
-        tab_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        tab_bar.setMinimumWidth(0)  # Allow shrinking
-        
-        # Initial width update will happen in showEvent
-        
-        self.tabs.setIconSize(QSize(28, 28))
-        
-        # Stylesheet for tabs
-        self.tabs.setStyleSheet("""
-            QTabBar::tab {
-                padding: 6px 12px 10px 12px;
-                min-height: 36px;
-                margin-bottom: 0px;
-                border-bottom: 2px solid #888888;
-            }
-            QTabBar::tab:selected {
-                border-bottom: 2px solid #00AA00;
-                margin-bottom: 0px;
-            }
-            QTabWidget::pane {
-                border: none;
-                margin-top: 0px;
-                padding-top: 2px;
-                padding-bottom: 0px;
-                margin-bottom: 0px;
-                background-color: transparent;
-            }
-        """)
-        # DEBUG: Tab colors - COMMENTED OUT
-        # QTabBar::tab { background-color: rgba(0, 255, 0, 100); }
-        # QTabBar::tab:selected { background-color: rgba(0, 255, 0, 200); }
-        # QTabWidget::pane { background-color: rgba(255, 128, 0, 150); }
-        # QTabWidget { border: 3px solid cyan; background-color: rgba(255, 255, 0, 200); }
-        
-        layout.addWidget(self.tabs)
-        
-        # DEBUG: Visual marker for tabs widget bottom edge
+        # DEBUG: Visual marker for tabs widget bottom edge (Between Rows)
         tabs_end_marker = QWidget()
-        tabs_end_marker.setFixedHeight(0)  # Set to 0
-        tabs_end_marker.setStyleSheet("background-color: rgba(255, 0, 0, 255);")  # Bright red line
-        tabs_end_label = QLabel("TABS-WIDGET-END", tabs_end_marker)
+        tabs_end_marker.setFixedHeight(0)
+        tabs_end_marker.setStyleSheet("background-color: rgba(255, 0, 0, 255);")
+        tabs_end_label = QLabel("TABS-END", tabs_end_marker)
         tabs_end_label.setStyleSheet("color: white; font-size: 9px; font-weight: bold;")
         tabs_end_label.move(2, -6)
         layout.addWidget(tabs_end_marker)
         
-        # DEBUG: Gap between tabs and output folder
+        # Gap between Transform folder and Output folder
         layout.addWidget(self._create_debug_spacer(8))
         
-        # Output settings
-        output_group = self.create_output_settings()
-        layout.addWidget(output_group)
+        # --- Row 2: Output (Sidebar Bottom + Output Group) ---
+        row2_widget = QWidget()
+        row2_layout = QHBoxLayout(row2_widget)
+        row2_layout.setContentsMargins(-12, 0, 0, 0) # Match indentation
+        row2_layout.setSpacing(0)
+        
+        # 3. Sidebar Bottom (Output Icon)
+        sidebar_bottom = QWidget()
+        sidebar_bottom.setFixedWidth(44)
+        sb_bot_layout = QVBoxLayout(sidebar_bottom)
+        # No top margin - aligns with top of Output Group
+        sb_bot_layout.setContentsMargins(0, 0, 0, 0) 
+        sb_bot_layout.setSpacing(0)
+        
+        # Output Icon
+        self.output_side_btn = QPushButton()
+        self.output_side_btn.setFixedSize(44, 44)
+        self.output_side_btn.setIconSize(QSize(32, 32))  # Increased from 24x24
+        color = QColor("white") if self.is_dark_mode else QColor("black")
+        self.output_side_btn.setIcon(self._get_tinted_icon("client/assets/icons/output.svg", color))
+        self.output_side_btn.setToolTip("Output Settings")
+        
+        # Custom styling: no border, rounded left corners, square right corners
+        bg_color = "#3c3c3c" if self.is_dark_mode else "#f0f0f0"
+        hover_bg = "#4a4a4a" if self.is_dark_mode else "#e8e8e8"
+        
+        self.output_side_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {bg_color};
+                border: none;
+                border-top-left-radius: 12px;
+                border-top-right-radius: 0px;
+                border-bottom-right-radius: 0px;
+                border-bottom-left-radius: 12px;
+                padding: 4px;
+            }}
+            QPushButton:hover {{
+                background-color: {hover_bg};
+            }}
+        """)
+        
+        sb_bot_layout.addWidget(self.output_side_btn)
+        sb_bot_layout.addStretch()
+        
+        row2_layout.addWidget(sidebar_bottom)
+        
+        # 4. Output Group (Right side of Row 2)
+        self.output_group = self.create_output_settings()
+        row2_layout.addWidget(self.output_group)
+        
+        layout.addWidget(row2_widget)
+        
+        # --- Content Initialization ---
+        
+        # Image conversion tab
+        self.image_tab = self.create_image_tab()
+        self.tabs.addTab(self.image_tab, QIcon(get_resource_path("client/assets/icons/pic_icon.svg")), "")
+        # Add side buttons to global stack
+        if hasattr(self, 'image_side_buttons'):
+            self.side_buttons_stack.addWidget(self.image_side_buttons)
+        
+        # Video conversion tab
+        self.video_tab = self.create_video_tab()
+        self.tabs.addTab(self.video_tab, QIcon(get_resource_path("client/assets/icons/vid_icon.svg")), "")
+        if hasattr(self, 'video_side_buttons'):
+            self.side_buttons_stack.addWidget(self.video_side_buttons)
+        
+        # GIF conversion tab
+        self.gif_tab = self.create_gif_tab()
+        self.tabs.addTab(self.gif_tab, QIcon(get_resource_path("client/assets/icons/loop_icon2.svg")), "")
+        if hasattr(self, 'gif_side_buttons'):
+            self.side_buttons_stack.addWidget(self.gif_side_buttons)
+        
+        # Select Video tab by default
+        self.tabs.setCurrentIndex(1)
+        self.side_buttons_stack.setCurrentIndex(1)
+        
+        # Initialize UI state
+        self.on_image_size_mode_changed("Max Size")
+        self.on_video_size_mode_changed("Max Size")
+        self.on_gif_size_mode_changed("Max Size")
+        self.mode_buttons.set_mode("Max Size")
+        
+        self.tab_modes = {
+            0: "Max Size",
+            1: "Max Size",
+            2: "Max Size"
+        }
+        
+        # Initialize transform visibility
+        self._update_image_transform_visibility('resize')
+        self._update_video_transform_visibility('resize')
+        self._update_gif_transform_visibility('resize')
+        
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+        
+        # Tab Bar Styling
+        tab_bar = self.tabs.tabBar()
+        tab_bar.setExpanding(True)
+        tab_bar.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        
+        from PyQt6.QtWidgets import QTabBar
+        tab_bar.setUsesScrollButtons(False)
+        self.tabs.setDocumentMode(False)
+        tab_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        tab_bar.setMinimumWidth(0)
+        self.tabs.setIconSize(QSize(36, 36))
+        
+        self.tabs.setStyleSheet("""
+            QTabBar::tab {
+                padding: 8px 16px;
+                min-height: 36px;
+                margin: 2px;
+                background-color: transparent;
+                border: none;
+                border-radius: 6px;
+            }
+            QTabBar::tab:selected {
+                background-color: #00AA00;
+                color: white;
+                font-weight: bold;
+            }
+            QTabBar::tab:hover:!selected {
+                background-color: rgba(0, 170, 0, 0.2);
+            }
+            QTabWidget::pane {
+                border: none;
+                background-color: transparent;
+            }
+        """)
         
         # DEBUG: Gap between output folder and convert button
         layout.addWidget(self._create_debug_spacer(9))
         
-        # Control buttons
-        button_layout = self.create_control_buttons()
-        layout.addLayout(button_layout)
+        # Control buttons (Row 3 - Aligned with content)
+        # Create a container to match the sidebar+content structure
+        control_row = QWidget()
+        control_row_layout = QHBoxLayout(control_row)
+        control_row_layout.setContentsMargins(-12, 0, 0, 0) # Match indentation of Row 2
+        control_row_layout.setSpacing(0)
         
-        # Install event filter on all input fields for Enter key handling
+        # Invisible spacer for sidebar alignment
+        sidebar_spacer = QWidget()
+        sidebar_spacer.setFixedWidth(44)
+        control_row_layout.addWidget(sidebar_spacer)
+        
+        # Add button layout
+        button_layout = self.create_control_buttons()
+        # Ensure button fills width
+        control_row_layout.addLayout(button_layout)
+        
+        layout.addWidget(control_row)
+        
+        # Install event filter
         self._install_input_field_filters()
         
     def _install_input_field_filters(self):
@@ -598,6 +833,77 @@ class CommandPanel(QWidget):
             focus_widget.clearFocus()
         tab_bar = self.tabs.tabBar()
         tab_bar.setFocus()
+
+    def _create_transform_side_buttons(self, tab_type):
+        """Create side buttons for transform group (Resize, Rotate, Time)"""
+        btns_config = [
+            {'id': 'resize', 'icon_path': 'client/assets/icons/scale.png', 'tooltip': 'Resize Options'},
+            {'id': 'rotate', 'icon_path': 'client/assets/icons/rotate.svg', 'tooltip': 'Rotation Options'}
+        ]
+        
+        # Add Time button only for Video and GIF
+        if tab_type in ['video', 'gif']:
+            btns_config.append({'id': 'time', 'icon_path': 'client/assets/icons/time.png', 'tooltip': 'Time Options'})
+            
+        group = SideButtonGroup(btns_config, default_selection='resize')
+        # Align buttons 15px below the top edge of the stack (which matches Transform folder top)
+        if group.layout():
+            group.layout().setContentsMargins(0, 15, 0, 0)
+        return group
+
+    def _on_global_mode_changed(self, mode):
+        """Handle mode change from the global vertical buttons"""
+        current_tab = self.tabs.currentIndex()
+        self.tab_modes[current_tab] = mode
+        
+        # Dispatch to specific logic
+        if current_tab == 0:
+            self.on_image_size_mode_changed(mode)
+        elif current_tab == 1:
+            self.on_video_size_mode_changed(mode)
+        elif current_tab == 2:
+            self.on_gif_size_mode_changed(mode)
+            
+        # Update stack visibility
+        visible = (mode != "Presets")
+        if hasattr(self, 'side_buttons_stack'):
+            self.side_buttons_stack.setVisible(visible)
+
+    def _on_tab_changed(self, index):
+        """Sync global mode buttons when tab changes"""
+        mode = self.tab_modes.get(index, "Max Size")
+        self.mode_buttons.blockSignals(True)
+        self.mode_buttons.set_mode(mode)
+        self.mode_buttons.blockSignals(False)
+        
+        # Sync side buttons stack
+        if hasattr(self, 'side_buttons_stack'):
+            self.side_buttons_stack.setCurrentIndex(index)
+        
+        # Update visibility based on mode
+        is_presets = (mode == "Presets")
+        if hasattr(self, 'side_buttons_stack'):
+            self.side_buttons_stack.setVisible(not is_presets)
+            
+        # Update tab icons
+        self.update_tab_icons()
+
+    def _update_image_transform_visibility(self, mode):
+        """Show/hide image transform sections based on selected mode"""
+        self.image_resize_container.setVisible(mode == 'resize')
+        self.image_rotate_container.setVisible(mode == 'rotate')
+
+    def _update_video_transform_visibility(self, mode):
+        """Show/hide video transform/time sections based on selected mode"""
+        self.video_resize_container.setVisible(mode == 'resize')
+        self.video_rotate_container.setVisible(mode == 'rotate')
+        self.video_time_container.setVisible(mode == 'time')
+
+    def _update_gif_transform_visibility(self, mode):
+        """Show/hide GIF transform/time sections based on selected mode"""
+        self.gif_resize_container.setVisible(mode == 'resize')
+        self.gif_rotate_container.setVisible(mode == 'rotate')
+        self.gif_time_container.setVisible(mode == 'time')
 
     def mousePressEvent(self, event):
         """Clicking empty canvas should clear focus and focus active tab"""
@@ -721,31 +1027,44 @@ class CommandPanel(QWidget):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)  # We'll manually add spacers
+        layout.setSpacing(8)
         
-        # Settings group (Mode + Format + Quality)
-        format_group = CommandGroup("Settings", "client/assets/icons/settings.png")
+        # ============================================================
+        # SETTINGS FOLDER (Top) - with invisible spacer to align with transform
+        # ============================================================
+        settings_row = QWidget()
+        settings_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        settings_h = QHBoxLayout(settings_row)
+        settings_h.setContentsMargins(0, 0, 0, 0)
+        settings_h.setSpacing(0)
         
-        # Add mode buttons
-        self.image_mode_buttons = format_group.add_mode_buttons(default_mode="Max Size")
-        self.image_mode_buttons.modeChanged.connect(self.on_image_size_mode_changed)
-        self.image_size_mode_value = "manual"
+        # Settings CommandGroup - expands to fill remaining width
+        self.image_format_group = CommandGroup("")
+        self.image_format_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.image_format_group.get_content_layout().setContentsMargins(16, 16, 16, 16)
+        self.image_format_group.setMinimumHeight(180)
+        settings_h.addWidget(self.image_format_group, 1)  # stretch=1 ensures it fills
         
-        # Target Size - FIRST (shown in Max Size mode)
+        layout.addWidget(settings_row)
+        
+        # Removed local mode buttons, now handled globally
+        self.image_size_mode_value = "max_size"
+        
+        # Target Size - FIRST
         self.image_max_size_spinbox = CustomTargetSizeSpinBox(
             default_value=0.2,
             on_enter_callback=self._focus_active_tab
         )
-        self.image_max_size_spinbox.setRange(0.01, 100.0)  # Allow smaller sizes for images
-        self.image_max_size_spinbox.setDecimals(2)  # Two decimal places for precision
-        self.image_max_size_spinbox.setSensitivity(0.0025)  # Lower sensitivity (40px = 0.1 value change)
+        self.image_max_size_spinbox.setRange(0.01, 100.0)
+        self.image_max_size_spinbox.setDecimals(2)
+        self.image_max_size_spinbox.setSensitivity(0.0025)
         self.image_max_size_spinbox.setToolTip("Target maximum file size in megabytes")
         self.image_max_size_spinbox.setVisible(False)
-        self.image_max_size_label = QLabel("Max Size (MB)")
+        self.image_max_size_label = QLabel("Max Size")
         self.image_max_size_label.setVisible(False)
-        format_group.add_row(self.image_max_size_label, self.image_max_size_spinbox)
-
-        # Auto-resize checkbox (for Max Size mode)
+        self.image_format_group.add_row(self.image_max_size_label, self.image_max_size_spinbox)
+        
+        # Auto-resize checkbox
         self.image_auto_resize_checkbox = QCheckBox("Auto-resize")
         self.image_auto_resize_checkbox.setChecked(True)
         self.image_auto_resize_checkbox.setStyleSheet(TOGGLE_STYLE)
@@ -753,19 +1072,19 @@ class CommandPanel(QWidget):
             "Change the resolution in pixels (width×height) to match desired file size in MB."
         )
         self.image_auto_resize_checkbox.setVisible(False)
-        format_group.add_row(self.image_auto_resize_checkbox)
+        self.image_format_group.add_row(self.image_auto_resize_checkbox)
         
-        # Format dropdown - SECOND
+        # Format dropdown
         self.image_format = CustomComboBox()
         self.image_format.addItems(["WebP", "JPG", "PNG", "TIFF", "BMP"])
         self.image_format_label = QLabel("Format")
-        format_group.add_row(self.image_format_label, self.image_format)
+        self.image_format_group.add_row(self.image_format_label, self.image_format)
 
-        # Multiple qualities option - THIRD
+        # Multiple qualities option
         self.multiple_qualities = QCheckBox("Multiple qualities")
         self.multiple_qualities.toggled.connect(self.toggle_quality_mode)
         self.multiple_qualities.setStyleSheet(TOGGLE_STYLE)
-        format_group.add_row(self.multiple_qualities)
+        self.image_format_group.add_row(self.multiple_qualities)
         
         # Quality settings
         self.image_quality = QSlider(Qt.Orientation.Horizontal)
@@ -778,71 +1097,102 @@ class CommandPanel(QWidget):
         quality_layout.addWidget(self.image_quality)
         quality_layout.addWidget(self.image_quality_label)
         self.image_quality_row_label = QLabel("Quality")
-        format_group.add_row(self.image_quality_row_label, quality_layout)
+        self.image_format_group.add_row(self.image_quality_row_label, quality_layout)
         
-        # Quality variants input (hidden by default)
+        # Quality variants input
         self.quality_variants = QLineEdit()
         self.quality_variants.setPlaceholderText("e.g., 40, 60, 80, 95")
         self.quality_variants.setText("40, 60, 80, 95")
         self.quality_variants.setVisible(False)
         self.quality_variants_label = QLabel("Quality variants")
         self.quality_variants_label.setVisible(False)
-        format_group.add_row(self.quality_variants_label, self.quality_variants)
+        self.image_format_group.add_row(self.quality_variants_label, self.quality_variants)
         
-        layout.addWidget(format_group)
-        
-        # Presets section (initially hidden)
+        # Add presets section to group
         self.image_presets_section = self._create_presets_section("image")
-        format_group.add_row(self.image_presets_section)
+        self.image_format_group.add_row(self.image_presets_section)
+
+        # ============================================================
+        # TRANSFORM FOLDER (Bottom) - with side buttons
+        # ============================================================
+        transform_row = QWidget()
+        transform_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        transform_h = QHBoxLayout(transform_row)
+        transform_h.setContentsMargins(0, 0, 0, 0)
+        transform_h.setSpacing(0)
         
-        # DEBUG: Gap between folders
-        layout.addWidget(self._create_debug_spacer(3))
+        # Side Buttons (Resize, Rotate)
+        self.image_side_buttons = self._create_transform_side_buttons('image')
+        self.image_side_buttons.selectionChanged.connect(self._update_image_transform_visibility)
+        # Note: Added to global stack in setup_ui
         
-        # Transform options (Resize + Rotation combined)
-        self.image_transform_group = CommandGroup(
-            "Transform", "client/assets/icons/transform.svg", size_policy=QSizePolicy.Policy.Maximum
-        )
+        # Transform CommandGroup - expands to fill remaining width
+        self.image_transform_group = CommandGroup("")
+        self.image_transform_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.image_transform_group.get_content_layout().setContentsMargins(16, 16, 16, 16)
+        self.image_transform_group.get_content_layout().setVerticalSpacing(12)
+        self.image_transform_group.setFixedHeight(198)
+        transform_h.addWidget(self.image_transform_group, 1)  # stretch=1 ensures it fills
         
-        # Resize mode selection
+        layout.addWidget(transform_row)
+        
+        # === RESIZE SECTION CONTAINER ===
+        self.image_resize_container = QWidget()
+        resize_layout = QVBoxLayout(self.image_resize_container)
+        resize_layout.setContentsMargins(0, 0, 0, 0)
+        resize_layout.setSpacing(8)
+        
+        # Resize widgets
         self.image_resize_mode = CustomComboBox()
         self.image_resize_mode.addItems(["No resize", "By width (pixels)", "By longer edge (pixels)", "By ratio (percent)"])
         self.image_resize_mode.setStyleSheet(COMBOBOX_STYLE)
         self.image_resize_mode.currentTextChanged.connect(self.on_image_resize_ui_changed)
-        self.image_transform_group.add_row("Resize", self.image_resize_mode, with_icon=True)
+        resize_layout.addWidget(self.image_resize_mode)
         
-        # Multiple resize option
         self.multiple_resize = QCheckBox("Multiple resize variants")
         self.multiple_resize.toggled.connect(self.toggle_resize_mode)
         self.multiple_resize.setStyleSheet(TOGGLE_STYLE)
-        self.image_transform_group.add_row(self.multiple_resize)
+        resize_layout.addWidget(self.multiple_resize)
         
-        # Single resize value input
+        # Single value row
+        single_val_row = QHBoxLayout()
+        self.resize_value_label = QLabel("Width (pixels)")
         self.resize_value = CustomSpinBox(on_enter_callback=self._focus_active_tab)
         self.resize_value.setRange(1, 10000)
-        self.resize_value.setValue(720)  # Default for pixels
-        self.resize_value.setVisible(False)
-        self.resize_value_label = QLabel("Width (pixels)")
-        self.resize_value_label.setVisible(False)
-        self.image_transform_group.add_row(self.resize_value_label, self.resize_value)
+        self.resize_value.setValue(720)
+        single_val_row.addWidget(self.resize_value_label)
+        single_val_row.addWidget(self.resize_value)
+        resize_layout.addLayout(single_val_row)
         
-        # Multiple resize input (hidden by default)
+        # Variants row
+        variants_row = QHBoxLayout()
+        self.resize_variants_label = QLabel("Resize values")
         self.resize_variants = QLineEdit()
         self.resize_variants.setPlaceholderText("e.g., 30,50,80 or 720,1280,1920")
         self.resize_variants.setText("720,1280,1920")
-        self.resize_variants.setVisible(False)
-        self.resize_variants_label = QLabel("Resize values")
+        variants_row.addWidget(self.resize_variants_label)
+        variants_row.addWidget(self.resize_variants)
+        resize_layout.addLayout(variants_row)
+        
+        # Initial visibility for sub-widgets
+        self.resize_value_label.setVisible(False)
+        self.resize_value.setVisible(False)
         self.resize_variants_label.setVisible(False)
-        self.image_transform_group.add_row(self.resize_variants_label, self.resize_variants)
+        self.resize_variants.setVisible(False)
         
-
+        self.image_transform_group.add_row(self.image_resize_container)
         
-        # Rotation options
+        # === ROTATION SECTION CONTAINER ===
+        self.image_rotate_container = QWidget()
+        rotate_layout = QVBoxLayout(self.image_rotate_container)
+        rotate_layout.setContentsMargins(0, 0, 0, 0)
+        
         self.image_rotation_angle = CustomComboBox()
         self.image_rotation_angle.addItems(["No rotation", "90° clockwise", "180°", "270° clockwise"])
         self.image_rotation_angle.setStyleSheet(COMBOBOX_STYLE)
-        self.image_transform_group.add_row("Rotation", self.image_rotation_angle, with_icon=True)
+        rotate_layout.addWidget(self.image_rotation_angle)
         
-        layout.addWidget(self.image_transform_group)
+        self.image_transform_group.add_row(self.image_rotate_container)
         
         return tab
         
@@ -851,15 +1201,28 @@ class CommandPanel(QWidget):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)  # We'll manually add spacers
+        layout.setSpacing(8)
         
-        # Settings group (Mode + Format + Quality)
-        codec_group = CommandGroup("Settings", "client/assets/icons/settings.png")
+        # ============================================================
+        # SETTINGS FOLDER (Top) - with invisible spacer to align with transform
+        # ============================================================
+        settings_row = QWidget()
+        settings_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        settings_h = QHBoxLayout(settings_row)
+        settings_h.setContentsMargins(0, 0, 0, 0)
+        settings_h.setSpacing(0)
         
-        # Add mode buttons
-        self.video_mode_buttons = codec_group.add_mode_buttons(default_mode="Max Size")
-        self.video_mode_buttons.modeChanged.connect(self.on_video_size_mode_changed)
-        self.video_size_mode_value = "manual"
+        # Settings CommandGroup - expands to fill remaining width
+        codec_group = CommandGroup("")
+        codec_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        codec_group.get_content_layout().setContentsMargins(16, 16, 16, 16)
+        codec_group.setMinimumHeight(180)
+        settings_h.addWidget(codec_group, 1)  # stretch=1 ensures it fills
+        
+        layout.addWidget(settings_row)
+        
+        # Removed local mode buttons, now handled globally
+        self.video_size_mode_value = "max_size"
         
         # Target Size - FIRST (shown in Max Size mode)
         self.video_max_size_spinbox = CustomTargetSizeSpinBox(
@@ -868,7 +1231,7 @@ class CommandPanel(QWidget):
         )
         self.video_max_size_spinbox.setToolTip("Target maximum file size in megabytes")
         self.video_max_size_spinbox.setVisible(False)
-        self.video_max_size_label = QLabel("Max Size (MB)")
+        self.video_max_size_label = QLabel("Max Size")
         self.video_max_size_label.setVisible(False)
         codec_group.add_row(self.video_max_size_label, self.video_max_size_spinbox)
 
@@ -930,73 +1293,99 @@ class CommandPanel(QWidget):
 
         # Set initial state for bitrate and quality visibility
         self.on_video_codec_changed(self.video_codec.currentText())
+
+        # ============================================================
+        # TRANSFORM FOLDER (Bottom) - with side buttons
+        # ============================================================
+        transform_row = QWidget()
+        transform_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        transform_h = QHBoxLayout(transform_row)
+        transform_h.setContentsMargins(0, 0, 0, 0)
+        transform_h.setSpacing(0)
         
-        layout.addWidget(codec_group)
+        # Side Buttons (Resize, Rotate, Time)
+        self.video_side_buttons = self._create_transform_side_buttons('video')
+        self.video_side_buttons.selectionChanged.connect(self._update_video_transform_visibility)
+        # Note: Added to global stack in setup_ui
         
-        # DEBUG: Gap between folders
-        layout.addWidget(self._create_debug_spacer(4))
+        # Transform CommandGroup - expands to fill remaining width
+        self.video_transform_group = CommandGroup("")
+        self.video_transform_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.video_transform_group.get_content_layout().setContentsMargins(16, 16, 16, 16)
+        self.video_transform_group.get_content_layout().setVerticalSpacing(12)
+        self.video_transform_group.setFixedHeight(198)
+        transform_h.addWidget(self.video_transform_group, 1)  # stretch=1 ensures it fills
         
-        # Transform options (Resize + Rotation combined)
-        # Changed size_policy to allow expansion (removed fixed Maximum policy)
-        self.video_transform_group = CommandGroup(
-            "Transform", "client/assets/icons/transform.svg"
-        )
+        layout.addWidget(transform_row)
         
-        # Resize mode selection
+        # === RESIZE SECTION CONTAINER ===
+        self.video_resize_container = QWidget()
+        resize_layout = QVBoxLayout(self.video_resize_container)
+        resize_layout.setContentsMargins(0, 0, 0, 0)
+        resize_layout.setSpacing(8)
+        
         self.video_resize_mode = CustomComboBox()
         self.video_resize_mode.addItems(["No resize", "By width (pixels)", "By longer edge (pixels)", "By ratio (percent)"])
         self.video_resize_mode.setStyleSheet(COMBOBOX_STYLE)
         self.video_resize_mode.currentTextChanged.connect(self.on_video_resize_ui_changed)
-        self.video_transform_group.add_row("Resize", self.video_resize_mode, with_icon=True)
+        resize_layout.addWidget(self.video_resize_mode)
         
-        # Multiple video size variants option
         self.multiple_video_variants = QCheckBox("Multiple size variants")
         self.multiple_video_variants.toggled.connect(self.toggle_video_variant_mode)
         self.multiple_video_variants.setStyleSheet(TOGGLE_STYLE)
-        self.video_transform_group.add_row(self.multiple_video_variants)
+        resize_layout.addWidget(self.multiple_video_variants)
         
-        # Single resize value input (hidden by default)
+        # Single value row
+        single_val_row = QHBoxLayout()
+        self.video_resize_value_label = QLabel("Width (pixels)")
         self.video_resize_value = CustomSpinBox(on_enter_callback=self._focus_active_tab)
         self.video_resize_value.setRange(1, 10000)
         self.video_resize_value.setValue(720)
-        self.video_resize_value.setVisible(False)
-        self.video_resize_value_label = QLabel("Width (pixels)")
-        self.video_resize_value_label.setVisible(False)
-        self.video_transform_group.add_row(self.video_resize_value_label, self.video_resize_value)
+        single_val_row.addWidget(self.video_resize_value_label)
+        single_val_row.addWidget(self.video_resize_value)
+        resize_layout.addLayout(single_val_row)
         
-        # Video size variant inputs (hidden by default)
+        # Variants row
+        variants_row = QHBoxLayout()
+        self.video_size_variants_label = QLabel("Size variants")
         self.video_size_variants = QLineEdit()
         self.video_size_variants.setPlaceholderText("e.g., 480,720,1080 or 25%,50%,75%")
         self.video_size_variants.setText("480,720,1280")
-        self.video_size_variants.setVisible(False)
-        self.video_size_variants_label = QLabel("Size variants")
-        self.video_size_variants_label.setVisible(False)
-        self.video_transform_group.add_row(self.video_size_variants_label, self.video_size_variants)
-        
+        variants_row.addWidget(self.video_size_variants_label)
+        variants_row.addWidget(self.video_size_variants)
+        resize_layout.addLayout(variants_row)
 
+        # Initial visibility
+        self.video_resize_value.setVisible(False)
+        self.video_resize_value_label.setVisible(False)
+        self.video_size_variants.setVisible(False)
+        self.video_size_variants_label.setVisible(False)
         
-        # Rotation options
+        self.video_transform_group.add_row(self.video_resize_container)
+        
+        # === ROTATION SECTION CONTAINER ===
+        self.video_rotate_container = QWidget()
+        rotate_layout = QVBoxLayout(self.video_rotate_container)
+        rotate_layout.setContentsMargins(0, 0, 0, 0)
+        
         self.video_rotation_angle = CustomComboBox()
         self.video_rotation_angle.addItems(["No rotation", "90° clockwise", "180°", "270° clockwise"])
         self.video_rotation_angle.setStyleSheet(COMBOBOX_STYLE)
-        self.video_transform_group.add_row("Rotation", self.video_rotation_angle, with_icon=True)
+        rotate_layout.addWidget(self.video_rotation_angle)
         
-        layout.addWidget(self.video_transform_group)
+        self.video_transform_group.add_row(self.video_rotate_container)
         
-        # DEBUG: Gap between folders
-        layout.addWidget(self._create_debug_spacer(5))
+        # === TIME SECTION CONTAINER ===
+        self.video_time_container = QWidget()
+        time_layout = QVBoxLayout(self.video_time_container)
+        time_layout.setContentsMargins(0, 0, 0, 0)
+        time_layout.setSpacing(12)
         
-        # Time Options group
-        self.video_time_group = CommandGroup(
-            "Time Options", "client/assets/icons/time.png", size_policy=QSizePolicy.Policy.Maximum
-        )
-        
-        # Time range toggle (controls range slider visibility)
+        # Time range row
         self.enable_time_cutting = QCheckBox("Time range")
         self.enable_time_cutting.setStyleSheet(TOGGLE_STYLE)
         self.enable_time_cutting.toggled.connect(self.toggle_time_cutting)
         
-        # Time range slider with dark mode support
         self.time_range_slider = TimeRangeSlider(is_dark_mode=self.is_dark_mode)
         self.time_range_slider.setRange(0.0, 1.0)
         self.time_range_slider.setStartValue(0.0)
@@ -1004,20 +1393,19 @@ class CommandPanel(QWidget):
         self.time_range_slider.setToolTip("Drag the handles to set start and end times (0% = beginning, 100% = end)")
         self.time_range_slider.setVisible(False)
         
-        # Put toggle and slider on same row
         time_range_row = QHBoxLayout()
         time_range_row.addWidget(self.enable_time_cutting)
-        time_range_row.addSpacing(8)  # Small gap between toggle and slider
-        time_range_row.addWidget(self.time_range_slider, 1)  # stretch=1
-        self.video_time_group.add_row(time_range_row)
-
-        # Retime controls
+        time_range_row.addSpacing(8)
+        time_range_row.addWidget(self.time_range_slider, 1)
+        time_layout.addLayout(time_range_row)
+        
+        # Retime row
         self.enable_retime = QCheckBox("Retime")
         self.enable_retime.setStyleSheet(TOGGLE_STYLE)
         self.enable_retime.toggled.connect(self.toggle_retime)
-
+        
         self.retime_slider = QSlider(Qt.Orientation.Horizontal)
-        self.retime_slider.setRange(10, 30)  # 1.0x to 3.0x in 0.1 steps
+        self.retime_slider.setRange(10, 30)
         self.retime_slider.setValue(10)
         self.retime_slider.setSingleStep(1)
         self.retime_slider.setVisible(False)
@@ -1025,15 +1413,14 @@ class CommandPanel(QWidget):
         self.retime_value_label.setVisible(False)
         self.retime_slider.valueChanged.connect(lambda v: self.retime_value_label.setText(f"{v/10:.1f}x"))
         
-        # Put toggle and slider on same row
         retime_row = QHBoxLayout()
         retime_row.addWidget(self.enable_retime)
-        retime_row.addSpacing(8)  # Small gap between toggle and slider
-        retime_row.addWidget(self.retime_slider, 1)  # stretch=1
+        retime_row.addSpacing(8)
+        retime_row.addWidget(self.retime_slider, 1)
         retime_row.addWidget(self.retime_value_label)
-        self.video_time_group.add_row(retime_row)
+        time_layout.addLayout(retime_row)
         
-        layout.addWidget(self.video_time_group)
+        self.video_transform_group.add_row(self.video_time_container)
         
         return tab
         
@@ -1042,14 +1429,28 @@ class CommandPanel(QWidget):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)  # We'll manually add spacers
+        layout.setSpacing(8)
         
-        # Settings group (Mode + Format + Quality)
-        self.ffmpeg_group = CommandGroup("Settings", "client/assets/icons/settings.png")
+        # ============================================================
+        # SETTINGS FOLDER (Top) - with invisible spacer to align with transform
+        # ============================================================
+        settings_row = QWidget()
+        settings_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        settings_h = QHBoxLayout(settings_row)
+        settings_h.setContentsMargins(0, 0, 0, 0)
+        settings_h.setSpacing(0)
         
-        # Add mode buttons
-        self.gif_mode_buttons = self.ffmpeg_group.add_mode_buttons(default_mode="Max Size")
-        self.gif_mode_buttons.modeChanged.connect(self.on_gif_size_mode_changed)
+        # Settings CommandGroup - expands to fill remaining width
+        self.ffmpeg_group = CommandGroup("")
+        self.ffmpeg_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.ffmpeg_group.get_content_layout().setContentsMargins(16, 16, 16, 16)
+        self.ffmpeg_group.setMinimumHeight(180)
+        settings_h.addWidget(self.ffmpeg_group, 1)  # stretch=1 ensures it fills
+        
+        layout.addWidget(settings_row)
+        
+        # Removed local mode buttons, now handled globally
+        self.gif_size_mode_value = "max_size"
 
         # Target Size - SECOND
         self.gif_max_size_spinbox = CustomTargetSizeSpinBox(
@@ -1058,7 +1459,7 @@ class CommandPanel(QWidget):
         )
         self.gif_max_size_spinbox.setToolTip("Target maximum file size in megabytes")
         self.gif_max_size_spinbox.setVisible(False)
-        self.gif_max_size_label = QLabel("Max Size (MB)")
+        self.gif_max_size_label = QLabel("Max Size")
         self.gif_max_size_label.setVisible(False)
         self.ffmpeg_group.add_row(self.gif_max_size_label, self.gif_max_size_spinbox)
 
@@ -1077,8 +1478,6 @@ class CommandPanel(QWidget):
         self.gif_size_estimate_label.setStyleSheet("color: #888; font-style: italic;")
         self.gif_size_estimate_label.setVisible(False)
         self.gif_size_estimate_label.setWordWrap(True)
-        # Don't add to layout - we'll manage visibility separately to avoid empty row space
-        # self.ffmpeg_group.add_row("", self.gif_size_estimate_label)
 
         # Multiple variants toggle
         self.gif_ffmpeg_variants = QCheckBox("Multiple Variants (FPS, Colors, Qualities)")
@@ -1115,14 +1514,10 @@ class CommandPanel(QWidget):
         self.ffmpeg_gif_colors_variants_label = QLabel("Colors variants")
         self.ffmpeg_gif_colors_variants_label.setVisible(False)
         self.ffmpeg_group.add_row(self.ffmpeg_gif_colors_variants_label, self.ffmpeg_gif_colors_variants)
-
-        # self.ffmpeg_group.add_row(self.ffmpeg_gif_dither_label, self.ffmpeg_gif_dither)
         
         # Presets section (initially hidden)
         self.gif_presets_section = self._create_presets_section("gif")
         self.ffmpeg_group.add_row(self.gif_presets_section)
-        
-        # Dither Quality Slider
 
         # Dither Quality Slider
         self.gif_dither_quality_slider = QSlider(Qt.Orientation.Horizontal)
@@ -1153,72 +1548,98 @@ class CommandPanel(QWidget):
         self.ffmpeg_gif_blur.setStyleSheet(TOGGLE_STYLE)
         self.ffmpeg_group.add_row(self.ffmpeg_gif_blur)
 
-        layout.addWidget(self.ffmpeg_group)
+        # ============================================================
+        # TRANSFORM FOLDER (Bottom) - with side buttons
+        # ============================================================
+        transform_row = QWidget()
+        transform_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        transform_h = QHBoxLayout(transform_row)
+        transform_h.setContentsMargins(0, 0, 0, 0)
+        transform_h.setSpacing(0)
         
-        # DEBUG: Gap between folders
-        layout.addWidget(self._create_debug_spacer(6))
+        # Side Buttons (Resize, Rotate, Time)
+        self.gif_side_buttons = self._create_transform_side_buttons('gif')
+        self.gif_side_buttons.selectionChanged.connect(self._update_gif_transform_visibility)
+        # Note: Added to global stack in setup_ui
         
-        # Transform options (Resize + Rotation combined)
-        # Changed size_policy to allow expansion (removed fixed Maximum policy)
-        self.gif_transform_group = CommandGroup(
-            "Transform", "client/assets/icons/transform.svg"
-        )
+        # Transform CommandGroup - expands to fill remaining width
+        self.gif_transform_group = CommandGroup("")
+        self.gif_transform_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.gif_transform_group.get_content_layout().setContentsMargins(16, 16, 16, 16)
+        self.gif_transform_group.get_content_layout().setVerticalSpacing(12)
+        self.gif_transform_group.setFixedHeight(198)
+        transform_h.addWidget(self.gif_transform_group, 1)  # stretch=1 ensures it fills
         
-        # Resize mode selection
+        layout.addWidget(transform_row)
+
+        # === RESIZE SECTION CONTAINER ===
+        self.gif_resize_container = QWidget()
+        resize_layout = QVBoxLayout(self.gif_resize_container)
+        resize_layout.setContentsMargins(0, 0, 0, 0)
+        resize_layout.setSpacing(8)
+        
         self.gif_resize_mode = CustomComboBox()
         self.gif_resize_mode.addItems(["No resize", "By width (pixels)", "By longer edge (pixels)", "By ratio (percent)"])
         self.gif_resize_mode.setStyleSheet(COMBOBOX_STYLE)
         self.gif_resize_mode.currentTextChanged.connect(self.on_gif_resize_ui_changed)
-        self.gif_transform_group.add_row("Resize", self.gif_resize_mode, with_icon=True)
+        resize_layout.addWidget(self.gif_resize_mode)
         
-        # Multiple resize variants option
         self.gif_multiple_resize = QCheckBox("Multiple size variants")
         self.gif_multiple_resize.toggled.connect(self.toggle_gif_resize_variant_mode)
         self.gif_multiple_resize.setStyleSheet(TOGGLE_STYLE)
-        self.gif_transform_group.add_row(self.gif_multiple_resize)
-        
-        # Single resize value input (hidden by default)
+        resize_layout.addWidget(self.gif_multiple_resize)
+
+        # Single value row
+        single_val_row = QHBoxLayout()
+        self.gif_resize_value_label = QLabel("Width (pixels)")
         self.gif_resize_value = CustomSpinBox(on_enter_callback=self._focus_active_tab)
         self.gif_resize_value.setRange(1, 10000)
         self.gif_resize_value.setValue(720)
-        self.gif_resize_value.setVisible(False)
-        self.gif_resize_value_label = QLabel("Width (pixels)")
-        self.gif_resize_value_label.setVisible(False)
-        self.gif_transform_group.add_row(self.gif_resize_value_label, self.gif_resize_value)
+        single_val_row.addWidget(self.gif_resize_value_label)
+        single_val_row.addWidget(self.gif_resize_value)
+        resize_layout.addLayout(single_val_row)
         
-        # Resize variant inputs (hidden by default)
+        # Variants row
+        variants_row = QHBoxLayout()
+        self.gif_resize_variants_label = QLabel("Size variants")
         self.gif_resize_variants = QLineEdit()
         self.gif_resize_variants.setPlaceholderText("e.g., 480,720,1080")
         self.gif_resize_variants.setText("480,720,1080")
+        variants_row.addWidget(self.gif_resize_variants_label)
+        variants_row.addWidget(self.gif_resize_variants)
+        resize_layout.addLayout(variants_row)
+        
+        # Initial visibility
+        self.gif_resize_value.setVisible(False)
+        self.gif_resize_value_label.setVisible(False)
         self.gif_resize_variants.setVisible(False)
-        self.gif_resize_variants_label = QLabel("Size variants")
         self.gif_resize_variants_label.setVisible(False)
-        self.gif_transform_group.add_row(self.gif_resize_variants_label, self.gif_resize_variants)
         
-
+        self.gif_transform_group.add_row(self.gif_resize_container)
         
-        # Rotation options
+        # === ROTATION SECTION CONTAINER ===
+        self.gif_rotate_container = QWidget()
+        rotate_layout = QVBoxLayout(self.gif_rotate_container)
+        rotate_layout.setContentsMargins(0, 0, 0, 0)
+        
         self.gif_rotation_angle = CustomComboBox()
         self.gif_rotation_angle.addItems(["No rotation", "90° clockwise", "180°", "270° clockwise"])
         self.gif_rotation_angle.setStyleSheet(COMBOBOX_STYLE)
-        self.gif_transform_group.add_row("Rotation", self.gif_rotation_angle, with_icon=True)
+        rotate_layout.addWidget(self.gif_rotation_angle)
         
-        layout.addWidget(self.gif_transform_group)
+        self.gif_transform_group.add_row(self.gif_rotate_container)
+
+        # === TIME SECTION CONTAINER ===
+        self.gif_time_container = QWidget()
+        time_layout = QVBoxLayout(self.gif_time_container)
+        time_layout.setContentsMargins(0, 0, 0, 0)
+        time_layout.setSpacing(12)
         
-        # DEBUG: Gap between folders
-        layout.addWidget(self._create_debug_spacer(7))
-        
-        # Time Options group
-        self.gif_time_group = CommandGroup(
-            "Time Options", "client/assets/icons/time.png", size_policy=QSizePolicy.Policy.Maximum
-        )
-        
-        # Time range toggle
+        # Time range row
         self.gif_enable_time_cutting = QCheckBox("Time range")
         self.gif_enable_time_cutting.setStyleSheet(TOGGLE_STYLE)
         self.gif_enable_time_cutting.toggled.connect(self.toggle_gif_time_cutting)
         
-        # Time range slider with dark mode support
         self.gif_time_range_slider = TimeRangeSlider(is_dark_mode=self.is_dark_mode)
         self.gif_time_range_slider.setRange(0.0, 1.0)
         self.gif_time_range_slider.setStartValue(0.0)
@@ -1226,18 +1647,17 @@ class CommandPanel(QWidget):
         self.gif_time_range_slider.setToolTip("Drag the handles to set start and end times (0% = beginning, 100% = end)")
         self.gif_time_range_slider.setVisible(False)
         
-        # Put toggle and slider on same row
         gif_time_range_row = QHBoxLayout()
         gif_time_range_row.addWidget(self.gif_enable_time_cutting)
-        gif_time_range_row.addSpacing(8)  # Small gap between toggle and slider
-        gif_time_range_row.addWidget(self.gif_time_range_slider, 1)  # stretch=1
-        self.gif_time_group.add_row(gif_time_range_row)
-
-        # Retime controls for GIF conversion
+        gif_time_range_row.addSpacing(8)
+        gif_time_range_row.addWidget(self.gif_time_range_slider, 1)
+        time_layout.addLayout(gif_time_range_row)
+        
+        # Retime row
         self.gif_enable_retime = QCheckBox("Retime")
         self.gif_enable_retime.setStyleSheet(TOGGLE_STYLE)
         self.gif_enable_retime.toggled.connect(self.toggle_gif_retime)
-
+        
         self.gif_retime_slider = QSlider(Qt.Orientation.Horizontal)
         self.gif_retime_slider.setRange(10, 30)
         self.gif_retime_slider.setValue(10)
@@ -1246,27 +1666,15 @@ class CommandPanel(QWidget):
         self.gif_retime_value_label = QLabel("1.0x")
         self.gif_retime_value_label.setVisible(False)
         self.gif_retime_slider.valueChanged.connect(lambda v: self.gif_retime_value_label.setText(f"{v/10:.1f}x"))
-
-        # Put toggle and slider on same row
+        
         gif_retime_row = QHBoxLayout()
         gif_retime_row.addWidget(self.gif_enable_retime)
-        gif_retime_row.addSpacing(8)  # Small gap between toggle and slider
-        gif_retime_row.addWidget(self.gif_retime_slider, 1)  # stretch=1
+        gif_retime_row.addSpacing(8)
+        gif_retime_row.addWidget(self.gif_retime_slider, 1)
         gif_retime_row.addWidget(self.gif_retime_value_label)
-        self.gif_time_group.add_row(gif_retime_row)
-        
-        layout.addWidget(self.gif_time_group)
-        
-        # DEBUG: Spacer at end of tab content - COMMENTED OUT
-        # end_spacer = QWidget()
-        # end_spacer.setFixedHeight(0)
-        # end_spacer.setStyleSheet("background-color: rgba(255, 255, 255, 200);")
-        # end_label = QLabel("TAB-END", end_spacer)
-        # end_label.setStyleSheet("color: black; font-size: 9px; font-weight: bold;")
-        # end_label.move(2, -1)
-        # layout.addWidget(end_spacer)
-        
-        # STRETCH-AREA removed
+        time_layout.addLayout(gif_retime_row)
+
+        self.gif_transform_group.add_row(self.gif_time_container)
         
         # Apply initial size mode visibility (Max Size default)
         self.on_gif_size_mode_changed("Max Size")
@@ -1275,7 +1683,23 @@ class CommandPanel(QWidget):
 
     def create_output_settings(self):
         """Create output directory and naming settings"""
-        group = CommandGroup("Output", "client/assets/icons/output.png")
+        group = CommandGroup("Output", None, size_policy=QSizePolicy.Policy.Fixed)
+        
+        # Custom styling: square upper-right corner, rounded others
+        # border-radius: top-left top-right bottom-right bottom-left
+        is_dark = self.is_dark_mode
+        bg_color = "#3c3c3c" if is_dark else "#ffffff"
+        border_color = "none" if is_dark else "2px solid #cccccc"
+        
+        group.setStyleSheet(f"""
+            QGroupBox {{
+                background-color: {bg_color};
+                border: {border_color};
+                border-radius: 8px 0px 8px 8px;
+                margin: 0px;
+                padding: 0px;
+            }}
+        """)
         
         # Reduce vertical spacing for output settings as requested
         group.get_content_layout().setVerticalSpacing(4)
@@ -1336,7 +1760,7 @@ class CommandPanel(QWidget):
         """Create conversion control buttons"""
         layout = QVBoxLayout()
         
-        self.convert_btn = DynamicFontButton("Start Conversion")
+        self.convert_btn = DynamicFontButton("START")
         self.convert_btn.clicked.connect(self.on_convert_button_clicked)
         self.is_converting = False
         
@@ -1359,11 +1783,11 @@ class CommandPanel(QWidget):
         self.is_converting = is_converting
         
         if is_converting:
-            self.convert_btn.setText("Stop Conversion")
+            self.convert_btn.setText("STOP")
             # Trigger stylesheet update with current font values
             self.convert_btn.update_stylesheet()
         else:
-            self.convert_btn.setText("Start Conversion")
+            self.convert_btn.setText("START")
             # Trigger stylesheet update with current font values
             self.convert_btn.update_stylesheet()
     
@@ -1372,7 +1796,7 @@ class CommandPanel(QWidget):
         self.stop_conversion_requested.emit()
         # Disable the button temporarily to prevent multiple clicks
         self.convert_btn.setEnabled(False)
-        self.convert_btn.setText("Stopping...")
+        self.convert_btn.setText("STOPPING...")
     
     def on_custom_output_toggled(self, state):
         """Handle custom output directory toggle - show controls only when custom is selected"""
@@ -2071,7 +2495,6 @@ class CommandPanel(QWidget):
             self.video_resize_mode.setCurrentText("No resize")
 
         self.video_transform_group.setVisible(not is_presets)
-        self.video_time_group.setVisible(not is_presets)
 
     def on_gif_size_mode_changed(self, mode):
         """Handle GIF size mode change between Manual, Max Size, and Presets"""
@@ -2116,7 +2539,7 @@ class CommandPanel(QWidget):
             self.gif_resize_mode.setCurrentText("No resize")
 
         self.gif_transform_group.setVisible(not is_presets)
-        self.gif_time_group.setVisible(not is_presets)
+
 
     def toggle_video_variant_mode(self, checked):
         """Toggle between single and multiple video size variant modes"""

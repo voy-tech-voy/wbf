@@ -19,9 +19,9 @@ class CommandGroup(QGroupBox):
         super().__init__(parent)
         self.setTitle("") # We use a custom header
         
-        # Set size policy
+        # Set size policy - horizontal should always expand, vertical is configurable
         if size_policy:
-            self.setSizePolicy(self.sizePolicy().horizontalPolicy(), size_policy)
+            self.setSizePolicy(QSizePolicy.Policy.Expanding, size_policy)
         else:
             self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
@@ -87,6 +87,10 @@ class CommandGroup(QGroupBox):
         self.header_layout.addStretch()
 
         self.main_layout.addWidget(self.header_widget)
+        
+        # Hide header if no title and no icon provided (to save space)
+        if not title and not icon_path:
+            self.header_widget.setVisible(False)
 
         # 2. Mode Buttons Section (Container)
         self.mode_buttons_container = QWidget()

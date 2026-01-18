@@ -737,7 +737,7 @@ class ModernLoginWindow(QDialog):
             pass
         
         self.app_name_label = QLabel(APP_NAME)
-        self.app_name_label.setFont(QFont(FONT_FAMILY, 96, QFont.Weight.Bold))
+        self.app_name_label.setFont(AppFonts.get_app_name_font(96))
         app_header_layout.addWidget(self.app_name_label)
         app_header_layout.addStretch()
         

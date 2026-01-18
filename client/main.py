@@ -353,6 +353,11 @@ def main():
         if profile_startup:
             t_app = time.perf_counter()
             print(f"[startup] QApplication created in {(t_app - t0)*1000:.1f} ms")
+        
+        # Initialize custom fonts after QApplication is created
+        AppFonts.init_fonts()
+        app.setFont(AppFonts.get_base_font())
+        
         app.setApplicationName(APP_NAME)
         
         # Initialize MessageManager early in the application lifecycle
