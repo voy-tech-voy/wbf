@@ -12,12 +12,14 @@ from PyQt6.QtWidgets import (
 from client.utils.font_manager import AppFonts, FONT_FAMILY, FONT_SIZE_BUTTON
 from client.gui.custom_widgets import (
     TimeRangeSlider, ResizeFolder, RotationOptions, CustomComboBox, 
-    CustomTargetSizeSpinBox, ModeButtonsWidget, SocialPresetButton, RatioPresetButton
+    CustomTargetSizeSpinBox, ModeButtonsWidget, SocialPresetButton, RatioPresetButton,
+    SquareButtonRow
 )
 from client.gui.custom_spinbox import CustomSpinBox
 from client.gui.command_group import CommandGroup
-from PyQt6.QtCore import Qt, pyqtSignal, QRect, QPoint, QTimer
-from PyQt6.QtGui import QPainter, QPen, QColor, QBrush
+from PyQt6.QtCore import Qt, pyqtSignal, QRect, QPoint, QTimer, QSize
+from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QIcon
+from client.utils.resource_path import get_resource_path
 import json
 import winreg
 
@@ -445,15 +447,15 @@ class CommandPanel(QWidget):
         
         # Image conversion tab
         self.image_tab = self.create_image_tab()
-        self.tabs.addTab(self.image_tab, "Images")
+        self.tabs.addTab(self.image_tab, QIcon(get_resource_path("client/assets/icons/pic_icon.svg")), "")
         
         # Video conversion tab
         self.video_tab = self.create_video_tab()
-        self.tabs.addTab(self.video_tab, "Videos")
+        self.tabs.addTab(self.video_tab, QIcon(get_resource_path("client/assets/icons/vid_icon.svg")), "")
         
         # GIF conversion tab
         self.gif_tab = self.create_gif_tab()
-        self.tabs.addTab(self.gif_tab, "GIFs")
+        self.tabs.addTab(self.gif_tab, QIcon(get_resource_path("client/assets/icons/loop_icon.svg")), "")
         
         # Select Video tab by default
         self.tabs.setCurrentIndex(1)
@@ -478,11 +480,13 @@ class CommandPanel(QWidget):
         
         # Initial width update will happen in showEvent
         
+        self.tabs.setIconSize(QSize(28, 28))
+        
         # Stylesheet for tabs
         self.tabs.setStyleSheet("""
             QTabBar::tab {
-                padding: 8px 16px 13px 16px;
-                min-height: 32px;
+                padding: 6px 12px 10px 12px;
+                min-height: 36px;
                 margin-bottom: 0px;
                 border-bottom: 2px solid #888888;
             }
@@ -624,9 +628,8 @@ class CommandPanel(QWidget):
         social_label.setStyleSheet("font-weight: bold; color: #AAAAAA; font-size: 11px;")
         layout.addWidget(social_label)
         
-        # Social Media Buttons Row
-        social_layout = QHBoxLayout()
-        social_layout.setSpacing(8)
+        # Social Media Buttons Row - using SquareButtonRow for square aspect ratio
+        social_button_row = SquareButtonRow()
         
         social_group = QButtonGroup(self)
         social_group.setExclusive(True)
@@ -636,27 +639,26 @@ class CommandPanel(QWidget):
             ("LinkedIn", "client/assets/icons/in.svg"),
             ("YouTube", "client/assets/icons/yt.svg"),
             ("TikTok", "client/assets/icons/tik.svg"),
-            ("Behance", "client/assets/icons/be.png")
+            ("Behance", "client/assets/icons/be.svg")
         ]
         
         for name, icon_path in platforms:
             btn = SocialPresetButton(name, icon_path)
             btn.update_theme(self.is_dark_mode)
             social_group.addButton(btn)
-            social_layout.addWidget(btn)
+            social_button_row.addButton(btn)
             # Store buttons for later reference if needed
             setattr(self, f"{prefix}_preset_{name.lower()}_btn", btn)
             
-        layout.addLayout(social_layout)
+        layout.addWidget(social_button_row)
         
         # Ratios Label
         ratio_label = QLabel("Aspect Ratios")
         ratio_label.setStyleSheet("font-weight: bold; color: #AAAAAA; font-size: 11px;")
         layout.addWidget(ratio_label)
         
-        # Ratio Buttons Row
-        ratio_layout = QHBoxLayout()
-        ratio_layout.setSpacing(8)
+        # Ratio Buttons Row - using SquareButtonRow for square aspect ratio
+        ratio_button_row = SquareButtonRow()
         
         ratio_group = QButtonGroup(self)
         ratio_group.setExclusive(True)
@@ -672,15 +674,18 @@ class CommandPanel(QWidget):
             btn = RatioPresetButton(ratio, icon_path)
             btn.update_theme(self.is_dark_mode)
             ratio_group.addButton(btn)
-            ratio_layout.addWidget(btn)
+            ratio_button_row.addButton(btn)
             # Store buttons for later reference if needed
             setattr(self, f"{prefix}_preset_ratio_{ratio.replace(':', '_')}_btn", btn)
             
-        layout.addLayout(ratio_layout)
+        layout.addWidget(ratio_button_row)
         
         # Store groups
         setattr(self, f"{prefix}_social_group", social_group)
         setattr(self, f"{prefix}_ratio_group", ratio_group)
+        
+
+        layout.addStretch()
         
         container.setVisible(False) # Hidden by default
         return container
@@ -753,7 +758,8 @@ class CommandPanel(QWidget):
         # Format dropdown - SECOND
         self.image_format = CustomComboBox()
         self.image_format.addItems(["WebP", "JPG", "PNG", "TIFF", "BMP"])
-        format_group.add_row("Format", self.image_format)
+        self.image_format_label = QLabel("Format")
+        format_group.add_row(self.image_format_label, self.image_format)
 
         # Multiple qualities option - THIRD
         self.multiple_qualities = QCheckBox("Multiple qualities")
@@ -880,7 +886,8 @@ class CommandPanel(QWidget):
         self.video_codec = CustomComboBox()
         self.video_codec.addItems(["WebM (VP9, faster)", "WebM (AV1, slower)", "MP4 (H.264)", "MP4 (H.265)", "MP4 (AV1)"])
         self.video_codec.currentTextChanged.connect(self.on_video_codec_changed)
-        codec_group.add_row("Format", self.video_codec)
+        self.video_codec_label = QLabel("Format")
+        codec_group.add_row(self.video_codec_label, self.video_codec)
 
         # Quality (CRF) slider for WebM
         self.video_quality = QSlider(Qt.Orientation.Horizontal)
@@ -2017,6 +2024,10 @@ class CommandPanel(QWidget):
         # Presets visibility
         self.image_presets_section.setVisible(is_presets)
         
+        # Format visibility - hide in presets mode
+        self.image_format.setVisible(not is_presets)
+        self.image_format_label.setVisible(not is_presets)
+        
         # Transformation adjustments
         if is_presets:
             self.image_resize_mode.setCurrentText("No resize")
@@ -2050,6 +2061,10 @@ class CommandPanel(QWidget):
         
         # Presets visibility
         self.video_presets_section.setVisible(is_presets)
+        
+        # Format visibility - hide in presets mode
+        self.video_codec.setVisible(not is_presets)
+        self.video_codec_label.setVisible(not is_presets)
         
         # Transformation adjustments
         if is_presets:

@@ -1199,6 +1199,214 @@ class RotationOptions(QGroupBox):
         self.rotation_angle.update_theme(is_dark_mode)
 
 
+class QSvgIconWidget(QWidget):
+    """
+    Custom SVG icon widget that renders SVG with consistent appearance.
+    Renders SVG to a high-resolution pixmap and scales it to fit the widget.
+    This ensures the icon looks consistent regardless of widget size.
+    """
+    def __init__(self, svg_path, stroke_width=5, stroke_color=None, parent=None):
+        super().__init__(parent)
+        self.svg_path = svg_path
+        self.stroke_width = stroke_width
+        self.stroke_color = stroke_color or "black"
+        self.cached_pixmap = None
+        self.last_size = None
+        
+        # Transparent background
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        
+        # Pre-render the icon
+        self._render_icon()
+        
+    def _render_icon(self):
+        """Render SVG to a high-resolution pixmap"""
+        from PyQt6.QtSvg import QSvgRenderer
+        from PyQt6.QtGui import QPixmap, QPainter, QColor, QIcon
+        from PyQt6.QtCore import QByteArray, QRectF
+        import os
+        
+        try:
+            svg_path = self.svg_path
+            if not os.path.exists(svg_path):
+                from client.utils.resource_path import get_resource_path
+                svg_path = get_resource_path(svg_path)
+            
+            # First try: Load original SVG directly using QIcon (most reliable)
+            icon = QIcon(svg_path)
+            if not icon.isNull():
+                # Render icon to pixmap at desired size
+                render_size = 256
+                self.cached_pixmap = icon.pixmap(render_size, render_size)
+                
+                # If we need to colorize, do it on the pixmap
+                if self.stroke_color and self.stroke_color.lower() != "black":
+                    self._colorize_pixmap()
+                return
+            
+            # Fallback: Try QSvgRenderer directly
+            renderer = QSvgRenderer(svg_path)
+            if renderer.isValid():
+                render_size = 256
+                self.cached_pixmap = QPixmap(render_size, render_size)
+                self.cached_pixmap.fill(QColor(0, 0, 0, 0))  # Transparent
+                
+                painter = QPainter(self.cached_pixmap)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                renderer.render(painter, QRectF(0, 0, render_size, render_size))
+                painter.end()
+                
+                if self.stroke_color and self.stroke_color.lower() != "black":
+                    self._colorize_pixmap()
+                return
+            
+            print(f"Error: Could not load SVG: {svg_path}")
+            
+        except Exception as e:
+            print(f"Error rendering SVG icon: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _colorize_pixmap(self):
+        """Colorize the cached pixmap to match stroke_color"""
+        if not self.cached_pixmap:
+            return
+        
+        from PyQt6.QtGui import QPainter, QColor
+        from PyQt6.QtCore import Qt
+        
+        # Create a colored version by compositing
+        color = QColor(self.stroke_color)
+        
+        # Use CompositionMode to tint the pixmap
+        painter = QPainter(self.cached_pixmap)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        painter.fillRect(self.cached_pixmap.rect(), color)
+        painter.end()
+    
+    def paintEvent(self, event):
+        """Paint the cached pixmap scaled to widget size"""
+        if not self.cached_pixmap:
+            return
+        
+        from PyQt6.QtGui import QPainter
+        from PyQt6.QtCore import QRectF
+        
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        
+        # Scale pixmap to fit widget while maintaining aspect ratio
+        widget_size = min(self.width(), self.height())
+        target_rect = QRectF(
+            (self.width() - widget_size) / 2,
+            (self.height() - widget_size) / 2,
+            widget_size,
+            widget_size
+        )
+        
+        painter.drawPixmap(target_rect.toRect(), self.cached_pixmap)
+        painter.end()
+    
+    def update_color(self, color):
+        """Update the icon color and re-render"""
+        old_color = self.stroke_color
+        self.stroke_color = color
+        
+        # Re-render the icon with new color
+        self._render_icon()
+        self.update()
+    
+    def sizeHint(self):
+        """Provide default size hint"""
+        from PyQt6.QtCore import QSize
+        return QSize(64, 64)
+
+
+class SquareButtonRow(QWidget):
+    """
+    Container that enforces square aspect ratio for buttons in a horizontal row.
+    Button side length (S) equals container height (H): S=H.
+    Buttons are distributed evenly across the horizontal space.
+    Gap = (Width - (Count × Height)) / (Count + 1)
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.buttons = []
+        
+        # No layout manager - we manually position buttons in resizeEvent
+        self.setMinimumHeight(48)
+        self.setMaximumHeight(180)
+        
+        # Allow vertical expansion to fill available space
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
+    def addButton(self, button):
+        """Add a button to the row"""
+        self.buttons.append(button)
+        button.setParent(self)
+        button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        button.show()
+        
+    def minimumSizeHint(self):
+        """Return minimum size needed"""
+        from PyQt6.QtCore import QSize
+        if not self.buttons:
+            return QSize(100, 40)
+        
+        # Minimum: 40px height, enough width for all buttons with small gaps
+        min_size = 40
+        num_buttons = len(self.buttons)
+        min_gap = 4
+        total_width = min_size * num_buttons + min_gap * (num_buttons + 1)
+        
+        return QSize(max(0, min(total_width, 16777215)), min_size)
+        
+    def resizeEvent(self, event):
+        """Position buttons as squares based on container height with even distribution"""
+        super().resizeEvent(event)
+        if not self.buttons:
+            return
+            
+        # Get container dimensions
+        container_width = max(0, self.width())
+        container_height = max(1, self.height())
+        num_buttons = len(self.buttons)
+        
+        if num_buttons == 0:
+            return
+        
+        # Calculate button size based on available width to prevent cutting
+        # Reserve space for minimum gaps (4px each)
+        min_gap = 4
+        available_width_for_buttons = container_width - (min_gap * (num_buttons + 1))
+        width_based_size = available_width_for_buttons // num_buttons if num_buttons > 0 else 48
+        
+        # Also consider container height
+        height_based_size = container_height
+        
+        # Button size = min(width_based, height_based) to fit both dimensions
+        # Clamped to container constraints (48-180px)
+        button_size = max(48, min(width_based_size, height_based_size, 180))
+        
+        # Calculate gap: Gap = (Width - (Count × Height)) / (Count + 1)
+        total_buttons_width = button_size * num_buttons
+        remaining_space = max(0, container_width - total_buttons_width)
+        gap = remaining_space // (num_buttons + 1)
+        
+        # Ensure minimum gap
+        gap = max(4, gap)
+        
+        # Position each button manually
+        x_position = gap
+        y_position = (container_height - button_size) // 2  # Center vertically
+        
+        for button in self.buttons:
+            button.setFixedSize(button_size, button_size)
+            button.move(x_position, max(0, y_position))
+            x_position += button_size + gap
+
+
 class SocialPresetButton(QPushButton):
     """
     Standardized button for social media presets with theme support.
@@ -1211,7 +1419,7 @@ class SocialPresetButton(QPushButton):
         
         # Enable heightForWidth to keep it square while filling width
         from PyQt6.QtWidgets import QSizePolicy
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMinimumSize(40, 40)
         
         if icon_path:
@@ -1221,13 +1429,19 @@ class SocialPresetButton(QPushButton):
         self.setToolTip(f"Set settings for {name}")
 
     def resizeEvent(self, event):
-        """Scale icon to fill button area on resize"""
+        """Scale icon to fill button area on resize while maintaining aspect ratio"""
         super().resizeEvent(event)
         if not self.icon().isNull():
             from PyQt6.QtCore import QSize
             # Fill with 80% of button area to leave some padding
             side = int(min(self.width(), self.height()) * 0.8)
-            self.setIconSize(QSize(side, side))
+            
+            # YouTube and Behance are wide, others are square
+            if self.preset_name.lower() in ["youtube", "behance"]:
+                # Use approx 1.5:1 ratio for wide icons to prevent stretching in square iconSize
+                self.setIconSize(QSize(side, int(side * 0.65)))
+            else:
+                self.setIconSize(QSize(side, side))
 
     def hasHeightForWidth(self):
         return True
@@ -1283,8 +1497,7 @@ class RatioPresetButton(QPushButton):
         self.setCheckable(True)
         
         # Enable heightForWidth to keep it square while filling width
-        from PyQt6.QtWidgets import QSizePolicy
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMinimumSize(40, 40)
         
         if icon_path:
@@ -1294,13 +1507,27 @@ class RatioPresetButton(QPushButton):
         self.setToolTip(f"Set aspect ratio to {ratio}")
 
     def resizeEvent(self, event):
-        """Scale icon to fill button area on resize"""
+        """Scale icon to fill button area on resize while maintaining aspect ratio"""
         super().resizeEvent(event)
         if not self.icon().isNull():
             from PyQt6.QtCore import QSize
             # Fill with 80% of button area to leave some padding
             side = int(min(self.width(), self.height()) * 0.8)
-            self.setIconSize(QSize(side, side))
+            
+            # Calculate aspect ratio from preset name (e.g. "16:9")
+            if ":" in self.preset_name:
+                try:
+                    w_r, h_r = map(int, self.preset_name.split(':'))
+                    if w_r > h_r:
+                        self.setIconSize(QSize(side, int(side * h_r / w_r)))
+                    elif h_r > w_r:
+                        self.setIconSize(QSize(int(side * w_r / h_r), side))
+                    else:
+                        self.setIconSize(QSize(side, side))
+                except:
+                    self.setIconSize(QSize(side, side))
+            else:
+                self.setIconSize(QSize(side, side))
 
     def hasHeightForWidth(self):
         return True

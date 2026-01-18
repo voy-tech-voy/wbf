@@ -7,12 +7,94 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QLabel, QPushButton, QFileDialog, QMessageBox, QStyledItemDelegate
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QEvent
+from PyQt6.QtCore import Qt, pyqtSignal, QEvent, QSize, QByteArray
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QPixmap, QIcon, QAction, QPainter, QColor, QCursor, QBrush
+from PyQt6.QtSvg import QSvgRenderer
 import os
 import subprocess
 import tempfile
+import re
 from pathlib import Path
+from client.utils.resource_path import get_resource_path
+
+class HoverIconButton(QPushButton):
+    """Button that changes its SVG icon colors based on hover state and theme"""
+    def __init__(self, svg_name, icon_size=QSize(28, 28), parent=None):
+        super().__init__(parent)
+        self.svg_path = get_resource_path(f"client/assets/icons/{svg_name}")
+        self.icon_size = icon_size
+        self._is_dark = False
+        
+        self.setMouseTracking(True)
+        self.setIconSize(icon_size)
+        
+        self.normal_icon = None
+        self.hover_icon = None
+        
+        self.update_icons()
+        if self.normal_icon:
+            self.setIcon(self.normal_icon)
+
+    def enterEvent(self, event):
+        if self.hover_icon:
+            self.setIcon(self.hover_icon)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        if self.normal_icon:
+            self.setIcon(self.normal_icon)
+        super().leaveEvent(event)
+
+    def set_dark_mode(self, is_dark):
+        if self._is_dark != is_dark:
+            self._is_dark = is_dark
+            self.update_icons()
+            self.setIcon(self.hover_icon if self.underMouse() else self.normal_icon)
+
+    def update_icons(self):
+        if not os.path.exists(self.svg_path):
+            return
+            
+        # Read SVG
+        with open(self.svg_path, 'r') as f:
+            svg_content = f.read()
+        
+        # Determine theme base color (black or white) for the main outline
+        base_color = "white" if self._is_dark else "black"
+        
+        # 1. Adjust main outline color based on theme
+        # Replace black strokes with base_color
+        svg_base = svg_content.replace('stroke="black"', f'stroke="{base_color}"')
+        svg_base = svg_base.replace('stroke="#000000"', f'stroke="{base_color}"')
+        svg_base = svg_base.replace('stroke="#000"', f'stroke="{base_color}"')
+        
+        # 2. Create the Normal version (colored curves -> gray)
+        # Replace green (#4CAF50) and red (#D32F2F) with grey
+        gray_color = "#888888"
+        svg_normal = svg_base.replace('#4CAF50', gray_color).replace('#4caf50', gray_color)
+        svg_normal = svg_normal.replace('#D32F2F', gray_color).replace('#d32f2f', gray_color)
+        
+        # 3. Create the Hover version (original colored curves)
+        svg_hover = svg_base
+        
+        # Generate Icons
+        def svg_to_icon(content):
+            try:
+                renderer = QSvgRenderer(QByteArray(content.encode('utf-8')))
+                # Render at high resolution (2x) for sharp look
+                pixmap = QPixmap(self.icon_size * 2)
+                pixmap.fill(Qt.GlobalColor.transparent)
+                painter = QPainter(pixmap)
+                renderer.render(painter)
+                painter.end()
+                return QIcon(pixmap)
+            except:
+                import traceback
+                traceback.print_exc()
+                return QIcon()
+
+        self.normal_icon = svg_to_icon(svg_normal)
+        self.hover_icon = svg_to_icon(svg_hover)
 
 class FileListItemWidget(QWidget):
     """Custom widget for list items with hover-based remove button and progress indicator"""
@@ -330,14 +412,24 @@ class DragDropArea(QWidget):
         
         # Control buttons at top
         button_layout = QHBoxLayout()
+        icon_size = QSize(28, 28)
         
-        self.add_files_btn = QPushButton("Add Files...")
+        self.add_files_btn = HoverIconButton("addfile.svg", icon_size)
+        self.add_files_btn.setFixedSize(36, 36)
+        self.add_files_btn.setToolTip("Add Files")
+        self.add_files_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.add_files_btn.clicked.connect(self.add_files_dialog)
         
-        self.add_folder_btn = QPushButton("Browse Folder...")
+        self.add_folder_btn = HoverIconButton("addfolder.svg", icon_size)
+        self.add_folder_btn.setFixedSize(36, 36)
+        self.add_folder_btn.setToolTip("Add Folder")
+        self.add_folder_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.add_folder_btn.clicked.connect(self.add_folder_dialog)
         
-        self.clear_files_btn = QPushButton("Clear All")
+        self.clear_files_btn = HoverIconButton("removefile.svg", icon_size)
+        self.clear_files_btn.setFixedSize(36, 36)
+        self.clear_files_btn.setToolTip("Clear All")
+        self.clear_files_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.clear_files_btn.clicked.connect(self.clear_files)
         
         button_layout.addWidget(self.add_files_btn)
@@ -696,48 +788,63 @@ class DragDropArea(QWidget):
         self.reset_list_style()
         self.update_placeholder_text()
         
-        # Apply specific styling to the clear button (red outline)
+        # Apply specific styling to the buttons (compact icon buttons)
         if self.theme_manager:
             current_theme = self.theme_manager.get_current_theme()
-            if current_theme == 'dark':
-                clear_button_style = """
+            is_dark = current_theme == 'dark'
+            
+            # Update icons for theme and hover behavior
+            self.add_files_btn.set_dark_mode(is_dark)
+            self.add_folder_btn.set_dark_mode(is_dark)
+            self.clear_files_btn.set_dark_mode(is_dark)
+            
+            if is_dark:
+                base_style = """
                     QPushButton {
                         background-color: #404040;
                         color: #ffffff;
                         border: 1px solid #555555;
-                        padding: 6px 12px;
+                        padding: 4px;
                         border-radius: 4px;
-                        font-size: 13px;
                     }
                     QPushButton:hover {
                         background-color: #4a4a4a;
-                        border-color: #f44336;
-                    }
-                    QPushButton:pressed {
-                        background-color: #363636;
-                        border-color: #d32f2f;
+                        border-color: #4CAF50;
                     }
                 """
+                clear_hover_border = "#f44336"
+                clear_pressed_border = "#d32f2f"
             else:
-                clear_button_style = """
+                base_style = """
                     QPushButton {
                         background-color: #f0f0f0;
                         color: #333333;
                         border: 1px solid #cccccc;
-                        padding: 6px 12px;
+                        padding: 4px;
                         border-radius: 4px;
-                        font-size: 13px;
                     }
                     QPushButton:hover {
                         background-color: #e8e8e8;
-                        border-color: #f44336;
-                    }
-                    QPushButton:pressed {
-                        background-color: #d8d8d8;
-                        border-color: #d32f2f;
+                        border-color: #4CAF50;
                     }
                 """
-            self.clear_files_btn.setStyleSheet(clear_button_style)
+                clear_hover_border = "#f44336"
+                clear_pressed_border = "#d32f2f"
+            
+            self.add_files_btn.setStyleSheet(base_style)
+            self.add_folder_btn.setStyleSheet(base_style)
+            
+            # Clear button with red hover/pressed states
+            clear_style = base_style + f"""
+                QPushButton:hover {{
+                    border-color: {clear_hover_border};
+                }}
+                QPushButton:pressed {{
+                    background-color: {"#363636" if is_dark else "#d8d8d8"};
+                    border-color: {clear_pressed_border};
+                }}
+            """
+            self.clear_files_btn.setStyleSheet(clear_style)
         
     def add_files_dialog(self):
         """Open file dialog to add files"""
