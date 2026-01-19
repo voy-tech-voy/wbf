@@ -7,6 +7,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtGui import QPalette, QColor
 from PyQt6.QtWidgets import QApplication
 import sys
+from client.utils.font_manager import FONT_FAMILY
 
 class ThemeManager(QObject):
     """Manages application theming based on system preferences"""
@@ -327,11 +328,14 @@ class ThemeManager(QObject):
                     background-color: #404040;
                 }
                 QToolTip {
-                    background-color: #2b2b2b;
+                    background-color: #1E1E1E;
                     color: #ffffff;
-                    border: 1px solid #555555;
-                    border-radius: 4px;
-                    padding: 5px;
+                    border: 1px solid #808080;
+                    border-radius: 0px;
+                    padding: 6px 10px;
+                    font-family: '{FONT_FAMILY}', sans-serif;
+                    font-size: 14px;
+                    max-width: 300px;
                 }
                 QTextEdit {
                     background-color: #2b2b2b;
@@ -515,11 +519,14 @@ class ThemeManager(QObject):
                     background-color: #e0e0e0;
                 }
                 QToolTip {
-                    background-color: #2b2b2b;
-                    color: #ffffff;
-                    border: 1px solid #555555;
-                    border-radius: 4px;
-                    padding: 5px;
+                    background-color: #E0E0E0;
+                    color: #000000;
+                    border: 1px solid #808080;
+                    border-radius: 0px;
+                    padding: 6px 10px;
+                    font-family: '{FONT_FAMILY}', sans-serif;
+                    font-size: 14px;
+                    max-width: 300px;
                 }
                 QProgressBar {
                     border: 1px solid #cccccc;

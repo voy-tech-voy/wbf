@@ -3,15 +3,205 @@ Custom PyQt6 Widgets with Dark Mode Support
 Provides TimeRangeSlider, ResizeFolder, and Rotation classes
 """
 
+from PyQt6.QtCore import Qt, pyqtSignal, QRect, QPoint, QSize, QPropertyAnimation, QEasingCurve, pyqtProperty, QTimer, QObject
+from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QPalette, QIcon, QPixmap
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, 
-    QSpinBox, QLineEdit, QGroupBox, QFormLayout, QCheckBox, QSizePolicy, QApplication, QButtonGroup
+    QSpinBox, QLineEdit, QGroupBox, QFormLayout, QCheckBox, QSizePolicy, 
+    QApplication, QButtonGroup, QStyleOptionButton, QStyle
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QRect, QPoint, QSize
-from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QPalette, QIcon, QPixmap
 from client.utils.font_manager import AppFonts
 from client.utils.resource_path import get_resource_path
 import os
+import math
+
+
+class GPUIndicator(QWidget):
+    """
+    Glowing GPU indicator that pulses with a sin wave when GPU acceleration is active.
+    Shows a GPU icon that glows with clamped(sin(), 0, 1) animation cycle.
+    """
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._gpu_active = False
+        self._glow_phase = 0.0
+        self._base_color = QColor("#00FF00")  # Green for GPU active
+        self._inactive_color = QColor("#555555")  # Gray when inactive
+        
+        # Animation timer
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._update_glow)
+        self._timer.setInterval(50)  # 20 FPS for smooth animation
+        
+        # Fixed size for the indicator
+        self.setFixedSize(32, 32)
+        self.setToolTip("GPU Acceleration")
+        
+    @property
+    def gpu_active(self) -> bool:
+        return self._gpu_active
+        
+    @gpu_active.setter
+    def gpu_active(self, value: bool):
+        self._gpu_active = value
+        if value:
+            self._timer.start()
+            self.setToolTip("GPU Acceleration Active")
+        else:
+            self._timer.stop()
+            self._glow_phase = 0.0
+            self.setToolTip("GPU Acceleration Inactive")
+        self.update()
+        
+    def set_gpu_active(self, active: bool):
+        """Set whether GPU is currently active"""
+        self.gpu_active = active
+        
+    def _update_glow(self):
+        """Update the glow animation phase"""
+        self._glow_phase += 0.15  # Speed of the glow cycle
+        if self._glow_phase > math.pi * 2:
+            self._glow_phase -= math.pi * 2
+        self.update()
+        
+    def _get_glow_intensity(self) -> float:
+        """Calculate glow intensity using clamped sin wave"""
+        # sin() returns -1 to 1, we want 0 to 1
+        # clamp(sin(phase), 0, 1) = max(0, sin(phase))
+        raw = math.sin(self._glow_phase)
+        return max(0.0, min(1.0, raw))
+        
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Calculate center and size
+        center_x = self.width() // 2
+        center_y = self.height() // 2
+        base_radius = min(self.width(), self.height()) // 2 - 4
+        
+        if self._gpu_active:
+            intensity = self._get_glow_intensity()
+            
+            # Draw glow effect (multiple translucent circles)
+            glow_color = QColor(self._base_color)
+            for i in range(3, 0, -1):
+                glow_alpha = int(intensity * 80 / i)
+                glow_color.setAlpha(glow_alpha)
+                glow_radius = base_radius + (i * 3 * intensity)
+                painter.setBrush(QBrush(glow_color))
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.drawEllipse(
+                    QPoint(center_x, center_y),
+                    int(glow_radius), int(glow_radius)
+                )
+            
+            # Draw main circle with dynamic brightness
+            brightness = int(180 + (75 * intensity))
+            main_color = QColor(0, brightness, 0)
+            painter.setBrush(QBrush(main_color))
+            painter.setPen(QPen(QColor("#00AA00"), 2))
+            painter.drawEllipse(QPoint(center_x, center_y), base_radius, base_radius)
+            
+            # Draw GPU text
+            painter.setPen(QPen(QColor("#FFFFFF")))
+            font = painter.font()
+            font.setPointSize(7)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "GPU")
+            
+        else:
+            # Inactive state - gray circle
+            painter.setBrush(QBrush(self._inactive_color))
+            painter.setPen(QPen(QColor("#444444"), 2))
+            painter.drawEllipse(QPoint(center_x, center_y), base_radius, base_radius)
+            
+            # Draw GPU text (dimmed)
+            painter.setPen(QPen(QColor("#888888")))
+            font = painter.font()
+            font.setPointSize(7)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "GPU")
+
+
+
+class AnimatedSideModeButton(QPushButton):
+    """
+    Custom button for sidebars that slides horizontally.
+    Unselected buttons move RIGHT (+8px) to hide behind the folder edge.
+    Selected/hovered buttons slide LEFT (to 0) to reveal themselves.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._offset = 8  # Default: hidden behind folder (moved right)
+        
+        self.animation = QPropertyAnimation(self, b"pos_offset")
+        self.animation.setDuration(200)
+        self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        
+        # Connect toggled signal to handle selection state change
+        self.toggled.connect(self._handle_toggled)
+        
+    @pyqtProperty(int)
+    def pos_offset(self):
+        return self._offset
+        
+    @pos_offset.setter
+    def pos_offset(self, val):
+        self._offset = val
+        self.update()
+        
+    def _handle_toggled(self, checked):
+        """Update animation when selection state changes"""
+        # If checked, move to 0 (flush). If unchecked and not hovering, hide behind (8).
+        target = 0 if checked or self.underMouse() else 8
+        if target != self._offset:
+            self.animation.stop()
+            self.animation.setEndValue(target)
+            self.animation.start()
+            
+    def enterEvent(self, event):
+        """Slide out (to 0) when mouse enters"""
+        self.animation.stop()
+        self.animation.setEndValue(0)
+        self.animation.start()
+        super().enterEvent(event)
+        
+    def leaveEvent(self, event):
+        """Slide back behind folder when mouse leaves, unless selected"""
+        if not self.isChecked():
+            self.animation.stop()
+            self.animation.setEndValue(8)
+            self.animation.start()
+        super().leaveEvent(event)
+        
+    def showEvent(self, event):
+        """Ensure correct initial position based on selected state"""
+        super().showEvent(event)
+        # Set initial offset immediately without animation
+        self._offset = 0 if self.isChecked() else 8
+        self.update()
+
+    def paintEvent(self, event):
+        """Draw the button shifted by the current offset"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        
+        # Translate the painter horizontally
+        # offset 0 = flush, offset 8 = hidden behind folder (moved right)
+        painter.translate(int(self._offset), 0)
+        
+        opt = QStyleOptionButton()
+        self.initStyleOption(opt)
+        opt.rect = QRect(0, 0, 44, self.height())
+        
+        # Draw the button using standard style logic
+        self.style().drawControl(QStyle.ControlElement.CE_PushButton, opt, painter, self)
+        painter.end()
 
 
 class ModeButtonsWidget(QWidget):
@@ -65,8 +255,11 @@ class ModeButtonsWidget(QWidget):
         
         icon_size = QSize(32, 32)  # Increased from 26x26
         
-        # Max Size button
-        self.max_size_btn = QPushButton()
+        if orientation == Qt.Orientation.Vertical:
+            # Use animated version for vertical sidebar
+            self.max_size_btn = AnimatedSideModeButton()
+        else:
+            self.max_size_btn = QPushButton()
         self.max_size_btn.setIcon(QIcon(get_resource_path("client/assets/icons/target_icon.svg")))
         self.max_size_btn.setIconSize(icon_size)
         self.max_size_btn.setCheckable(True)
@@ -77,7 +270,10 @@ class ModeButtonsWidget(QWidget):
             self.max_size_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
         # Presets button
-        self.presets_btn = QPushButton()
+        if orientation == Qt.Orientation.Vertical:
+            self.presets_btn = AnimatedSideModeButton()
+        else:
+            self.presets_btn = QPushButton()
         self.presets_btn.setIcon(QIcon(get_resource_path("client/assets/icons/presets.svg")))
         self.presets_btn.setIconSize(icon_size)
         self.presets_btn.setCheckable(True)
@@ -88,7 +284,10 @@ class ModeButtonsWidget(QWidget):
             self.presets_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
         # Manual button
-        self.manual_btn = QPushButton()
+        if orientation == Qt.Orientation.Vertical:
+            self.manual_btn = AnimatedSideModeButton()
+        else:
+            self.manual_btn = QPushButton()
         self.manual_btn.setIcon(QIcon(get_resource_path("client/assets/icons/settings.svg")))
         self.manual_btn.setIconSize(icon_size)
         self.manual_btn.setCheckable(True)
@@ -1636,7 +1835,9 @@ class SquareButtonRow(QWidget):
         button.setParent(self)
         button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         button.show()
-        
+        # Trigger layout update when state changes to handle resizing
+        button.toggled.connect(self._update_layout)
+
     def minimumSizeHint(self):
         """Return minimum size needed"""
         from PyQt6.QtCore import QSize
@@ -1647,13 +1848,21 @@ class SquareButtonRow(QWidget):
         min_size = 40
         num_buttons = len(self.buttons)
         min_gap = 4
-        total_width = min_size * num_buttons + min_gap * (num_buttons + 1)
+        # Add a bit of buffer for expansion
+        total_width = int((min_size * num_buttons + min_gap * (num_buttons + 1)) * 1.05)
         
         return QSize(max(0, min(total_width, 16777215)), min_size)
-        
+
+    def _update_layout(self):
+        """Trigger layout update"""
+        self._layout_buttons()
+    
     def resizeEvent(self, event):
         """Position buttons as squares based on container height with even distribution"""
         super().resizeEvent(event)
+        self._layout_buttons()
+
+    def _layout_buttons(self):
         if not self.buttons:
             return
             
@@ -1665,45 +1874,55 @@ class SquareButtonRow(QWidget):
         if num_buttons == 0:
             return
         
-        # Calculate button size based on available width to prevent cutting
-        # Reserve space for minimum gaps (4px each)
+        # Calculate availability
         min_gap = 4
         available_width_for_buttons = container_width - (min_gap * (num_buttons + 1))
-        width_based_size = available_width_for_buttons // num_buttons if num_buttons > 0 else 48
         
-        # Also consider container height
+        # Calculate base size. 
+        # A checked button is 5% larger. To be safe, assume we need a bit more space.
+        # Effective units = count + 0.05
+        width_based_size = int(available_width_for_buttons / (num_buttons + 0.05)) if num_buttons > 0 else 48
+        
         height_based_size = container_height
         
-        # Button size = min(width_based, height_based) to fit both dimensions
-        # Clamped to container constraints (48-180px)
-        button_size = max(48, min(width_based_size, height_based_size, 180))
+        # Base button size (unchecked)
+        base_size = int(max(48, min(width_based_size, height_based_size, 180)))
         
-        # Calculate gap: Gap = (Width - (Count × Height)) / (Count + 1)
-        total_buttons_width = button_size * num_buttons
+        # Determine actual sizes
+        sizes = []
+        total_buttons_width = 0
+        for btn in self.buttons:
+            if btn.isChecked():
+                s = int(base_size * 1.05)
+            else:
+                s = base_size
+            sizes.append(s)
+            total_buttons_width += s
+            
+        # Calc gap
         remaining_space = max(0, container_width - total_buttons_width)
         gap = remaining_space // (num_buttons + 1)
-        
-        # Ensure minimum gap
         gap = max(4, gap)
         
-        # Position each button manually
+        # Position
         x_position = gap
-        y_position = (container_height - button_size) // 2  # Center vertically
-        
-        for button in self.buttons:
-            button.setFixedSize(button_size, button_size)
-            button.move(x_position, max(0, y_position))
-            x_position += button_size + gap
+        for i, button in enumerate(self.buttons):
+            s = sizes[i]
+            button.setFixedSize(s, s)
+            # Center vertically
+            button.move(x_position, (container_height - s) // 2)
+            x_position += s + gap
 
 
-class SocialPresetButton(QPushButton):
+
+class PresetButton(QPushButton):
     """
-    Standardized button for social media presets with theme support.
+    Unified button for presets (Social Media & Aspect Ratios).
+    Handles smart icon scaling and consistent styling.
     """
     def __init__(self, name, icon_path=None, parent=None):
-        # If icon is provided, we use it instead of text for a square look
         super().__init__("" if icon_path else name, parent)
-        self.preset_name = name  # Always store the original name
+        self.preset_name = name
         self.setCheckable(True)
         
         # Enable heightForWidth to keep it square while filling width
@@ -1714,97 +1933,30 @@ class SocialPresetButton(QPushButton):
         if icon_path:
             from PyQt6.QtGui import QIcon
             self.setIcon(QIcon(icon_path))
-            
-        self.setToolTip(f"Set settings for {name}")
-
-    def resizeEvent(self, event):
-        """Scale icon to fill button area on resize while maintaining aspect ratio"""
-        super().resizeEvent(event)
-        if not self.icon().isNull():
-            from PyQt6.QtCore import QSize
-            # Fill with 80% of button area to leave some padding
-            side = int(min(self.width(), self.height()) * 0.8)
-            
-            # YouTube and Behance are wide, others are square
-            if self.preset_name.lower() in ["youtube", "behance"]:
-                # Use approx 1.5:1 ratio for wide icons to prevent stretching in square iconSize
-                self.setIconSize(QSize(side, int(side * 0.65)))
-            else:
-                self.setIconSize(QSize(side, side))
-
-    def hasHeightForWidth(self):
-        return True
-
-    def heightForWidth(self, w):
-        return w
-
-    def update_theme(self, is_dark):
-        """Update styling based on theme"""
-        if is_dark:
-            bg_color = "#333333"
-            border_color = "#444444"
-            text_color = "white"
-            hover_bg = "#404040"
+        
+        # Set intelligent tooltip
+        if ":" in name:
+            self.setToolTip(f"Set aspect ratio to {name}")
         else:
-            bg_color = "#f0f0f0"
-            border_color = "#cccccc"
-            text_color = "#333333"
-            hover_bg = "#e0e0e0"
-
-        checked_bg = "#4CAF50"
-        checked_border = "#43a047"
-
-        style = f"""
-            QPushButton {{
-                padding: 0px;
-                border-radius: 6px;
-                border: 1px solid {border_color};
-                background-color: {bg_color};
-                color: {text_color};
-                font-weight: 500;
-            }}
-            QPushButton:checked {{
-                background-color: {checked_bg};
-                border-color: {checked_border};
-                color: white;
-            }}
-            QPushButton:hover:!checked {{
-                background-color: {hover_bg};
-            }}
-        """
-        self.setStyleSheet(style)
-
-
-class RatioPresetButton(QPushButton):
-    """
-    Standardized button for aspect ratio presets with theme support.
-    """
-    def __init__(self, ratio, icon_path=None, parent=None):
-        # Use icon if provided for an icon-only square look
-        super().__init__("" if icon_path else ratio, parent)
-        self.preset_name = ratio
-        self.setCheckable(True)
-        
-        # Enable heightForWidth to keep it square while filling width
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.setMinimumSize(40, 40)
-        
-        if icon_path:
-            from PyQt6.QtGui import QIcon
-            self.setIcon(QIcon(icon_path))
-            
-        self.setToolTip(f"Set aspect ratio to {ratio}")
+            self.setToolTip(f"Set settings for {name}")
 
     def resizeEvent(self, event):
-        """Scale icon to fill button area on resize while maintaining aspect ratio"""
+        """Scale icon to fill button area smartly based on preset type"""
         super().resizeEvent(event)
         if not self.icon().isNull():
             from PyQt6.QtCore import QSize
-            # Fill with 80% of button area to leave some padding
+            # Base size: 80% of button area
             side = int(min(self.width(), self.height()) * 0.8)
             
-            # Calculate aspect ratio from preset name (e.g. "16:9")
-            if ":" in self.preset_name:
+            name_lower = self.preset_name.lower()
+            
+            # Case 1: Wide Social Icons
+            if name_lower in ["youtube", "behance"]:
+                # Use approx 1.5:1 ratio for wide icons
+                self.setIconSize(QSize(side, int(side * 0.65)))
+                
+            # Case 2: Aspect Ratio Icons
+            elif ":" in self.preset_name:
                 try:
                     w_r, h_r = map(int, self.preset_name.split(':'))
                     if w_r > h_r:
@@ -1813,8 +1965,10 @@ class RatioPresetButton(QPushButton):
                         self.setIconSize(QSize(int(side * w_r / h_r), side))
                     else:
                         self.setIconSize(QSize(side, side))
-                except:
+                except ValueError:
                     self.setIconSize(QSize(side, side))
+                    
+            # Case 3: Standard Square Icons
             else:
                 self.setIconSize(QSize(side, side))
 
@@ -1836,6 +1990,9 @@ class RatioPresetButton(QPushButton):
             border_color = "#cccccc"
             text_color = "#333333"
             hover_bg = "#e0e0e0"
+            
+        # Store for paintEvent fallback
+        self.custom_text_color = QColor(text_color)
 
         checked_bg = "#4CAF50"
         checked_border = "#43a047"
@@ -1859,3 +2016,1051 @@ class RatioPresetButton(QPushButton):
             }}
         """
         self.setStyleSheet(style)
+        
+    def paintEvent(self, event):
+        """Paint overlaid text if icon is present but hidden, or fallback"""
+        super().paintEvent(event)
+        
+        # Logic: If we have a preset name, but no icon was set (text mode), or explicit overwrite needed
+        if not self.text() and self.preset_name:
+            # Only paint text overlay for Aspect Ratio presets (containing ":")
+            # Social presets typically have distinct icons (logos) and don't need text overlay
+            has_colon = ":" in self.preset_name
+            if not has_colon:
+                 return
+
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            
+            # Determine color
+            if self.isChecked():
+                color = QColor("white")
+            elif hasattr(self, 'custom_text_color'):
+                color = self.custom_text_color
+            else:
+                color = QColor("white") # Fallback
+                
+            painter.setPen(color)
+            
+            # Bold font
+            font = painter.font() if painter.font() else self.font()
+            font.setBold(True)
+            font.setPointSize(11)
+            painter.setFont(font)
+            
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.preset_name)
+
+# Alias for backward compatibility if needed temporarily (though we will replace usages)
+SocialPresetButton = PresetButton
+RatioPresetButton = PresetButton
+
+
+class FormatButtonRow(QWidget):
+    """
+    A row of exclusive buttons to select a format.
+    Mimics QComboBox API (currentText, setCurrentText, currentTextChanged)
+    for easy drop-in replacement.
+    """
+    
+    currentTextChanged = pyqtSignal(str)
+    
+    def __init__(self, formats, parent=None):
+        super().__init__(parent)
+        self.formats = formats
+        
+        # Horizontal layout
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        
+        self.button_group = QButtonGroup(self)
+        self.button_group.setExclusive(True)
+        self.buttons = {}
+        
+        for fmt in formats:
+            btn = QPushButton(fmt)
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            
+            # Add to group and layout
+            self.button_group.addButton(btn)
+            layout.addWidget(btn, 1) # Stretch factor 1 to fill width evenly
+            self.buttons[fmt] = btn
+            
+            # Connect signal
+            # Use a captured variable for the format string
+            btn.toggled.connect(lambda checked, f=fmt: checked and self.currentTextChanged.emit(f))
+            
+        # Select first by default
+        if formats:
+            self.buttons[formats[0]].setChecked(True)
+        
+        # Remove stretch to allow buttons to fill width
+        # layout.addStretch()
+            
+        # Apply initial theme
+        from client.utils.theme_utils import is_dark_mode
+        self.update_theme(is_dark_mode())
+        
+    def currentText(self):
+        """Get the text of the currently checked button"""
+        for fmt, btn in self.buttons.items():
+            if btn.isChecked():
+                return fmt
+        return ""
+        
+    def setCurrentText(self, text):
+        """Set the currently checked button by text"""
+        if text in self.buttons:
+            self.buttons[text].setChecked(True)
+            
+    def update_theme(self, is_dark):
+        """Update button styling based on theme"""
+        if is_dark:
+            bg_color = "transparent"
+            border_color = "#555555"
+            text_color = "#eeeeee"
+            hover_bg = "rgba(255, 255, 255, 0.1)"
+        else:
+            bg_color = "transparent"
+            border_color = "#cccccc"
+            text_color = "#333333"
+            hover_bg = "rgba(0, 0, 0, 0.05)"
+            
+        style = f"""
+            QPushButton {{
+                padding: 10px 12px;
+                border-radius: 6px;
+                border: 1px solid {border_color};
+                background-color: {bg_color};
+                color: {text_color};
+                font-weight: 500;
+                min-height: 24px;
+            }}
+            QPushButton:hover {{
+                background-color: {hover_bg};
+            }}
+            QPushButton:checked {{
+                background-color: #4CAF50;
+                border-color: #43a047;
+                color: white;
+                font-weight: bold;
+                font-size: 105%;
+            }}
+        """
+        
+        for btn in self.buttons.values():
+            btn.setStyleSheet(style)
+
+
+class RotationButtonRow(QWidget):
+    """
+    Row of square buttons for rotation selection (0°, 90°, 180°, 270°).
+    Mimics QComboBox API for compatibility.
+    """
+    currentTextChanged = pyqtSignal(str)
+    
+    # Mapping from display text to internal value (for compatibility with existing logic)
+    ROTATION_MAP = {
+        "0°": "No rotation",
+        "90°": "90° clockwise",
+        "180°": "180°",
+        "270°": "270° clockwise"
+    }
+    
+    REVERSE_MAP = {v: k for k, v in ROTATION_MAP.items()}
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        
+        self.button_group = QButtonGroup(self)
+        self.button_group.setExclusive(True)
+        self.buttons = {}
+        
+        rotations = ["0°", "90°", "180°", "270°"]
+        
+        for rot in rotations:
+            btn = QPushButton(rot)
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedSize(48, 48)  # Square buttons
+            
+            self.button_group.addButton(btn)
+            layout.addWidget(btn)
+            self.buttons[rot] = btn
+            
+            # Connect signal - emit the internal value for compatibility
+            btn.toggled.connect(lambda checked, r=rot: checked and self.currentTextChanged.emit(self.ROTATION_MAP[r]))
+            
+        # Select first by default (0° = No rotation)
+        self.buttons["0°"].setChecked(True)
+        
+        layout.addStretch()
+            
+        from client.utils.theme_utils import is_dark_mode
+        self.update_theme(is_dark_mode())
+        
+    def currentText(self):
+        """Get the internal value of the currently checked button"""
+        for rot, btn in self.buttons.items():
+            if btn.isChecked():
+                return self.ROTATION_MAP[rot]
+        return "No rotation"
+        
+    def setCurrentText(self, text):
+        """Set the currently checked button by internal value"""
+        # Map from internal value to display text
+        display = self.REVERSE_MAP.get(text, "0°")
+        if display in self.buttons:
+            self.buttons[display].setChecked(True)
+            
+    def update_theme(self, is_dark):
+        """Update button styling based on theme"""
+        if is_dark:
+            bg_color = "transparent"
+            border_color = "#555555"
+            text_color = "#eeeeee"
+            hover_bg = "rgba(255, 255, 255, 0.1)"
+        else:
+            bg_color = "transparent"
+            border_color = "#cccccc"
+            text_color = "#333333"
+            hover_bg = "rgba(0, 0, 0, 0.05)"
+            
+        style = f"""
+            QPushButton {{
+                padding: 8px;
+                border-radius: 6px;
+                border: 1px solid {border_color};
+                background-color: {bg_color};
+                color: {text_color};
+                font-weight: 600;
+                font-size: 14px;
+            }}
+            QPushButton:hover {{
+                background-color: {hover_bg};
+            }}
+            QPushButton:checked {{
+                background-color: #4CAF50;
+                border-color: #43a047;
+                color: white;
+                font-weight: bold;
+            }}
+        """
+        
+        for btn in self.buttons.values():
+            btn.setStyleSheet(style)
+
+
+
+from client.utils.font_manager import AppFonts, FONT_FAMILY
+
+class AppTooltip(QLabel):
+    """
+    Unified, theme-aware tooltip for the entire application.
+    
+    Features:
+    - Dark/Light mode support with automatic theme detection
+    - Fade-in/out animations
+    - Configurable show delay (mimics native tooltip behavior)
+    - Auto-positioning above or below target widget
+    - Consistent styling across the app
+    
+    Usage:
+        # Option 1: Direct instantiation
+        tooltip = AppTooltip()
+        tooltip.show_for_widget(widget, "Tooltip text")
+        
+        # Option 2: Use helper function (recommended)
+        install_app_tooltip(widget, "Tooltip text")
+    """
+    
+    # Singleton instance for shared tooltip
+    _instance = None
+    
+    @classmethod
+    def instance(cls):
+        """Get or create the shared tooltip instance."""
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+    
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        
+        # Ensure no default margins interfere with stylesheet padding
+        self.setMargin(0)
+        self.setContentsMargins(0, 0, 0, 0)
+        self.setWordWrap(True)  # Allow text wrapping for long tooltips
+        
+        # Track current theme
+        self._is_dark = True
+        self._apply_theme_style()
+        
+        # Opacity animation for fade-in/out
+        self.setWindowOpacity(0.0)
+        self._fade_anim = QPropertyAnimation(self, b"windowOpacity")
+        self._fade_anim.setDuration(150)
+        self._fade_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+        
+        # Show delay timer (500ms like native tooltips)
+        self._show_delay_timer = QTimer(self)
+        self._show_delay_timer.setSingleShot(True)
+        self._show_delay_timer.timeout.connect(self._do_show)
+        
+        # Auto-hide timer (5 seconds)
+        self._auto_hide_timer = QTimer(self)
+        self._auto_hide_timer.setSingleShot(True)
+        self._auto_hide_timer.timeout.connect(self.hide_tooltip)
+        
+        # Pending show data
+        self._pending_text = ""
+        self._pending_pos = None
+        self._target_widget = None
+        
+    # Explicit padding constants (pixels)
+    PADDING_H = 14  # Horizontal padding (left + right each)
+    PADDING_V = 10  # Vertical padding (top + bottom each)
+    
+    def _apply_theme_style(self):
+        """Apply styling based on current theme."""
+        from client.utils.theme_utils import is_dark_mode
+        self._is_dark = is_dark_mode()
+        
+        if self._is_dark:
+            bg_color = "#1E1E1E"
+            border_color = "#4CAF50"
+            text_color = "#FFFFFF"
+        else:
+            bg_color = "#E0E0E0"
+            border_color = "#4CAF50"
+            text_color = "#000000"
+        
+        # Explicit padding in stylesheet for consistent spacing
+        self.setStyleSheet(f"""
+            QLabel {{
+                background-color: {bg_color};
+                border: 1px solid {border_color};
+                color: {text_color};
+                border-radius: 6px;
+                font-family: '{FONT_FAMILY}', sans-serif;
+                font-size: 14px;
+                font-weight: 500;
+                padding: {self.PADDING_V}px {self.PADDING_H}px;
+            }}
+        """)
+        
+    def update_theme(self, is_dark: bool):
+        """Update tooltip styling for theme change."""
+        self._is_dark = is_dark
+        self._apply_theme_style()
+        
+    def show_message(self, text: str, target_pos_global: QPoint, delay_ms: int = 0):
+        """
+        Show tooltip centered above target_pos_global.
+        
+        Args:
+            text: Tooltip text (supports newlines)
+            target_pos_global: Global position (typically top-center of target widget)
+            delay_ms: Delay before showing (0 for immediate)
+        """
+        # =====================================================
+        # CRITICAL: Immediately reset before showing new tooltip
+        # This fixes issues when rapidly switching between widgets
+        # =====================================================
+        
+        # 1. Stop ALL timers immediately
+        self._show_delay_timer.stop()
+        self._auto_hide_timer.stop()
+        
+        # 2. Stop animation and disconnect signals
+        self._fade_anim.stop()
+        try:
+            self._fade_anim.finished.disconnect(self._on_fade_out_finished)
+        except TypeError:
+            pass
+        
+        # 3. If currently visible, force immediate hide and full reset
+        if self.isVisible() or self.windowOpacity() > 0:
+            self.hide()
+            self.setWindowOpacity(0.0)
+            self.move(-10000, -10000)
+            
+            # Reset ALL layout properties
+            self.setMargin(0)
+            self.setContentsMargins(0, 0, 0, 0)
+            self.setStyleSheet("")
+            self.setMinimumSize(0, 0)
+            self.setMaximumSize(16777215, 16777215)
+            self.resize(0, 0)
+            self.setText("")
+            self.updateGeometry()
+            
+            # Process events to ensure reset takes effect
+            QApplication.processEvents()
+        
+        # Store new pending data
+        self._pending_text = text
+        self._pending_pos = target_pos_global
+        
+        if delay_ms > 0:
+            self._show_delay_timer.start(delay_ms)
+        else:
+            self._do_show()
+            
+    def show_for_widget(self, widget: QWidget, text: str, delay_ms: int = 500):
+        """
+        Show tooltip for a widget with automatic positioning.
+        
+        Args:
+            widget: Target widget to show tooltip for
+            text: Tooltip text
+            delay_ms: Delay before showing (default 500ms like native)
+        """
+        self._target_widget = widget
+        
+        # Calculate position: center-top of widget
+        global_pos = widget.mapToGlobal(QPoint(widget.width() // 2, 0))
+        self.show_message(text, global_pos, delay_ms)
+        
+    def _do_show(self):
+        """Actually display the tooltip after delay."""
+        if not self._pending_text or not self._pending_pos:
+            return
+        
+        # =====================================================
+        # CRITICAL: Complete reset cycle before showing new tooltip
+        # When rapidly switching, the widget may be animating or 
+        # have stale geometry. We must fully reset BEFORE configuring.
+        # =====================================================
+        
+        # 1. Stop ALL timers that could interfere
+        self._auto_hide_timer.stop()
+        
+        # 2. Stop animation and disconnect ALL signals
+        self._fade_anim.stop()
+        try:
+            self._fade_anim.finished.disconnect(self._on_fade_out_finished)
+        except TypeError:
+            pass  # Not connected
+        
+        # 3. Force immediate hide (not animated)
+        self.hide()
+        
+        # 4. Process events to ensure hide takes effect before we reconfigure
+        QApplication.processEvents()
+        
+        # 5. Reset opacity to 0 (will fade in fresh)
+        self.setWindowOpacity(0.0)
+        
+        # 6. Move off-screen to prevent flash at old position
+        self.move(-10000, -10000)
+        
+        # 7. Reset ALL margin/padding properties to defaults
+        self.setMargin(0)
+        self.setContentsMargins(0, 0, 0, 0)
+        
+        # 8. Clear stylesheet completely before reapplying
+        self.setStyleSheet("")
+        
+        # 9. Clear ALL size constraints and geometry
+        self.setMinimumSize(0, 0)
+        self.setMaximumSize(16777215, 16777215)  # QWIDGETSIZE_MAX
+        self.resize(0, 0)  # Clear to absolute minimum
+        
+        # 10. Clear text to force fresh layout calculation
+        self.setText("")
+        
+        # 11. Force geometry update
+        self.updateGeometry()
+        
+        # =====================================================
+        # Now configure and show the new tooltip
+        # =====================================================
+        
+        # Apply theme styling (includes padding via stylesheet)
+        self._apply_theme_style()
+        
+        # Set text (no manual space padding - stylesheet handles it)
+        self.setText(self._pending_text)
+        
+        # Center text alignment
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Calculate size using QFontMetrics for precise control
+        from PyQt6.QtGui import QFontMetrics, QFont
+        
+        font = QFont(FONT_FAMILY, 14)
+        font.setWeight(QFont.Weight.Medium)
+        fm = QFontMetrics(font)
+        
+        # Calculate text bounding rect (supports multi-line)
+        max_width = 350
+        text_rect = fm.boundingRect(0, 0, max_width, 0, 
+                                    Qt.TextFlag.TextWordWrap | Qt.AlignmentFlag.AlignLeft,
+                                    self._pending_text)
+        
+        # Calculate total size: text + padding (both sides) + border
+        total_width = text_rect.width() + (self.PADDING_H * 2) + 2
+        total_height = text_rect.height() + (self.PADDING_V * 2) + 2
+        
+        # Apply fixed size
+        self.setFixedSize(total_width, total_height)
+        
+        # Calculate position
+        x = self._pending_pos.x() - (total_width // 2)
+        y = self._pending_pos.y() - total_height - 8
+        
+        # Screen boundary checks
+        screen = QApplication.primaryScreen()
+        if screen:
+            screen_rect = screen.availableGeometry()
+            
+            if x < screen_rect.left():
+                x = screen_rect.left() + 4
+            elif x + total_width > screen_rect.right():
+                x = screen_rect.right() - total_width - 4
+                
+            if y < screen_rect.top():
+                if self._target_widget:
+                    y = self._pending_pos.y() + self._target_widget.height() + 8
+                else:
+                    y = self._pending_pos.y() + 24
+        
+        # Move and show
+        self.move(x, y)
+        self.show()
+        
+        # Fade in animation
+        self._fade_anim.setStartValue(0.0)
+        self._fade_anim.setEndValue(0.97)
+        self._fade_anim.start()
+        
+        # Auto-hide timer
+        self._auto_hide_timer.start(5000)
+        
+    def hide_tooltip(self):
+        """Hide the tooltip with fade-out animation."""
+        self._show_delay_timer.stop()
+        self._auto_hide_timer.stop()
+        
+        if self.isVisible():
+            self._fade_anim.stop()
+            self._fade_anim.setStartValue(self.windowOpacity())
+            self._fade_anim.setEndValue(0.0)
+            self._fade_anim.finished.connect(self._on_fade_out_finished)
+            self._fade_anim.start()
+        else:
+            self.hide()
+            
+    def _on_fade_out_finished(self):
+        """Called when fade-out animation completes."""
+        try:
+            self._fade_anim.finished.disconnect(self._on_fade_out_finished)
+        except:
+            pass
+        self.hide()
+        self.setWindowOpacity(0.0)
+        
+    def cancel_pending(self):
+        """Cancel any pending tooltip show."""
+        self._show_delay_timer.stop()
+        self._pending_text = ""
+        self._pending_pos = None
+        self._target_widget = None
+
+
+class TooltipEventFilter(QObject):
+    """
+    Event filter that intercepts hover events to show native QToolTip.
+    Uses Qt's built-in tooltip system for reliable behavior.
+    """
+    
+    def __init__(self, target_widget: QWidget, tooltip_text: str = None):
+        super().__init__(target_widget)
+        self._target = target_widget
+        self._custom_text = tooltip_text
+        # Set native tooltip on the widget
+        if tooltip_text:
+            self._target.setToolTip(tooltip_text)
+        self._target.installEventFilter(self)
+        
+    def eventFilter(self, obj, event):
+        if obj != self._target:
+            return False
+            
+        event_type = event.type()
+        
+        if event_type == 10:  # QEvent.Type.Enter
+            text = self._custom_text or self._target.toolTip()
+            if text:
+                # Use native QToolTip - much more reliable
+                from PyQt6.QtWidgets import QToolTip
+                from PyQt6.QtCore import QPoint
+                
+                # Position above widget center
+                global_pos = self._target.mapToGlobal(
+                    QPoint(self._target.width() // 2, -8)
+                )
+                QToolTip.showText(global_pos, text, self._target)
+                
+        elif event_type == 11:  # QEvent.Type.Leave
+            from PyQt6.QtWidgets import QToolTip
+            QToolTip.hideText()
+            
+        return False
+
+
+def install_app_tooltip(widget: QWidget, text: str = None) -> TooltipEventFilter:
+    """
+    Install tooltip on a widget using Qt's native QToolTip system.
+    
+    If text is provided, it overrides any existing toolTip.
+    If text is None, the widget's existing toolTip() will be used.
+    
+    Args:
+        widget: The widget to add tooltip to
+        text: Optional tooltip text (uses widget.toolTip() if None)
+        
+    Returns:
+        The event filter instance (keep reference if you need to modify)
+        
+    Usage:
+        install_app_tooltip(my_button, "Click to submit")
+        # or if already has setToolTip:
+        my_button.setToolTip("Click to submit")
+        install_app_tooltip(my_button)
+    """
+    return TooltipEventFilter(widget, text)
+
+
+def apply_tooltip_style(is_dark: bool = True):
+    """
+    Apply global QToolTip styling to match app theme.
+    Call this when initializing the app or changing themes.
+    
+    Args:
+        is_dark: Whether dark mode is active
+    """
+    from client.utils.font_manager import FONT_FAMILY
+    
+    if is_dark:
+        bg_color = "#1E1E1E"
+        border_color = "#808080"  # Greyish border
+        text_color = "#FFFFFF"
+    else:
+        bg_color = "#E0E0E0"
+        border_color = "#808080"  # Greyish border
+        text_color = "#000000"
+    
+    tooltip_style = f"""
+        QToolTip {{
+            background-color: {bg_color};
+            border: 1px solid {border_color};
+            color: {text_color};
+            border-radius: 0px;
+            font-family: '{FONT_FAMILY}', sans-serif;
+            font-size: 14px;
+            font-weight: 500;
+            padding: 6px 10px;
+            max-width: 300px;
+        }}
+    """
+    
+    app = QApplication.instance()
+    if app:
+        current_style = app.styleSheet() or ""
+        # Remove old QToolTip style if exists
+        import re
+        current_style = re.sub(r'QToolTip\s*\{[^}]*\}', '', current_style)
+        app.setStyleSheet(current_style + tooltip_style)
+
+
+# Alias for backwards compatibility
+ModernTooltip = AppTooltip
+
+
+class LoopFormatSelector(QWidget):
+    """
+    Conditional format selector for Loop tab.
+    - Two primary square buttons: GIF and WebM
+    - When WebM is selected, shows a segmented control for AV1/VP9
+    - WebM buttons have hover tooltips describing tradeoffs
+    """
+    formatChanged = pyqtSignal(str)  # Emits the full format string like "GIF", "WebM (AV1)", "WebM (VP9)"
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(8)
+        
+        # Row 1: Primary format buttons (GIF / WebM)
+        primary_row = QHBoxLayout()
+        primary_row.setSpacing(12)
+        
+        self.primary_group = QButtonGroup(self)
+        self.primary_group.setExclusive(True)
+        
+        # WebM Button (First)
+        self.webm_btn = QPushButton("WebM")
+        self.webm_btn.setCheckable(True)
+        self.webm_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.webm_btn.setFixedSize(80, 48)
+        self.primary_group.addButton(self.webm_btn)
+        primary_row.addWidget(self.webm_btn)
+        
+        # GIF Button
+        self.gif_btn = QPushButton("GIF")
+        self.gif_btn.setCheckable(True)
+        self.gif_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.gif_btn.setFixedSize(80, 48)
+        self.primary_group.addButton(self.gif_btn)
+        primary_row.addWidget(self.gif_btn)
+        
+        primary_row.addStretch()
+        main_layout.addLayout(primary_row)
+        
+        # Row 2: Codec selector (only visible for WebM)
+        self.codec_row = QWidget()
+        codec_layout = QHBoxLayout(self.codec_row)
+        codec_layout.setContentsMargins(0, 4, 0, 0)
+        codec_layout.setSpacing(8)
+        
+        # Segmented control for AV1/VP9
+        self.codec_group = QButtonGroup(self)
+        self.codec_group.setExclusive(True)
+        
+        self.av1_btn = QPushButton("💎 AV1")
+        self.av1_btn.setCheckable(True)
+        self.av1_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.av1_btn.setFixedHeight(32)
+        self.av1_btn.setMinimumWidth(80)
+        self.codec_group.addButton(self.av1_btn)
+        codec_layout.addWidget(self.av1_btn)
+        
+        self.vp9_btn = QPushButton("⚡ VP9")
+        self.vp9_btn.setCheckable(True)
+        self.vp9_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.vp9_btn.setFixedHeight(32)
+        self.vp9_btn.setMinimumWidth(80)
+        self.codec_group.addButton(self.vp9_btn)
+        codec_layout.addWidget(self.vp9_btn)
+        
+        # tooltip setup - use unified AppTooltip via helper
+        install_app_tooltip(self.av1_btn, "Smaller file size. Slower encoding time.\nBest for performance.")
+        install_app_tooltip(self.vp9_btn, "Bigger file size. Faster encoding.")
+        
+        codec_layout.addStretch()
+        main_layout.addWidget(self.codec_row)
+        
+        # Set defaults
+        self.gif_btn.setChecked(True)
+        self.av1_btn.setChecked(True)  # AV1 is default for WebM
+        self.codec_row.setVisible(False)  # Hidden initially (GIF selected)
+        
+        # Connect signals
+        self.gif_btn.toggled.connect(self._on_primary_changed)
+        self.webm_btn.toggled.connect(self._on_primary_changed)
+        self.av1_btn.toggled.connect(self._on_codec_changed)
+        self.vp9_btn.toggled.connect(self._on_codec_changed)
+        
+        from client.utils.theme_utils import is_dark_mode
+        self.update_theme(is_dark_mode())
+        
+    def _on_primary_changed(self, checked):
+        """Handle primary format button change"""
+        if not checked:
+            return
+        
+        is_webm = self.webm_btn.isChecked()
+        self.codec_row.setVisible(is_webm)
+        
+        self._emit_format()
+        
+    def _on_codec_changed(self, checked):
+        """Handle codec button change"""
+        if checked:
+            self._emit_format()
+            
+    def _emit_format(self):
+        """Emit the current format string"""
+        if self.gif_btn.isChecked():
+            self.formatChanged.emit("GIF")
+        else:
+            codec = "AV1" if self.av1_btn.isChecked() else "VP9"
+            self.formatChanged.emit(f"WebM ({codec})")
+            
+    def currentText(self):
+        """Get the current format string (compatibility with FormatButtonRow)"""
+        if self.gif_btn.isChecked():
+            return "GIF"
+        else:
+            codec = "AV1" if self.av1_btn.isChecked() else "VP9"
+            return f"WebM ({codec})"
+            
+    def setCurrentText(self, text):
+        """Set the current format (compatibility)"""
+        if text == "GIF":
+            self.gif_btn.setChecked(True)
+        elif "WebM" in text:
+            self.webm_btn.setChecked(True)
+            if "VP9" in text:
+                self.vp9_btn.setChecked(True)
+            else:
+                self.av1_btn.setChecked(True)
+                
+    def update_theme(self, is_dark):
+        """Update styling based on theme"""
+        if is_dark:
+            bg_color = "transparent"
+            border_color = "#555555"
+            text_color = "#eeeeee"
+            hover_bg = "rgba(255, 255, 255, 0.1)"
+        else:
+            bg_color = "transparent"
+            border_color = "#cccccc"
+            text_color = "#333333"
+            hover_bg = "rgba(0, 0, 0, 0.05)"
+            
+        # Primary buttons style (larger)
+        primary_style = f"""
+            QPushButton {{
+                padding: 8px 16px;
+                border-radius: 8px;
+                border: 2px solid {border_color};
+                background-color: {bg_color};
+                color: {text_color};
+                font-weight: 600;
+                font-size: 15px;
+            }}
+            QPushButton:hover {{
+                background-color: {hover_bg};
+            }}
+            QPushButton:checked {{
+                background-color: #4CAF50;
+                border-color: #43a047;
+                color: white;
+                font-weight: bold;
+            }}
+        """
+        self.gif_btn.setStyleSheet(primary_style)
+        self.webm_btn.setStyleSheet(primary_style)
+        
+        # Codec buttons style (smaller, segmented look)
+        codec_style = f"""
+            QPushButton {{
+                padding: 4px 12px;
+                border-radius: 4px;
+                border: 1px solid {border_color};
+                background-color: {bg_color};
+                color: {text_color};
+                font-weight: 500;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {hover_bg};
+            }}
+            QPushButton:checked {{
+                background-color: #2196F3;
+                border-color: #1976D2;
+                color: white;
+                font-weight: bold;
+            }}
+        """
+        self.av1_btn.setStyleSheet(codec_style)
+        self.vp9_btn.setStyleSheet(codec_style)
+
+class HardwareAwareCodecButton(QPushButton):
+    """
+    Checkable button for codec selection with hardware acceleration visual effects.
+    Replaces circuit trace with internal glow on hover.
+    """
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self.setCheckable(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedHeight(48)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        
+        # GPU state
+        self._gpu_available = False
+        self._is_hovered = False
+        
+        # Glow Animation properties
+        self._glow_opacity = 0.0
+        self._glow_direction = 1
+        self._glow_timer = QTimer(self)
+        self._glow_timer.timeout.connect(self._update_glow)
+        self._glow_timer.setInterval(33) # ~30 FPS
+        
+    def set_gpu_available(self, available: bool):
+        self._gpu_available = available
+        self.update()
+        
+    def enterEvent(self, event):
+        self._is_hovered = True
+        if self._gpu_available:
+            self._glow_timer.start()
+        super().enterEvent(event)
+        
+    def leaveEvent(self, event):
+        self._is_hovered = False
+        self._glow_timer.stop()
+        self._glow_opacity = 0.0
+        self.update()
+        super().leaveEvent(event)
+        
+    def _update_glow(self):
+        """Pulse the internal glow opacity"""
+        # Pulse between 0.05 and 0.25 opacity
+        step = 0.015
+        self._glow_opacity += step * self._glow_direction
+        
+        if self._glow_opacity >= 0.25:
+            self._glow_opacity = 0.25
+            self._glow_direction = -1
+        elif self._glow_opacity <= 0.05:
+            self._glow_opacity = 0.05
+            self._glow_direction = 1
+        self.update()
+        
+    def paintEvent(self, event):
+        # Let default painting happen (background, border, text)
+        super().paintEvent(event)
+        
+        if self._gpu_available:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            
+            # Always draw bolt icon if GPU available
+            self._draw_bolt_icon(painter)
+            
+            # Draw internal glow only on hover
+            if self._is_hovered:
+                self._draw_internal_glow(painter)
+                
+            painter.end()
+            
+    def _draw_bolt_icon(self, painter):
+        # Position in top-right corner
+        icon_size = 8
+        x = self.width() - icon_size - 6
+        y = 6
+        
+        painter.setPen(Qt.PenStyle.NoPen)
+        # Cyan if checked or hovered, dimmer turquoise if not
+        color = QColor("#00F3FF") if self.isChecked() or self._is_hovered else QColor("#00AAAA")
+        if not self.isChecked() and not self._is_hovered:
+             color.setAlpha(180)
+             
+        painter.setBrush(QBrush(color))
+        
+        # Simple bolt polygon
+        bolt = [
+            QPoint(x + 5, y),
+            QPoint(x + 1, y + 4),
+            QPoint(x + 4, y + 4),
+            QPoint(x + 3, y + 8),
+            QPoint(x + 7, y + 3),
+            QPoint(x + 4, y + 3),
+        ]
+        painter.drawPolygon(bolt)
+
+    def _draw_internal_glow(self, painter):
+        """Draw a pulsing internal glow"""
+        color = QColor("#00F3FF")
+        color.setAlphaF(self._glow_opacity)
+        
+        painter.setBrush(QBrush(color))
+        painter.setPen(Qt.PenStyle.NoPen)
+        
+        # Draw rounded rect slightly inside border
+        # Assuming 8px border radius for button, let's use 6px for glow
+        rect = self.rect().adjusted(2, 2, -2, -2)
+        painter.drawRoundedRect(rect, 6, 6)
+
+
+class VideoCodecSelector(QWidget):
+    """
+    Selector for video codecs (H.264, H.265, AV1) with hardware acceleration indicators.
+    """
+    codecChanged = pyqtSignal(str)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        
+        self.group = QButtonGroup(self)
+        self.group.setExclusive(True)
+        
+        self.btn_h264 = HardwareAwareCodecButton("H.264")
+        self.btn_h265 = HardwareAwareCodecButton("H.265")
+        self.btn_av1 = HardwareAwareCodecButton("AV1")
+        
+        for btn in [self.btn_h264, self.btn_h265, self.btn_av1]:
+            self.group.addButton(btn)
+            layout.addWidget(btn)
+            
+        self.btn_h264.setChecked(True)
+        self.group.buttonToggled.connect(self._on_toggled)
+        
+        from client.utils.theme_utils import is_dark_mode
+        self.update_theme(is_dark_mode())
+
+    def _on_toggled(self, btn, checked):
+        if checked:
+            self.codecChanged.emit(self.currentText())
+            
+    def currentText(self):
+        if self.btn_h264.isChecked(): return "MP4 (H.264)"
+        if self.btn_h265.isChecked(): return "MP4 (H.265)"
+        if self.btn_av1.isChecked(): return "MP4 (AV1)"
+        return "MP4 (H.264)"
+        
+    def setCurrentText(self, text):
+        if "H.264" in text: self.btn_h264.setChecked(True)
+        elif "H.265" in text or "HEVC" in text: self.btn_h265.setChecked(True)
+        elif "AV1" in text: self.btn_av1.setChecked(True)
+        
+    def update_gpu_status(self, available_codecs):
+        """Update buttons based on GPU availability"""
+        self.btn_h264.set_gpu_available('h264' in available_codecs)
+        self.btn_h265.set_gpu_available('hevc' in available_codecs)
+        self.btn_av1.set_gpu_available('av1' in available_codecs)
+
+    def update_theme(self, is_dark):
+        border_color = "#555555" if is_dark else "#cccccc"
+        bg_color = "transparent"
+        text_color = "#eeeeee" if is_dark else "#333333"
+        hover_bg = "rgba(255, 255, 255, 0.1)" if is_dark else "rgba(0, 0, 0, 0.05)"
+        
+        style = f"""
+            QPushButton {{
+                background-color: {bg_color};
+                border: 2px solid {border_color};
+                border-radius: 8px;
+                color: {text_color};
+                font-weight: 600;
+                font-size: 14px;
+            }}
+            QPushButton:hover {{
+                background-color: {hover_bg};
+            }}
+            QPushButton:checked {{
+                background-color: #4CAF50;
+                border-color: #388E3C;
+                color: white;
+            }}
+        """
+        self.btn_h264.setStyleSheet(style)
+        self.btn_h265.setStyleSheet(style)
+        self.btn_av1.setStyleSheet(style)

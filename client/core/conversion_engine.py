@@ -232,6 +232,15 @@ from pathlib import Path
 from typing import List, Dict, Optional, Callable
 from PyQt6.QtCore import QThread, pyqtSignal
 import tempfile
+from client.core.presets import (
+    VIDEO_QUALITY_PRESETS_STANDARD,
+    VIDEO_QUALITY_PRESETS_AUTORESIZE,
+    SOCIAL_PLATFORM_PRESETS,
+    RATIO_MAPS,
+    BG_STYLE_BLURRED,
+    BG_STYLE_FILL_ZOOM,
+    BG_STYLE_BLACK_BARS
+)
 
 # Hide subprocess consoles on Windows without altering ffmpeg-python signatures
 if os.name == 'nt':
@@ -2504,34 +2513,35 @@ class ConversionEngine(QThread):
             optimized_audio = self.params.get('_optimized_audio_bitrate')
             quality = self.params.get('quality')
             
-            # Instagram Preset Overrides
-            is_instagram = self.params.get('video_preset_social') == 'Instagram'
-            if is_instagram:
-                self.status_updated.emit("Applying specialized Instagram export settings")
-                # Force H.264 for Instagram compatibility
-                output_args.update({
-                    'vcodec': 'libx264',
-                    'profile:v': 'high',
-                    'level:v': '4.2',
-                    'pix_fmt': 'yuv420p',
-                    'color_primaries': 'bt709',
-                    'color_trc': 'bt709',
-                    'colorspace': 'bt709',
-                    'acodec': 'aac',
-                    'ba': '128k', # Standard audio bitrate
-                    'r': '30',
-                    'g': '15',
-                    'b:v': '5000k',
-                    'maxrate:v': '8000k',
-                    'bufsize:v': '10000k',
-                    'f': 'mp4'
-                })
+            # Social Presets Overrides (e.g. Instagram)
+            # Use presets from configuration
+            preset_social = self.params.get('video_preset_social')
+            social_config = SOCIAL_PLATFORM_PRESETS.get(preset_social)
+            
+            if social_config:
+                self.status_updated.emit(f"Applying specialized settings for {preset_social}")
+                # Apply core settings from config, excluding internal logic keys
+                logic_keys = ['scaling_flags', 'f', 'force_original_aspect_ratio', 'use_padding', 'supported_background_styles']
+                
+                # Update output_args with social config
+                for k, v in social_config.items():
+                    if k not in logic_keys:
+                        output_args[k] = v
+                        
+                # Ensure format is set
+                output_args['f'] = social_config.get('f', 'mp4')
+                
+                # Override codec if specified (e.g. force h264 for insta)
+                if 'vcodec' in social_config:
+                    codec = social_config['vcodec']
+                    
             else:
                 # For WebM/VP9/AV1, we need to handle audio codec and format-specific parameters
                 if selected_codec in ['WebM (VP9, faster)', 'WebM (AV1, slower)']:
-                    # WebM uses VP9/AV1 video codec and Opus audio codec
-                    output_args['acodec'] = 'libopus'  # Use Opus audio codec for WebM
-                    output_args['f'] = 'webm'          # WebM container format
+                    # WebM: Strip audio completely (no audio stream)
+                    audio_stream = None  # Remove audio stream
+                    output_args['an'] = None  # No audio flag
+                    output_args['f'] = 'webm'  # WebM container format
                     
                     # Apply CRF quality - use optimized value if in Max Size mode
                     if optimized_crf is not None:
@@ -2542,10 +2552,7 @@ class ConversionEngine(QThread):
                         output_args['crf'] = crf_value
                         self.status_updated.emit(f"DEBUG: WebM CRF set to {crf_value} (quality: {quality})")
                     
-                    # Apply optimized audio bitrate if in Max Size mode
-                    if optimized_audio is not None:
-                        output_args['audio_bitrate'] = f'{optimized_audio}k'
-                        self.status_updated.emit(f"DEBUG: Audio bitrate set to {optimized_audio}k (max size optimized)")
+                    # No audio bitrate needed since we're stripping audio
                     
                     # Optimize AV1 speed
                     if codec == 'libaom-av1':
@@ -2587,28 +2594,67 @@ class ConversionEngine(QThread):
                 video_stream = ffmpeg.filter(video_stream, 'scale', scale_w, scale_h)
                 self.status_updated.emit(f"DEBUG: Applied max size resolution scale: {int(max_size_scale * 100)}%")
             
-            # Aspect Ratio Presets (Social or Manual)
+            # Aspect Ratio & Smart Scaling
             preset_ratio = self.params.get('video_preset_ratio')
-            if is_instagram or preset_ratio:
-                # Default Instagram to 9:16 if no ratio selected
-                target_ratio = preset_ratio or ('9:16' if is_instagram else None)
-                
-                if target_ratio:
-                    ratio_map = {
-                        '4:3': (1440, 1080),
-                        '1:1': (1080, 1080),
-                        '16:9': (1920, 1080),
-                        '9:16': (1080, 1920)
-                    }
-                    if target_ratio in ratio_map:
-                        tw, th = ratio_map[target_ratio]
-                        self.status_updated.emit(f"Applying preset ratio: {target_ratio} ({tw}x{th})")
-                        # Scale to fit inside target dimensions, then pad
-                        # We use even dimensions to avoid codec issues
-                        video_stream = video_stream.filter('scale', tw, th, force_original_aspect_ratio='decrease')
-                        video_stream = video_stream.filter('pad', tw, th, '(ow-iw)/2', '(oh-ih)/2')
-                        # Disable other scaling as this takes precedence
-                        self.params['scale'] = False
+            bg_style = self.params.get('video_background_style')
+            
+            # Default to social preset ratio if not manually set
+            target_ratio = preset_ratio
+            if not target_ratio and social_config:
+                 target_ratio = '9:16' # Default for social
+            
+            if target_ratio and target_ratio in RATIO_MAPS:
+                 tw, th = RATIO_MAPS[target_ratio]
+                 self.status_updated.emit(f"Applying smart scaling: {target_ratio} ({tw}x{th})")
+                 
+                 # 'Fit & Blur' Safety: Vertical input -> Widescreen output
+                 try:
+                     original_width, original_height = get_video_dimensions(file_path)
+                     if target_ratio == '16:9' and original_height > original_width:
+                         self.status_updated.emit("Safety: Vertical video detected in Widescreen mode. Forcing 'Fit & Blur'.")
+                         bg_style = BG_STYLE_BLURRED
+                 except Exception as e:
+                     self.status_updated.emit(f"Warning: Could not check dimensions for safety logic: {e}")
+
+                 # Determine strategy
+                 is_blurred = bg_style == BG_STYLE_BLURRED
+                 is_fill = bg_style == BG_STYLE_FILL_ZOOM
+                 # Default to Black Bars if no style selected or explicit Black Bars, unless Fill forced in logic (but here handled by style)
+                 
+                 scaling_flags = social_config.get('scaling_flags', 'lanczos') if social_config else 'lanczos'
+                 
+                 if is_blurred:
+                      self.status_updated.emit("Scaling Mode: Blurred Background")
+                      s1, s2 = video_stream.split()
+                      
+                      # Background: Fill + Blur
+                      bg = s1.filter('scale', tw, th, force_original_aspect_ratio='increase', flags=scaling_flags)
+                      bg = bg.filter('crop', tw, th)
+                      bg = bg.filter('boxblur', '20:10')
+                      
+                      # Foreground: Fit
+                      fg = s2.filter('scale', tw, th, force_original_aspect_ratio='decrease', flags=scaling_flags)
+                      
+                      # Overlay
+                      video_stream = ffmpeg.overlay(bg, fg, x='(W-w)/2', y='(H-h)/2')
+                      
+                 elif is_fill:
+                      self.status_updated.emit("Scaling Mode: Fill/Zoom")
+                      video_stream = video_stream.filter('scale', tw, th, force_original_aspect_ratio='increase', flags=scaling_flags)
+                      video_stream = video_stream.filter('crop', tw, th)
+                      
+                 else:
+                      # Default: Black Bars (Fit with Padding)
+                      # Or just Fit if padding not required (logic from presets use_padding)
+                      use_pad = social_config.get('use_padding', True) if social_config else True
+                      
+                      self.status_updated.emit("Scaling Mode: Black Bars (Fit)")
+                      video_stream = video_stream.filter('scale', tw, th, force_original_aspect_ratio='decrease', flags=scaling_flags)
+                      if use_pad:
+                          video_stream = video_stream.filter('pad', tw, th, '(ow-iw)/2', '(oh-ih)/2')
+                      
+                 # Disable other scaling as this takes precedence
+                 self.params['scale'] = False
             
             # Scaling
             if self.params.get('scale', False):
@@ -2622,17 +2668,21 @@ class ConversionEngine(QThread):
                         if target_w:
                             target_w = clamp_resize_width(original_width, target_w)
                             target_h = int((target_w * original_height) / original_width) if original_height else -1
-                            video_stream = ffmpeg.filter(video_stream, 'scale', target_w, target_h)
+                            video_stream = ffmpeg.filter(video_stream, 'scale', target_w, target_h, flags='lanczos')
                         else:
                             scale_w = f'trunc(iw*{percent}/2)*2'
                             scale_h = f'trunc(ih*{percent}/2)*2'
-                            video_stream = ffmpeg.filter(video_stream, 'scale', scale_w, scale_h)
+                            video_stream = ffmpeg.filter(video_stream, 'scale', scale_w, scale_h, flags='lanczos')
                         self.status_updated.emit(f"DEBUG: Applied percentage scaling: {percent*100}%")
                     else:
                         new_width = int(width)
                         original_width, _ = get_video_dimensions(file_path)
-                        new_width = clamp_resize_width(original_width, new_width)
-                        video_stream = ffmpeg.filter(video_stream, 'scale', new_width, -1)
+                        
+                        # Only clamp if upscaling is disabled (default)
+                        if not self.params.get('allow_upscaling', False):
+                            new_width = clamp_resize_width(original_width, new_width)
+                            
+                        video_stream = ffmpeg.filter(video_stream, 'scale', new_width, -1, flags='lanczos')
                         self.status_updated.emit(f"DEBUG: Applied width scaling: {new_width}px")
                 else:
                     self.status_updated.emit("DEBUG: Scale enabled but no width parameter found")
@@ -2655,6 +2705,10 @@ class ConversionEngine(QThread):
                 elif rotation_angle == "270° clockwise":
                     video_stream = ffmpeg.filter(video_stream, 'transpose', 2)  # 270 degrees clockwise
             
+            # Apply extra args (e.g. from Loop presets)
+            if 'extra_ffmpeg_args' in self.params:
+                output_args.update(self.params['extra_ffmpeg_args'])
+
             if audio_stream is not None:
                 output = ffmpeg.output(video_stream, audio_stream, output_path, **output_args)
             else:
@@ -2812,24 +2866,24 @@ class ConversionEngine(QThread):
                     if longer_edge >= target_longer_edge:
                         if original_width > original_height:
                             # Width is longer: scale by width
-                            input_stream = ffmpeg.filter(input_stream, 'scale', str(target_longer_edge), '-2')
+                            input_stream = ffmpeg.filter(input_stream, 'scale', str(target_longer_edge), '-2', flags='lanczos')
                         else:
                             # Height is longer: calculate width to maintain aspect ratio
                             ratio = target_longer_edge / original_height
                             new_w = int(original_width * ratio)
                             # Ensure even dimensions
                             new_w = new_w if new_w % 2 == 0 else new_w - 1
-                            input_stream = ffmpeg.filter(input_stream, 'scale', str(new_w), str(target_longer_edge))
+                            input_stream = ffmpeg.filter(input_stream, 'scale', str(new_w), str(target_longer_edge), flags='lanczos')
                 elif resize_mode == 'By ratio (percent)':
                     if resize_value.endswith('%'):
                         percent = float(resize_value[:-1]) / 100.0
                         new_width = int(original_width * percent)
                         new_width = clamp_resize_width(original_width, new_width)
-                        input_stream = ffmpeg.filter(input_stream, 'scale', str(new_width), '-2')
+                        input_stream = ffmpeg.filter(input_stream, 'scale', str(new_width), '-2', flags='lanczos')
                 elif resize_mode == 'By width (pixels)':
                     new_width = int(resize_value)
                     new_width = clamp_resize_width(original_width, new_width)
-                    input_stream = ffmpeg.filter(input_stream, 'scale', str(new_width), '-2')
+                    input_stream = ffmpeg.filter(input_stream, 'scale', str(new_width), '-2', flags='lanczos')
                 elif resize_mode == 'By longer edge (pixels)':
                     # Handle mode name format for longer edge
                     # Check if resize_value has 'L' prefix and strip it
@@ -2842,14 +2896,14 @@ class ConversionEngine(QThread):
                     if longer_edge >= target_longer_edge:
                         if original_width > original_height:
                             # Width is longer: scale by width
-                            input_stream = ffmpeg.filter(input_stream, 'scale', str(target_longer_edge), '-2')
+                            input_stream = ffmpeg.filter(input_stream, 'scale', str(target_longer_edge), '-2', flags='lanczos')
                         else:
                             # Height is longer: calculate width to maintain aspect ratio
                             ratio = target_longer_edge / original_height
                             new_w = int(original_width * ratio)
                             # Ensure even dimensions
                             new_w = new_w if new_w % 2 == 0 else new_w - 1
-                            input_stream = ffmpeg.filter(input_stream, 'scale', str(new_w), str(target_longer_edge))
+                            input_stream = ffmpeg.filter(input_stream, 'scale', str(new_w), str(target_longer_edge), flags='lanczos')
             
             # Apply auto-resize resolution scale (from size optimization)
             # This is applied ON TOP of user's resize choice
@@ -2873,7 +2927,8 @@ class ConversionEngine(QThread):
                         '4:3': (1440, 1080),
                         '1:1': (1080, 1080),
                         '16:9': (1920, 1080),
-                        '9:16': (1080, 1920)
+                        '9:16': (1080, 1920),
+                        '3:4': (1080, 1350)
                     }
                     if target_ratio in ratio_map:
                         tw, th = ratio_map[target_ratio]
@@ -3890,9 +3945,10 @@ class ConversionEngine(QThread):
                         
                         # For WebM/VP9/AV1, we need to handle audio codec and format-specific parameters
                         if selected_codec in ['WebM (VP9, faster)', 'WebM (AV1, slower)']:
-                            # WebM uses VP9/AV1 video codec and Opus audio codec
-                            output_args['acodec'] = 'libopus'  # Use Opus audio codec for WebM
-                            output_args['f'] = 'webm'          # WebM container format
+                            # WebM: Strip audio completely (no audio stream)
+                            variant_audio_stream = None  # Remove audio stream
+                            output_args['an'] = None  # No audio flag
+                            output_args['f'] = 'webm'  # WebM container format
                             
                             # Apply CRF quality for VP9
                             if quality_variant is not None:

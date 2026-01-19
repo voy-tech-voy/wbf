@@ -725,6 +725,10 @@ class MainWindow(QMainWindow):
         # Update title bar theme
         self.update_title_bar_theme(is_dark)
         
+        # Apply global QToolTip styling
+        from client.gui.custom_widgets import apply_tooltip_style
+        apply_tooltip_style(is_dark)
+        
     def update_title_bar_theme(self, is_dark):
         """Update title bar colors based on theme"""
         if is_dark:

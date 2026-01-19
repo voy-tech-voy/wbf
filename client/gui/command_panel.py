@@ -9,11 +9,20 @@ from PyQt6.QtWidgets import (
     QGroupBox, QFormLayout, QTabWidget, QTextEdit, QSlider, QRadioButton, QSizePolicy, QButtonGroup,
     QProgressBar, QFrame, QStackedWidget
 )
+from client.core.presets import (
+    VIDEO_QUALITY_PRESETS_STANDARD,
+    VIDEO_QUALITY_PRESETS_AUTORESIZE,
+    BG_STYLE_BLACK_BARS,
+    BG_STYLE_BLURRED,
+    BG_STYLE_FILL_ZOOM,
+    LOOP_PRESETS
+)
 from client.utils.font_manager import AppFonts, FONT_FAMILY, FONT_FAMILY_APP_NAME, FONT_SIZE_BUTTON
 from client.gui.custom_widgets import (
-    TimeRangeSlider, ResizeFolder, RotationOptions, CustomComboBox, 
-    CustomTargetSizeSpinBox, ModeButtonsWidget, SocialPresetButton, RatioPresetButton,
-    SquareButtonRow, SideButtonGroup
+    TimeRangeSlider, ResizeFolder, RotationOptions, CustomComboBox,
+    CustomTargetSizeSpinBox, ModeButtonsWidget, PresetButton,
+    SquareButtonRow, SideButtonGroup, AnimatedSideModeButton, FormatButtonRow, RotationButtonRow,
+    LoopFormatSelector, GPUIndicator, VideoCodecSelector, install_app_tooltip
 )
 from client.gui.custom_spinbox import CustomSpinBox
 from client.gui.command_group import CommandGroup
@@ -26,9 +35,37 @@ import winreg
 
 
 class DynamicFontButton(QPushButton):
-    """Custom button that uses the latest font from AppFonts and font_manager variables"""
+    """
+    Hardware-aware Start button with GPU acceleration visual effects.
+    
+    When GPU is available:
+    - Circuit trace effect: 1px cyan line traces the border on hover
+    - Scanline fill: subtle diagonal pattern moves across background
+    - Bolt icon lights up in cyan
+    
+    When CPU only:
+    - Standard button appearance, no animation
+    """
+    
     def __init__(self, text=""):
         super().__init__(text)
+        
+        # GPU state
+        self._gpu_available = False
+        self._is_hovered = False
+        
+        # Animation properties
+        self._trace_offset = 0.0  # 0.0 to 1.0, position along border perimeter
+        self._scanline_offset = 0.0
+        
+        # Animation timers
+        self._trace_timer = QTimer(self)
+        self._trace_timer.timeout.connect(self._update_trace_animation)
+        self._trace_timer.setInterval(16)  # ~60 FPS
+        
+        self._scanline_timer = QTimer(self)
+        self._scanline_timer.timeout.connect(self._update_scanline_animation)
+        self._scanline_timer.setInterval(33)  # ~30 FPS for subtle effect
         
         # Store the base style (without font properties)
         self.base_style = {
@@ -60,6 +97,171 @@ class DynamicFontButton(QPushButton):
         
         # Initial update
         self.update_stylesheet()
+        
+    def set_gpu_available(self, available: bool):
+        """Set whether GPU acceleration is available for current format"""
+        self._gpu_available = available
+        self.update()
+        
+    def enterEvent(self, event):
+        """Handle mouse enter - start animations if GPU available"""
+        self._is_hovered = True
+        if self._gpu_available and "STOP" not in self.text().upper():
+            self._trace_timer.start()
+            self._scanline_timer.start()
+        super().enterEvent(event)
+        
+    def leaveEvent(self, event):
+        """Handle mouse leave - stop animations"""
+        self._is_hovered = False
+        self._trace_timer.stop()
+        self._scanline_timer.stop()
+        self._trace_offset = 0.0
+        self._scanline_offset = 0.0
+        self.update()
+        super().leaveEvent(event)
+        
+    def _update_trace_animation(self):
+        """Update circuit trace animation offset"""
+        self._trace_offset += 0.02  # Speed of trace around border
+        if self._trace_offset > 1.0:
+            self._trace_offset = 0.0
+        self.update()
+        
+    def _update_scanline_animation(self):
+        """Update scanline animation offset"""
+        self._scanline_offset += 2.0  # Pixels per frame
+        if self._scanline_offset > 20.0:  # Reset after pattern repeats
+            self._scanline_offset = 0.0
+        self.update()
+        
+    def paintEvent(self, event):
+        """Custom paint to add GPU effects"""
+        # First, let the default painting happen
+        super().paintEvent(event)
+        
+        # Only add GPU effects when GPU is available and hovered (not in STOP mode)
+        if not self._gpu_available or not self._is_hovered or "STOP" in self.text().upper():
+            return
+            
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Draw circuit trace effect - cyan line tracing the border
+        self._draw_circuit_trace(painter)
+        
+        # Draw scanline effect - subtle diagonal pattern
+        self._draw_scanline_overlay(painter)
+        
+        # Draw bolt icon in corner
+        self._draw_bolt_icon(painter)
+        
+        painter.end()
+        
+    def _draw_circuit_trace(self, painter):
+        """Draw the animated circuit trace around the border"""
+        pen = QPen(QColor("#00F3FF"))  # Cyan
+        pen.setWidth(2)
+        painter.setPen(pen)
+        
+        # Calculate perimeter
+        w, h = self.width(), self.height()
+        perimeter = 2 * (w + h) - 16  # Adjust for border radius
+        
+        # Calculate trace position along perimeter
+        trace_pos = self._trace_offset * perimeter
+        trace_length = perimeter * 0.15  # Trace is 15% of perimeter
+        
+        # Draw trace as a segment along the border
+        # Simplify by drawing short line segments
+        margin = 4
+        corner_radius = 8
+        
+        # Convert trace_pos to actual coordinates on border
+        points = self._get_border_points(trace_pos, trace_length, margin, corner_radius)
+        
+        if len(points) >= 2:
+            for i in range(len(points) - 1):
+                painter.drawLine(points[i], points[i + 1])
+                
+    def _get_border_points(self, start_pos, length, margin, radius):
+        """Get points along the border for circuit trace"""
+        w, h = self.width() - margin * 2, self.height() - margin * 2
+        perimeter = 2 * (w + h)
+        
+        points = []
+        pos = start_pos
+        remaining = length
+        
+        while remaining > 0 and len(points) < 50:
+            # Normalize position to perimeter
+            pos = pos % perimeter
+            
+            # Top edge
+            if pos < w:
+                x = margin + pos
+                y = margin
+            # Right edge
+            elif pos < w + h:
+                x = margin + w
+                y = margin + (pos - w)
+            # Bottom edge
+            elif pos < 2 * w + h:
+                x = margin + w - (pos - w - h)
+                y = margin + h
+            # Left edge
+            else:
+                x = margin
+                y = margin + h - (pos - 2 * w - h)
+                
+            points.append(QPoint(int(x), int(y)))
+            pos += 3  # Step size
+            remaining -= 3
+            
+        return points
+        
+    def _draw_scanline_overlay(self, painter):
+        """Draw subtle diagonal scanline pattern"""
+        # Very subtle overlay
+        painter.setOpacity(0.08)
+        pen = QPen(QColor("#00F3FF"))
+        pen.setWidth(1)
+        painter.setPen(pen)
+        
+        # Diagonal lines moving with offset
+        spacing = 10
+        offset = int(self._scanline_offset)
+        
+        for i in range(-self.height(), self.width() + self.height(), spacing):
+            x1 = i + offset
+            y1 = 0
+            x2 = i + self.height() + offset
+            y2 = self.height()
+            painter.drawLine(x1, y1, x2, y2)
+            
+        painter.setOpacity(1.0)
+        
+    def _draw_bolt_icon(self, painter):
+        """Draw small bolt icon that lights up when GPU is active"""
+        # Position in top-right corner
+        icon_size = 10
+        x = self.width() - icon_size - 8
+        y = 6
+        
+        # Draw bolt shape
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor("#00F3FF")))  # Cyan when GPU active
+        
+        # Simple bolt polygon
+        bolt = [
+            QPoint(x + 6, y),
+            QPoint(x + 2, y + 5),
+            QPoint(x + 5, y + 5),
+            QPoint(x + 4, y + 10),
+            QPoint(x + 8, y + 4),
+            QPoint(x + 5, y + 4),
+        ]
+        painter.drawPolygon(bolt)
         
     def update_stylesheet(self):
         """Build stylesheet with CURRENT font values from font_manager"""
@@ -175,9 +377,13 @@ class CommandPanel(QWidget):
     def __init__(self):
         super().__init__()
         self.is_dark_mode = is_dark_mode()
+        self._gpu_detector = None  # Lazy-loaded GPU detector
+        self._gpu_available_codecs = set()  # Codecs with GPU acceleration
         self.setup_ui()
         # Ensure the convert button starts in the blue (idle) style before first use
         self.set_conversion_state(False)
+        # Initialize GPU detection after UI is ready
+        QTimer.singleShot(100, self._initialize_gpu_detection)
     
     def resizeEvent(self, event):
         """Handle resize to keep tab bar stretched to full width"""
@@ -201,6 +407,89 @@ class CommandPanel(QWidget):
             new_width = self.tabs.width() - 6
             if new_width > 0:
                 tab_bar.setFixedWidth(new_width)
+
+    def _initialize_gpu_detection(self):
+        """Initialize GPU detection and determine which codecs have acceleration"""
+        try:
+            from client.utils.gpu_detector import get_gpu_detector
+            from client.core.conversion_engine_validation import validate_system_ffmpeg
+            
+            # Get validated ffmpeg path
+            is_valid, error_msg, ffmpeg_path, version_info = validate_system_ffmpeg()
+            if not is_valid or not ffmpeg_path:
+                ffmpeg_path = "ffmpeg"  # Fallback to system PATH
+                
+            self._gpu_detector = get_gpu_detector(ffmpeg_path)
+            encoders = self._gpu_detector.detect_encoders()
+            
+            # Determine which codecs have GPU acceleration
+            self._gpu_available_codecs = set()
+            
+            # Check for H.264 GPU
+            if any(e in encoders for e in ['h264_nvenc', 'h264_amf', 'h264_qsv']):
+                self._gpu_available_codecs.add('h264')
+                
+            # Check for HEVC/H.265 GPU
+            if any(e in encoders for e in ['hevc_nvenc', 'hevc_amf', 'hevc_qsv']):
+                self._gpu_available_codecs.add('hevc')
+                
+            # Check for AV1 GPU (RTX 40 series only for NVIDIA)
+            if any(e in encoders for e in ['av1_nvenc', 'av1_amf', 'av1_qsv']):
+                self._gpu_available_codecs.add('av1')
+                
+            # Check for VP9 GPU (only Intel QSV has VP9 HW encoding)
+            if 'vp9_qsv' in encoders:
+                self._gpu_available_codecs.add('vp9')
+                
+            print(f"GPU Detector: Available GPU codecs: {self._gpu_available_codecs}")
+            print(f"GPU Detector: Found encoders: {encoders}")
+            
+            # Update indicator based on current tab/format
+            self._update_gpu_indicator()
+            
+            # Update video codec buttons with GPU status
+            if hasattr(self, 'video_codec') and hasattr(self.video_codec, 'update_gpu_status'):
+                self.video_codec.update_gpu_status(self._gpu_available_codecs)
+            
+        except Exception as e:
+            print(f"GPU Detection failed: {e}")
+            self._gpu_available_codecs = set()
+            # Still try to update button state to false
+            if hasattr(self, 'convert_btn'):
+                self.convert_btn.set_gpu_available(False)
+                
+    def _update_gpu_indicator(self):
+        """Update GPU state for UI elements based on currently selected format"""
+        # Determine format based on current tab
+        current_tab = self.tabs.currentIndex() if hasattr(self, 'tabs') else 0
+        gpu_available = False
+        
+        if current_tab == 0:  # Image tab - no GPU for images
+            gpu_available = False
+            
+        elif current_tab == 1:  # Video tab
+            if hasattr(self, 'video_codec'):
+                codec_text = self.video_codec.currentText()
+                if 'H.264' in codec_text:
+                    gpu_available = 'h264' in self._gpu_available_codecs
+                elif 'H.265' in codec_text or 'HEVC' in codec_text:
+                    gpu_available = 'hevc' in self._gpu_available_codecs
+                elif 'AV1' in codec_text:
+                    gpu_available = 'av1' in self._gpu_available_codecs
+                    
+        elif current_tab == 2:  # Loop tab
+            if hasattr(self, 'loop_format'):
+                format_text = self.loop_format.currentText()
+                if 'GIF' in format_text:
+                    gpu_available = False  # GIF doesn't use GPU
+                elif 'VP9' in format_text:
+                    gpu_available = 'vp9' in self._gpu_available_codecs
+                elif 'AV1' in format_text:
+                    gpu_available = 'av1' in self._gpu_available_codecs
+                    
+        # Update the convert button GPU state for visual effects
+        if hasattr(self, 'convert_btn'):
+            self.convert_btn.set_gpu_available(gpu_available)
 
     def _create_label_with_icon(self, text, icon_path):
         """Create a QLabel with an icon and text"""
@@ -322,19 +611,22 @@ class CommandPanel(QWidget):
 
     def update_tab_icons(self):
         """Update tab icons based on selection state and theme"""
+        if not hasattr(self, 'tabs'):
+            return
+            
         # Determine colors
         if self.is_dark_mode:
-            normal_color = QColor(255, 255, 255) # White in dark mode
+            normal_color = QColor("#888888") # Grey in dark mode
+            selected_color = QColor("white") # White when selected
         else:
-            normal_color = QColor(0, 0, 0) # Black in light mode
+            normal_color = QColor("#888888") # Grey in light mode
+            selected_color = QColor("black") # Black when selected
         
-        selected_color = QColor(255, 255, 255) # Always white when selected (green bg)
-        
-        # Icon paths
+        # Icon paths using existing files
         icons = [
-            "client/assets/icons/pic_icon2.svg",
-            "client/assets/icons/vid_icon2.svg",
-            "client/assets/icons/loop_icon2.svg"
+            get_resource_path("client/assets/icons/pic_icon2.svg"),
+            get_resource_path("client/assets/icons/vid_icon2.svg"),
+            get_resource_path("client/assets/icons/loop_icon2.svg")
         ]
         
         current_index = self.tabs.currentIndex()
@@ -411,7 +703,7 @@ class CommandPanel(QWidget):
             spinbox.update_theme(is_dark)
         
         # Update preset buttons
-        preset_buttons = self.findChildren((SocialPresetButton, RatioPresetButton))
+        preset_buttons = self.findChildren(PresetButton)
         for btn in preset_buttons:
             btn.update_theme(is_dark)
 
@@ -500,6 +792,21 @@ class CommandPanel(QWidget):
         for sb in side_buttons:
             sb.update_theme(is_dark)
         
+        # Update rotation button rows
+        rotation_rows = self.findChildren(RotationButtonRow)
+        for row in rotation_rows:
+            row.update_theme(is_dark)
+        
+        # Update loop format selector
+        loop_selectors = self.findChildren(LoopFormatSelector)
+        for selector in loop_selectors:
+            selector.update_theme(is_dark)
+
+        # Update video codec selector
+        video_selectors = self.findChildren(VideoCodecSelector)
+        for selector in video_selectors:
+            selector.update_theme(is_dark)
+        
         # Update nested output name styling
         self._update_nested_output_style()
         
@@ -508,6 +815,11 @@ class CommandPanel(QWidget):
         
         # Update tab icons (tinting)
         self.update_tab_icons()
+        
+        # Update global tooltip singleton theme
+        from client.gui.custom_widgets import AppTooltip
+        if AppTooltip._instance is not None:
+            AppTooltip._instance.update_theme(is_dark)
     
     def _update_nested_output_style(self):
         """Update nested output name field styling based on enabled state and theme"""
@@ -653,7 +965,8 @@ class CommandPanel(QWidget):
                 padding: 4px;
             }}
             QPushButton:hover {{
-                background-color: {hover_bg};
+                background-color: {bg_color};
+                border: none;
             }}
         """)
         
@@ -683,11 +996,11 @@ class CommandPanel(QWidget):
         if hasattr(self, 'video_side_buttons'):
             self.side_buttons_stack.addWidget(self.video_side_buttons)
         
-        # GIF conversion tab
-        self.gif_tab = self.create_gif_tab()
-        self.tabs.addTab(self.gif_tab, QIcon(get_resource_path("client/assets/icons/loop_icon2.svg")), "")
-        if hasattr(self, 'gif_side_buttons'):
-            self.side_buttons_stack.addWidget(self.gif_side_buttons)
+        # Loop conversion tab (was GIF)
+        self.loop_tab = self.create_loop_tab()
+        self.tabs.addTab(self.loop_tab, QIcon(get_resource_path("client/assets/icons/loop_icon2.svg")), "")
+        if hasattr(self, 'loop_side_buttons'):
+            self.side_buttons_stack.addWidget(self.loop_side_buttons)
         
         # Select Video tab by default
         self.tabs.setCurrentIndex(1)
@@ -696,7 +1009,7 @@ class CommandPanel(QWidget):
         # Initialize UI state
         self.on_image_size_mode_changed("Max Size")
         self.on_video_size_mode_changed("Max Size")
-        self.on_gif_size_mode_changed("Max Size")
+        self.on_loop_size_mode_changed("Max Size")
         self.mode_buttons.set_mode("Max Size")
         
         self.tab_modes = {
@@ -708,7 +1021,7 @@ class CommandPanel(QWidget):
         # Initialize transform visibility
         self._update_image_transform_visibility('resize')
         self._update_video_transform_visibility('resize')
-        self._update_gif_transform_visibility('resize')
+        self._update_loop_transform_visibility('resize')
         
         self.tabs.currentChanged.connect(self._on_tab_changed)
         
@@ -862,7 +1175,7 @@ class CommandPanel(QWidget):
         elif current_tab == 1:
             self.on_video_size_mode_changed(mode)
         elif current_tab == 2:
-            self.on_gif_size_mode_changed(mode)
+            self.on_loop_size_mode_changed(mode)
             
         # Update stack visibility
         visible = (mode != "Presets")
@@ -887,6 +1200,9 @@ class CommandPanel(QWidget):
             
         # Update tab icons
         self.update_tab_icons()
+        
+        # Update GPU indicator for new tab
+        self._update_gpu_indicator()
 
     def _update_image_transform_visibility(self, mode):
         """Show/hide image transform sections based on selected mode"""
@@ -899,8 +1215,8 @@ class CommandPanel(QWidget):
         self.video_rotate_container.setVisible(mode == 'rotate')
         self.video_time_container.setVisible(mode == 'time')
 
-    def _update_gif_transform_visibility(self, mode):
-        """Show/hide GIF transform/time sections based on selected mode"""
+    def _update_loop_transform_visibility(self, mode):
+        """Show/hide Loop transform/time sections based on selected mode"""
         self.gif_resize_container.setVisible(mode == 'resize')
         self.gif_rotate_container.setVisible(mode == 'rotate')
         self.gif_time_container.setVisible(mode == 'time')
@@ -929,19 +1245,16 @@ class CommandPanel(QWidget):
         layout.setContentsMargins(0, 10, 0, 0)
         layout.setSpacing(12)
         
-        # Label
-        social_label = QLabel("Social Media")
-        social_label.setStyleSheet("font-weight: bold; color: #AAAAAA; font-size: 11px;")
-        layout.addWidget(social_label)
-        
-        # Social Media Buttons Row - using SquareButtonRow for square aspect ratio
+        # Social Media Buttons Row
         social_button_row = SquareButtonRow()
+
         
         social_group = QButtonGroup(self)
         social_group.setExclusive(True)
         
         platforms = [
             ("Instagram", "client/assets/icons/insta.svg"),
+            ("X", "client/assets/icons/X_icon.svg"),
             ("LinkedIn", "client/assets/icons/in.svg"),
             ("YouTube", "client/assets/icons/yt.svg"),
             ("TikTok", "client/assets/icons/tik.svg"),
@@ -949,7 +1262,7 @@ class CommandPanel(QWidget):
         ]
         
         for name, icon_path in platforms:
-            btn = SocialPresetButton(name, icon_path)
+            btn = PresetButton(name, icon_path)
             btn.update_theme(self.is_dark_mode)
             social_group.addButton(btn)
             social_button_row.addButton(btn)
@@ -958,12 +1271,15 @@ class CommandPanel(QWidget):
             
         layout.addWidget(social_button_row)
         
+        # Connect signal to handler
+        social_group.buttonClicked.connect(lambda btn: self.on_social_preset_changed(prefix, btn))
+        
         # Ratios Label
         ratio_label = QLabel("Aspect Ratios")
         ratio_label.setStyleSheet("font-weight: bold; color: #AAAAAA; font-size: 11px;")
         layout.addWidget(ratio_label)
         
-        # Ratio Buttons Row - using SquareButtonRow for square aspect ratio
+        # Ratio Buttons Row
         ratio_button_row = SquareButtonRow()
         
         ratio_group = QButtonGroup(self)
@@ -977,7 +1293,7 @@ class CommandPanel(QWidget):
         ]
         
         for ratio, icon_path in ratios:
-            btn = RatioPresetButton(ratio, icon_path)
+            btn = PresetButton(ratio, icon_path)
             btn.update_theme(self.is_dark_mode)
             ratio_group.addButton(btn)
             ratio_button_row.addButton(btn)
@@ -986,6 +1302,38 @@ class CommandPanel(QWidget):
             
         layout.addWidget(ratio_button_row)
         
+        # Background Style (Video Only)
+        if prefix == 'video':
+            style_label = QLabel("Background Style")
+            style_label.setStyleSheet("font-weight: bold; color: #AAAAAA; font-size: 11px;")
+            self.video_bg_style_label = style_label
+            
+            self.video_bg_style = CustomComboBox()
+            self.video_bg_style.addItems([BG_STYLE_BLACK_BARS, BG_STYLE_BLURRED, BG_STYLE_FILL_ZOOM])
+            self.video_bg_style.setToolTip(
+                "Upscaling ensures Instagram uses its high-quality player.\n"
+                "Blurred backgrounds prevent 'dead space' on mobile screens."
+            )
+            
+            # Initially hidden
+            self.video_bg_style_label.setVisible(False)
+            self.video_bg_style.setVisible(False)
+            
+            layout.addWidget(self.video_bg_style_label)
+            layout.addWidget(self.video_bg_style)
+            
+            # Defaults: Instagram + 3:4
+            for btn in social_group.buttons():
+                if btn.text() == "Instagram":
+                    btn.setChecked(True)
+                    self.on_social_preset_changed(prefix, btn)
+                    break
+                    
+            for btn in ratio_group.buttons():
+                if btn.text() == "3:4":
+                    btn.setChecked(True)
+                    break
+
         # Store groups
         setattr(self, f"{prefix}_social_group", social_group)
         setattr(self, f"{prefix}_ratio_group", ratio_group)
@@ -995,6 +1343,21 @@ class CommandPanel(QWidget):
         
         container.setVisible(False) # Hidden by default
         return container
+
+    def on_social_preset_changed(self, prefix, btn):
+        """Handle changes to social preset selection"""
+        if prefix == 'video':
+            # Check if Instagram is selected
+            is_instagram = btn.text() == "Instagram"
+            
+            # Toggle visibility of Background Style
+            if hasattr(self, 'video_bg_style'):
+                self.video_bg_style.setVisible(is_instagram)
+                self.video_bg_style_label.setVisible(is_instagram)
+                
+            # Auto-select 9:16 for Instagram if no ratio selected? 
+            # Existing logic in conversion engine handles default ratio.
+            # But UI might want to reflect it. For now, leave as is.
 
     def _get_checked_button_text(self, group):
         """Get the text or preset name of the checked button in a QButtonGroup"""
@@ -1074,11 +1437,11 @@ class CommandPanel(QWidget):
         self.image_auto_resize_checkbox.setVisible(False)
         self.image_format_group.add_row(self.image_auto_resize_checkbox)
         
-        # Format dropdown
-        self.image_format = CustomComboBox()
-        self.image_format.addItems(["WebP", "JPG", "PNG", "TIFF", "BMP"])
-        self.image_format_label = QLabel("Format")
-        self.image_format_group.add_row(self.image_format_label, self.image_format)
+        # Format buttons - FIRST
+        self.image_format = FormatButtonRow(["WebP", "JPG", "PNG"])
+        # Insert at the very top (index 0)
+        self.image_format_group.get_content_layout().insertRow(0, self.image_format)
+
 
         # Multiple qualities option
         self.multiple_qualities = QCheckBox("Multiple qualities")
@@ -1187,9 +1550,7 @@ class CommandPanel(QWidget):
         rotate_layout = QVBoxLayout(self.image_rotate_container)
         rotate_layout.setContentsMargins(0, 0, 0, 0)
         
-        self.image_rotation_angle = CustomComboBox()
-        self.image_rotation_angle.addItems(["No rotation", "90° clockwise", "180°", "270° clockwise"])
-        self.image_rotation_angle.setStyleSheet(COMBOBOX_STYLE)
+        self.image_rotation_angle = RotationButtonRow()
         rotate_layout.addWidget(self.image_rotation_angle)
         
         self.image_transform_group.add_row(self.image_rotate_container)
@@ -1245,12 +1606,12 @@ class CommandPanel(QWidget):
         self.video_auto_resize_checkbox.setVisible(False)
         codec_group.add_row(self.video_auto_resize_checkbox)
         
-        # Format dropdown - SECOND
-        self.video_codec = CustomComboBox()
-        self.video_codec.addItems(["WebM (VP9, faster)", "WebM (AV1, slower)", "MP4 (H.264)", "MP4 (H.265)", "MP4 (AV1)"])
-        self.video_codec.currentTextChanged.connect(self.on_video_codec_changed)
-        self.video_codec_label = QLabel("Format")
-        codec_group.add_row(self.video_codec_label, self.video_codec)
+        # Format buttons - FIRST (Top of list)
+        self.video_codec = VideoCodecSelector()
+        self.video_codec.codecChanged.connect(self.on_video_codec_changed)
+        
+        # Insert at the very top (index 0)
+        codec_group.get_content_layout().insertRow(0, self.video_codec)
 
         # Quality (CRF) slider for WebM
         self.video_quality = QSlider(Qt.Orientation.Horizontal)
@@ -1368,9 +1729,7 @@ class CommandPanel(QWidget):
         rotate_layout = QVBoxLayout(self.video_rotate_container)
         rotate_layout.setContentsMargins(0, 0, 0, 0)
         
-        self.video_rotation_angle = CustomComboBox()
-        self.video_rotation_angle.addItems(["No rotation", "90° clockwise", "180°", "270° clockwise"])
-        self.video_rotation_angle.setStyleSheet(COMBOBOX_STYLE)
+        self.video_rotation_angle = RotationButtonRow()
         rotate_layout.addWidget(self.video_rotation_angle)
         
         self.video_transform_group.add_row(self.video_rotate_container)
@@ -1424,15 +1783,17 @@ class CommandPanel(QWidget):
         
         return tab
         
-    def create_gif_tab(self):
-        """Create GIF conversion options tab"""
+    def create_loop_tab(self):
+        """Create Loop conversion options tab (GIF and WebM loop)"""
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
         
+        self.current_loop_preset = None # Tracks active preset for extra flags (e.g. tile-columns)
+        
         # ============================================================
-        # SETTINGS FOLDER (Top) - with invisible spacer to align with transform
+        # SETTINGS FOLDER (Top)
         # ============================================================
         settings_row = QWidget()
         settings_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -1440,19 +1801,17 @@ class CommandPanel(QWidget):
         settings_h.setContentsMargins(0, 0, 0, 0)
         settings_h.setSpacing(0)
         
-        # Settings CommandGroup - expands to fill remaining width
         self.ffmpeg_group = CommandGroup("")
         self.ffmpeg_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.ffmpeg_group.get_content_layout().setContentsMargins(16, 16, 16, 16)
         self.ffmpeg_group.setMinimumHeight(180)
-        settings_h.addWidget(self.ffmpeg_group, 1)  # stretch=1 ensures it fills
+        settings_h.addWidget(self.ffmpeg_group, 1)
         
         layout.addWidget(settings_row)
         
-        # Removed local mode buttons, now handled globally
-        self.gif_size_mode_value = "max_size"
-
-        # Target Size - SECOND
+        self.loop_size_mode_value = "max_size"
+        
+        # Max Size
         self.gif_max_size_spinbox = CustomTargetSizeSpinBox(
             default_value=2.0,
             on_enter_callback=self._focus_active_tab
@@ -1462,36 +1821,33 @@ class CommandPanel(QWidget):
         self.gif_max_size_label = QLabel("Max Size")
         self.gif_max_size_label.setVisible(False)
         self.ffmpeg_group.add_row(self.gif_max_size_label, self.gif_max_size_spinbox)
-
-        # Auto-resize checkbox (for Max Size mode)
+        
+        # Auto-resize checkbox
         self.gif_auto_resize_checkbox = QCheckBox("Auto-resize")
-        self.gif_auto_resize_checkbox.setChecked(True)  # Enabled by default
+        self.gif_auto_resize_checkbox.setChecked(True)
         self.gif_auto_resize_checkbox.setStyleSheet(TOGGLE_STYLE)
-        self.gif_auto_resize_checkbox.setToolTip(
-            "Change the resolution in pixels (width×height) to match desired file size in MB."
-        )
         self.gif_auto_resize_checkbox.setVisible(False)
         self.ffmpeg_group.add_row(self.gif_auto_resize_checkbox)
 
-        # Estimation info label (hidden by default)
-        self.gif_size_estimate_label = QLabel("")
-        self.gif_size_estimate_label.setStyleSheet("color: #888; font-style: italic;")
-        self.gif_size_estimate_label.setVisible(False)
-        self.gif_size_estimate_label.setWordWrap(True)
+        # Format Selector (FIRST Item) - Conditional panel with GIF/WebM toggle
+        self.loop_format = LoopFormatSelector()
+        self.loop_format.formatChanged.connect(self.on_loop_format_changed)
+        self.ffmpeg_group.get_content_layout().insertRow(0, self.loop_format)
 
-        # Multiple variants toggle
+        # -- GIF Specific Widgets --
+        
         self.gif_ffmpeg_variants = QCheckBox("Multiple Variants (FPS, Colors, Qualities)")
         self.gif_ffmpeg_variants.setStyleSheet(TOGGLE_STYLE)
         self.gif_ffmpeg_variants.toggled.connect(self.toggle_gif_ffmpeg_variants)
         self.ffmpeg_group.add_row(self.gif_ffmpeg_variants)
-
+        
         # FPS
         self.ffmpeg_gif_fps = CustomComboBox()
         self.ffmpeg_gif_fps.addItems(["10", "12", "15", "18", "24"])
         self.ffmpeg_gif_fps.setCurrentText("15")
         self.ffmpeg_gif_fps_label = QLabel("FPS")
         self.ffmpeg_group.add_row(self.ffmpeg_gif_fps_label, self.ffmpeg_gif_fps)
-
+        
         # FPS Variants
         self.ffmpeg_gif_fps_variants = QLineEdit()
         self.ffmpeg_gif_fps_variants.setPlaceholderText("e.g., 10,15,24")
@@ -1499,14 +1855,14 @@ class CommandPanel(QWidget):
         self.ffmpeg_gif_fps_variants_label = QLabel("FPS variants")
         self.ffmpeg_gif_fps_variants_label.setVisible(False)
         self.ffmpeg_group.add_row(self.ffmpeg_gif_fps_variants_label, self.ffmpeg_gif_fps_variants)
-
+        
         # Colors
         self.ffmpeg_gif_colors = CustomComboBox()
         self.ffmpeg_gif_colors.addItems(["8", "16", "32", "64", "128", "256"])
         self.ffmpeg_gif_colors.setCurrentText("256")
         self.ffmpeg_gif_colors_label = QLabel("Colors")
         self.ffmpeg_group.add_row(self.ffmpeg_gif_colors_label, self.ffmpeg_gif_colors)
-
+        
         # Colors Variants
         self.ffmpeg_gif_colors_variants = QLineEdit()
         self.ffmpeg_gif_colors_variants.setPlaceholderText("e.g., 64,128,256")
@@ -1515,26 +1871,21 @@ class CommandPanel(QWidget):
         self.ffmpeg_gif_colors_variants_label.setVisible(False)
         self.ffmpeg_group.add_row(self.ffmpeg_gif_colors_variants_label, self.ffmpeg_gif_colors_variants)
         
-        # Presets section (initially hidden)
-        self.gif_presets_section = self._create_presets_section("gif")
-        self.ffmpeg_group.add_row(self.gif_presets_section)
-
-        # Dither Quality Slider
+        # Dither
         self.gif_dither_quality_slider = QSlider(Qt.Orientation.Horizontal)
         self.gif_dither_quality_slider.setRange(0, 5)
-        self.gif_dither_quality_slider.setValue(3)  # Default to best quality (floyd_steinberg)
+        self.gif_dither_quality_slider.setValue(3)
         self.gif_dither_quality_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.gif_dither_quality_slider.setTickInterval(1)
-        
         self.gif_dither_quality_label = QLabel("3")
         self.gif_dither_quality_slider.valueChanged.connect(self.update_dither_quality_label)
-        
-        dither_quality_layout = QHBoxLayout()
-        dither_quality_layout.addWidget(self.gif_dither_quality_slider)
-        dither_quality_layout.addWidget(self.gif_dither_quality_label)
         self.gif_dither_quality_row_label = QLabel("Quality")
-        self.ffmpeg_group.add_row(self.gif_dither_quality_row_label, dither_quality_layout)
-
+        
+        dither_layout = QHBoxLayout()
+        dither_layout.addWidget(self.gif_dither_quality_slider)
+        dither_layout.addWidget(self.gif_dither_quality_label)
+        self.ffmpeg_group.add_row(self.gif_dither_quality_row_label, dither_layout)
+        
         # Dither Variants
         self.ffmpeg_gif_dither_variants = QLineEdit()
         self.ffmpeg_gif_dither_variants.setPlaceholderText("e.g., 0,3,5")
@@ -1542,14 +1893,54 @@ class CommandPanel(QWidget):
         self.ffmpeg_gif_dither_variants_label = QLabel("Quality variants (0-5)")
         self.ffmpeg_gif_dither_variants_label.setVisible(False)
         self.ffmpeg_group.add_row(self.ffmpeg_gif_dither_variants_label, self.ffmpeg_gif_dither_variants)
-
+        
         # Blur
         self.ffmpeg_gif_blur = QCheckBox("Reduce banding")
         self.ffmpeg_gif_blur.setStyleSheet(TOGGLE_STYLE)
         self.ffmpeg_group.add_row(self.ffmpeg_gif_blur)
 
+        # -- WebM Specific Widgets (Hidden by default) --
+        
+        # WebM multi-variant toggle
+        self.loop_webm_variants = QCheckBox("Multiple quality variants")
+        self.loop_webm_variants.setStyleSheet(TOGGLE_STYLE)
+        self.loop_webm_variants.toggled.connect(self.on_loop_format_changed)
+        self.loop_webm_variants.setVisible(False)
+        self.ffmpeg_group.add_row(self.loop_webm_variants)
+        
+        # WebM Quality Slider (single value)
+        self.loop_webm_quality = QSlider(Qt.Orientation.Horizontal)
+        self.loop_webm_quality.setRange(0, 63)
+        self.loop_webm_quality.setValue(30)
+        self.loop_webm_quality.setVisible(False)
+        
+        self.loop_webm_quality_value = QLabel("30")
+        self.loop_webm_quality_value.setVisible(False)
+        self.loop_webm_quality.valueChanged.connect(lambda v: self.loop_webm_quality_value.setText(str(v)))
+        
+        self.loop_webm_quality_row_label = QLabel("Quality")
+        self.loop_webm_quality_row_label.setVisible(False)
+        
+        webm_qual_layout = QHBoxLayout()
+        webm_qual_layout.addWidget(self.loop_webm_quality)
+        webm_qual_layout.addWidget(self.loop_webm_quality_value)
+        self.ffmpeg_group.add_row(self.loop_webm_quality_row_label, webm_qual_layout)
+        
+        # WebM Quality Variants (multi-value)
+        self.loop_webm_quality_variants = QLineEdit()
+        self.loop_webm_quality_variants.setPlaceholderText("e.g., 20,30,40")
+        self.loop_webm_quality_variants.setVisible(False)
+        self.loop_webm_quality_variants_label = QLabel("Quality variants")
+        self.loop_webm_quality_variants_label.setVisible(False)
+        self.ffmpeg_group.add_row(self.loop_webm_quality_variants_label, self.loop_webm_quality_variants)
+
+        # Presets (Shared)
+        # Presets (Shared)
+        self.gif_presets_section = self._create_loop_presets_section()
+        self.ffmpeg_group.add_row(self.gif_presets_section)
+        
         # ============================================================
-        # TRANSFORM FOLDER (Bottom) - with side buttons
+        # TRANSFORM FOLDER
         # ============================================================
         transform_row = QWidget()
         transform_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -1557,22 +1948,19 @@ class CommandPanel(QWidget):
         transform_h.setContentsMargins(0, 0, 0, 0)
         transform_h.setSpacing(0)
         
-        # Side Buttons (Resize, Rotate, Time)
-        self.gif_side_buttons = self._create_transform_side_buttons('gif')
-        self.gif_side_buttons.selectionChanged.connect(self._update_gif_transform_visibility)
-        # Note: Added to global stack in setup_ui
+        self.loop_side_buttons = self._create_transform_side_buttons('gif') # Keep ID 'gif' for now
+        self.loop_side_buttons.selectionChanged.connect(self._update_loop_transform_visibility)
         
-        # Transform CommandGroup - expands to fill remaining width
         self.gif_transform_group = CommandGroup("")
         self.gif_transform_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.gif_transform_group.get_content_layout().setContentsMargins(16, 16, 16, 16)
         self.gif_transform_group.get_content_layout().setVerticalSpacing(12)
         self.gif_transform_group.setFixedHeight(198)
-        transform_h.addWidget(self.gif_transform_group, 1)  # stretch=1 ensures it fills
+        transform_h.addWidget(self.gif_transform_group, 1)
         
         layout.addWidget(transform_row)
-
-        # === RESIZE SECTION CONTAINER ===
+        
+        # Resize Container
         self.gif_resize_container = QWidget()
         resize_layout = QVBoxLayout(self.gif_resize_container)
         resize_layout.setContentsMargins(0, 0, 0, 0)
@@ -1585,10 +1973,10 @@ class CommandPanel(QWidget):
         resize_layout.addWidget(self.gif_resize_mode)
         
         self.gif_multiple_resize = QCheckBox("Multiple size variants")
-        self.gif_multiple_resize.toggled.connect(self.toggle_gif_resize_variant_mode)
         self.gif_multiple_resize.setStyleSheet(TOGGLE_STYLE)
+        self.gif_multiple_resize.toggled.connect(self.toggle_gif_resize_variant_mode)
         resize_layout.addWidget(self.gif_multiple_resize)
-
+        
         # Single value row
         single_val_row = QHBoxLayout()
         self.gif_resize_value_label = QLabel("Width (pixels)")
@@ -1609,33 +1997,26 @@ class CommandPanel(QWidget):
         variants_row.addWidget(self.gif_resize_variants)
         resize_layout.addLayout(variants_row)
         
-        # Initial visibility
         self.gif_resize_value.setVisible(False)
         self.gif_resize_value_label.setVisible(False)
         self.gif_resize_variants.setVisible(False)
         self.gif_resize_variants_label.setVisible(False)
-        
         self.gif_transform_group.add_row(self.gif_resize_container)
         
-        # === ROTATION SECTION CONTAINER ===
+        # Rotation
         self.gif_rotate_container = QWidget()
         rotate_layout = QVBoxLayout(self.gif_rotate_container)
         rotate_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.gif_rotation_angle = CustomComboBox()
-        self.gif_rotation_angle.addItems(["No rotation", "90° clockwise", "180°", "270° clockwise"])
-        self.gif_rotation_angle.setStyleSheet(COMBOBOX_STYLE)
+        self.gif_rotation_angle = RotationButtonRow()
         rotate_layout.addWidget(self.gif_rotation_angle)
-        
         self.gif_transform_group.add_row(self.gif_rotate_container)
-
-        # === TIME SECTION CONTAINER ===
+        
+        # Time
         self.gif_time_container = QWidget()
         time_layout = QVBoxLayout(self.gif_time_container)
         time_layout.setContentsMargins(0, 0, 0, 0)
         time_layout.setSpacing(12)
         
-        # Time range row
         self.gif_enable_time_cutting = QCheckBox("Time range")
         self.gif_enable_time_cutting.setStyleSheet(TOGGLE_STYLE)
         self.gif_enable_time_cutting.toggled.connect(self.toggle_gif_time_cutting)
@@ -1644,16 +2025,14 @@ class CommandPanel(QWidget):
         self.gif_time_range_slider.setRange(0.0, 1.0)
         self.gif_time_range_slider.setStartValue(0.0)
         self.gif_time_range_slider.setEndValue(1.0)
-        self.gif_time_range_slider.setToolTip("Drag the handles to set start and end times (0% = beginning, 100% = end)")
         self.gif_time_range_slider.setVisible(False)
         
-        gif_time_range_row = QHBoxLayout()
-        gif_time_range_row.addWidget(self.gif_enable_time_cutting)
-        gif_time_range_row.addSpacing(8)
-        gif_time_range_row.addWidget(self.gif_time_range_slider, 1)
-        time_layout.addLayout(gif_time_range_row)
+        time_row = QHBoxLayout()
+        time_row.addWidget(self.gif_enable_time_cutting)
+        time_row.addSpacing(8)
+        time_row.addWidget(self.gif_time_range_slider, 1)
+        time_layout.addLayout(time_row)
         
-        # Retime row
         self.gif_enable_retime = QCheckBox("Retime")
         self.gif_enable_retime.setStyleSheet(TOGGLE_STYLE)
         self.gif_enable_retime.toggled.connect(self.toggle_gif_retime)
@@ -1661,25 +2040,117 @@ class CommandPanel(QWidget):
         self.gif_retime_slider = QSlider(Qt.Orientation.Horizontal)
         self.gif_retime_slider.setRange(10, 30)
         self.gif_retime_slider.setValue(10)
-        self.gif_retime_slider.setSingleStep(1)
         self.gif_retime_slider.setVisible(False)
         self.gif_retime_value_label = QLabel("1.0x")
         self.gif_retime_value_label.setVisible(False)
         self.gif_retime_slider.valueChanged.connect(lambda v: self.gif_retime_value_label.setText(f"{v/10:.1f}x"))
         
-        gif_retime_row = QHBoxLayout()
-        gif_retime_row.addWidget(self.gif_enable_retime)
-        gif_retime_row.addSpacing(8)
-        gif_retime_row.addWidget(self.gif_retime_slider, 1)
-        gif_retime_row.addWidget(self.gif_retime_value_label)
-        time_layout.addLayout(gif_retime_row)
-
+        retime_row = QHBoxLayout()
+        retime_row.addWidget(self.gif_enable_retime)
+        retime_row.addWidget(self.gif_retime_slider)
+        retime_row.addWidget(self.gif_retime_value_label)
+        time_layout.addLayout(retime_row)
+        
         self.gif_transform_group.add_row(self.gif_time_container)
         
-        # Apply initial size mode visibility (Max Size default)
-        self.on_gif_size_mode_changed("Max Size")
+        # Initial call to set visibility
+        self.on_loop_size_mode_changed("Max Size")
         
         return tab
+        
+    def _create_loop_presets_section(self):
+        """Create specific presets for Loop tab (Hero, Alpha)"""
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+        
+        from collections import defaultdict
+        groups = defaultdict(list)
+        for name, config in LOOP_PRESETS.items():
+            groups[config.get('row', 'Other')].append(name)
+            
+        # Group 1: Hero
+        if 'Hero' in groups:
+            hero_label = QLabel("Website Hero (WebM)")
+            hero_label.setStyleSheet("font-weight: bold; color: #888;")
+            layout.addWidget(hero_label)
+            
+            hero_row = SquareButtonRow()
+            self.loop_preset_group = QButtonGroup(self) # Loop-specific exclusive group
+            self.loop_preset_group.setExclusive(True)
+            self.loop_preset_group.buttonClicked.connect(self.on_loop_preset_clicked)
+
+            for name in groups['Hero']:
+                btn = PresetButton(name) # Text only
+                # Apply custom tooltip from config
+                config = LOOP_PRESETS[name]
+                btn.setToolTip(f"<b>{config.get('tooltip_title','')}</b><br>{config.get('tooltip_body','')}")
+                install_app_tooltip(btn, btn.toolTip())
+                
+                btn.update_theme(self.is_dark_mode)
+                self.loop_preset_group.addButton(btn)
+                hero_row.addButton(btn)
+            layout.addWidget(hero_row)
+            
+        # Group 2: Features (Alpha)
+        if 'Features' in groups:
+            feat_label = QLabel("Special Features")
+            feat_label.setStyleSheet("font-weight: bold; color: #888; margin-top: 8px;")
+            layout.addWidget(feat_label)
+            
+            feat_row = SquareButtonRow()
+            for name in groups['Features']:
+                btn = PresetButton(name)
+                config = LOOP_PRESETS[name]
+                btn.setToolTip(f"<b>{config.get('tooltip_title','')}</b><br>{config.get('tooltip_body','')}")
+                install_app_tooltip(btn, btn.toolTip())
+
+                btn.update_theme(self.is_dark_mode)
+                self.loop_preset_group.addButton(btn) # Be part of same exclusive group? Yes, usually only one preset active.
+                feat_row.addButton(btn)
+            layout.addWidget(feat_row)
+            
+        return container
+
+    def on_loop_preset_clicked(self, btn):
+        """Apply Loop preset settings"""
+        name = btn.text()
+        if name not in LOOP_PRESETS:
+            return
+            
+        config = LOOP_PRESETS[name]
+        self.current_loop_preset = config
+        
+        # 1. Set Format
+        format_type = config.get('format_type')
+        if format_type == 'webm':
+            codec = config.get('vcodec', '')
+            if 'av1' in codec:
+                self.loop_format.setCurrentText("WebM (AV1)")
+            elif 'vp9' in codec:
+                self.loop_format.setCurrentText("WebM (VP9)")
+            else:
+                 self.loop_format.setCurrentText("WebM")
+                 
+        # 2. Set Resize
+        scale = config.get('scale') # e.g. "1280:720"
+        if scale:
+            width, height = scale.split(':')
+            self.gif_resize_mode.setCurrentText("By width (pixels)")
+            self.gif_resize_value.setValue(int(width))
+            
+        # 3. Set Quality (CRF)
+        crf = config.get('crf')
+        if crf:
+            self.loop_webm_quality.setValue(int(crf))
+        
+    def on_loop_format_changed(self, format_name):
+        """Handle Loop format change (GIF vs WebM)"""
+        # Re-trigger size mode to update visibility based on new format
+        self.on_loop_size_mode_changed(getattr(self, 'loop_size_mode_value', 'max_size').replace('_', ' ').title())
+        # Update GPU indicator
+        self._update_gpu_indicator()
 
     def create_output_settings(self):
         """Create output directory and naming settings"""
@@ -1760,6 +2231,10 @@ class CommandPanel(QWidget):
         """Create conversion control buttons"""
         layout = QVBoxLayout()
         
+        # Horizontal layout for button
+        button_row = QHBoxLayout()
+        button_row.setSpacing(8)
+        
         self.convert_btn = DynamicFontButton("START")
         self.convert_btn.clicked.connect(self.on_convert_button_clicked)
         self.is_converting = False
@@ -1767,8 +2242,10 @@ class CommandPanel(QWidget):
         # Make button expand to full width
         self.convert_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
+        button_row.addWidget(self.convert_btn)
+        
         # DynamicFontButton handles stylesheet with font properties automatically
-        layout.addWidget(self.convert_btn)
+        layout.addLayout(button_row)
         return layout
         
     def on_convert_button_clicked(self):
@@ -1901,6 +2378,7 @@ class CommandPanel(QWidget):
                     'retime_speed': self.retime_slider.value() / 10.0,
                     'video_preset_social': self._get_checked_button_text(self.video_social_group),
                     'video_preset_ratio': self._get_checked_button_text(self.video_ratio_group),
+                    'video_background_style': self.video_bg_style.currentText() if hasattr(self, 'video_bg_style') and self.video_bg_style.isVisible() else None,
                 })
             else:
                 video_resize = self.get_video_resize_values()
@@ -1938,40 +2416,127 @@ class CommandPanel(QWidget):
                     'retime_speed': self.retime_slider.value() / 10.0,
                     'video_preset_social': self._get_checked_button_text(self.video_social_group),
                     'video_preset_ratio': self._get_checked_button_text(self.video_ratio_group),
+                    'video_background_style': self.video_bg_style.currentText() if hasattr(self, 'video_bg_style') and self.video_bg_style.isVisible() else None,
                 })
-        elif current_tab == 2:  # GIFs
-            # Get GIF variants if multiple variants is checked
-            gif_variants = self.get_gif_variant_values()
+        elif current_tab == 2:  # Loop (GIF or WebM)
+            # Determine format
+            loop_format = self.loop_format.currentText()
+            is_webm = "WebM" in loop_format
             
-            # Get resize values
-            gif_resize_values = self.get_gif_resize_values()
+            # Use GIF resizing inputs for consistency in Loop tab for now
+            loop_resize_values = self.get_gif_resize_values()
             
-            # Get size mode settings
-            size_mode = getattr(self, 'gif_size_mode_value', 'max_size')
-            
+            # Common params
             params.update({
-                'type': 'gif',
-                'use_ffmpeg_gif': True,  # Always use FFmpeg
-                'gif_size_mode': size_mode,  # 'manual' or 'max_size'
-                'gif_max_size_mb': self.gif_max_size_spinbox.value() if size_mode == 'max_size' else None,
-                'gif_auto_resize': self.gif_auto_resize_checkbox.isChecked() if size_mode == 'max_size' else False,
-                'ffmpeg_fps': int(self.ffmpeg_gif_fps.currentText()),
-                'ffmpeg_colors': int(self.ffmpeg_gif_colors.currentText()),
-                'ffmpeg_dither': self.get_dither_string_from_quality(self.gif_dither_quality_slider.value()),
-                'ffmpeg_blur': self.ffmpeg_gif_blur.isChecked(),
-                'gif_resize_mode': self.gif_resize_mode.currentText(),
-                'gif_resize_values': gif_resize_values,
                 'rotation': self.gif_rotation_angle.currentText(),
                 'enable_time_cutting': self.gif_enable_time_cutting.isChecked(),
                 'time_start': self.gif_time_range_slider.getStartValue() if self.gif_enable_time_cutting.isChecked() else 0.0,
                 'time_end': self.gif_time_range_slider.getEndValue() if self.gif_enable_time_cutting.isChecked() else 1.0,
                 'retime_enabled': self.gif_enable_retime.isChecked(),
                 'retime_speed': self.gif_retime_slider.value() / 10.0,
-                'gif_variants': gif_variants,
-                'multiple_gif_variants': bool(gif_variants),
-                'gif_preset_social': self._get_checked_button_text(self.gif_social_group),
-                'gif_preset_ratio': self._get_checked_button_text(self.gif_ratio_group),
+                'gif_preset_social': None,
+                'gif_preset_ratio': None,
             })
+            
+            if is_webm:
+                # WebM Logic (using Loop tab widgets)
+                # Use exact strings expected by ConversionEngine codec_map
+                codec = "WebM (VP9, faster)" if "VP9" in loop_format else "WebM (AV1, slower)"
+                
+                # Check auto-resize/max size settings from the Loop tab widgets
+                size_mode = getattr(self, 'loop_size_mode_value', 'max_size')
+                
+                # Map GIF resize logic to Video params
+                # Width/Scale logic needs to be constructed from get_gif_resize_values result
+                width = None
+                scale = False
+                if loop_resize_values and len(loop_resize_values) == 1:
+                     v = loop_resize_values[0]
+                     if v.endswith('%'):
+                         scale = True
+                         width = v
+                     else:
+                         try:
+                             # L{value} or {value}
+                             if v.startswith('L'):
+                                 width = v.replace('L', '') # Treat as width?
+                             else:
+                                 width = int(v)
+                                 scale = True
+                         except:
+                             pass
+
+                webm_params = {
+                    'type': 'video', 
+                    'codec': codec,
+                    'quality': self.loop_webm_quality.value(), # Use our new widget
+                    'quality_variants': None, # Variants not implemented for Loop WebM yet
+                    'multiple_video_qualities': False,
+                    
+                    # Map max size / auto resize
+                    'video_size_mode': size_mode,
+                    'video_max_size_mb': self.gif_max_size_spinbox.value() if size_mode == 'max_size' else None,
+                    'video_auto_resize': self.gif_auto_resize_checkbox.isChecked() if size_mode == 'max_size' else False,
+                    
+                    # Map resize
+                    'width': width,
+                    'scale': scale,
+                    
+                    # Ensure video variants empty
+                    'video_variants': [],
+                    'multiple_video_variants': False
+                }
+                
+                # Inject active Loop Preset overrides
+                if self.current_loop_preset:
+                    # Audio stripping
+                    if self.current_loop_preset.get('an'):
+                        webm_params['remove_audio'] = True
+                        
+                    # Pixel Format (Transparency)
+                    if self.current_loop_preset.get('pix_fmt'):
+                         webm_params['pix_fmt'] = self.current_loop_preset.get('pix_fmt')
+                         
+                    # Extra Arguments (Tile columns, Tune, Metadata)
+                    extra_args = {}
+                    if self.current_loop_preset.get('tile-columns'):
+                         extra_args['tile-columns'] = self.current_loop_preset.get('tile-columns')
+                    
+                    if self.current_loop_preset.get('tune'):
+                         extra_args['tune'] = self.current_loop_preset.get('tune')
+                         
+                    if self.current_loop_preset.get('metadata'):
+                        for k, v in self.current_loop_preset.get('metadata').items():
+                            extra_args[f"metadata:{k}"] = v
+                            
+                    if extra_args:
+                         webm_params['extra_ffmpeg_args'] = extra_args
+
+                    # Upscaling
+                    if self.current_loop_preset.get('allow_upscaling'):
+                         webm_params['allow_upscaling'] = True
+
+                params.update(webm_params)
+            else:
+                # GIF Logic (Existing)
+                gif_variants = self.get_gif_variant_values()
+                size_mode = getattr(self, 'loop_size_mode_value', 'max_size')
+                
+                params.update({
+                    'type': 'gif',
+                    'use_ffmpeg_gif': True,
+                    'gif_size_mode': size_mode,
+                    'gif_max_size_mb': self.gif_max_size_spinbox.value() if size_mode == 'max_size' else None,
+                    'gif_auto_resize': self.gif_auto_resize_checkbox.isChecked() if size_mode == 'max_size' else False,
+                    'ffmpeg_fps': int(self.ffmpeg_gif_fps.currentText()),
+                    'ffmpeg_colors': int(self.ffmpeg_gif_colors.currentText()),
+                    'ffmpeg_dither': self.get_dither_string_from_quality(self.gif_dither_quality_slider.value()),
+                    'ffmpeg_blur': self.ffmpeg_gif_blur.isChecked(),
+                    'gif_resize_mode': self.gif_resize_mode.currentText(),
+                    'gif_resize_values': loop_resize_values,
+                    'gif_variants': gif_variants,
+                    'multiple_gif_variants': bool(gif_variants),
+                })
             
         return params
         
@@ -2450,7 +3015,6 @@ class CommandPanel(QWidget):
         
         # Format visibility - hide in presets mode
         self.image_format.setVisible(not is_presets)
-        self.image_format_label.setVisible(not is_presets)
         
         # Transformation adjustments
         if is_presets:
@@ -2488,7 +3052,6 @@ class CommandPanel(QWidget):
         
         # Format visibility - hide in presets mode
         self.video_codec.setVisible(not is_presets)
-        self.video_codec_label.setVisible(not is_presets)
         
         # Transformation adjustments
         if is_presets:
@@ -2496,8 +3059,8 @@ class CommandPanel(QWidget):
 
         self.video_transform_group.setVisible(not is_presets)
 
-    def on_gif_size_mode_changed(self, mode):
-        """Handle GIF size mode change between Manual, Max Size, and Presets"""
+    def on_loop_size_mode_changed(self, mode):
+        """Handle Loop size mode change (GIF/WebM)"""
         if mode not in ["Max Size", "Manual", "Presets"]:
             return
             
@@ -2505,7 +3068,11 @@ class CommandPanel(QWidget):
         is_manual = (mode == "Manual")
         is_presets = (mode == "Presets")
         
-        self.gif_size_mode_value = mode.lower().replace(" ", "_")
+        self.loop_size_mode_value = mode.lower().replace(" ", "_")
+        
+        # Determine format for manual visibility
+        format_name = self.loop_format.currentText()
+        is_gif = (format_name == "GIF")
         
         # State updates
         self.gif_max_size_label.setVisible(is_max_size)
@@ -2513,33 +3080,73 @@ class CommandPanel(QWidget):
         self.gif_auto_resize_checkbox.setVisible(is_max_size)
         
         # Manual settings visibility
-        self.gif_ffmpeg_variants.setVisible(is_manual)
-        self.ffmpeg_gif_fps_label.setVisible(is_manual)
-        self.ffmpeg_gif_fps.setVisible(is_manual)
-        self.ffmpeg_gif_colors_label.setVisible(is_manual)
-        self.ffmpeg_gif_colors.setVisible(is_manual)
-        self.gif_dither_quality_slider.setVisible(is_manual)
-        self.gif_dither_quality_row_label.setVisible(is_manual)
-        self.gif_dither_quality_label.setVisible(is_manual)
+        # Determine variant states
+        gif_variants_enabled = self.gif_ffmpeg_variants.isChecked() if (is_manual and is_gif and hasattr(self, 'gif_ffmpeg_variants')) else False
+        webm_variants_enabled = self.loop_webm_variants.isChecked() if (is_manual and not is_gif and hasattr(self, 'loop_webm_variants')) else False
         
-        # Variants visibility
-        variants_enabled = self.gif_ffmpeg_variants.isChecked() if is_manual else False
-        self.ffmpeg_gif_fps_variants_label.setVisible(is_manual and variants_enabled)
-        self.ffmpeg_gif_fps_variants.setVisible(is_manual and variants_enabled)
-        self.ffmpeg_gif_colors_variants_label.setVisible(is_manual and variants_enabled)
-        self.ffmpeg_gif_colors_variants.setVisible(is_manual and variants_enabled)
-        self.ffmpeg_gif_dither_variants_label.setVisible(is_manual and variants_enabled)
-        self.ffmpeg_gif_dither_variants.setVisible(is_manual and variants_enabled)
+        # Show GIF widgets (hide single-value when variants enabled)
+        show_gif = is_manual and is_gif
+        show_gif_single = show_gif and not gif_variants_enabled
+        show_gif_variants = show_gif and gif_variants_enabled
+        
+        # Show WebM widgets (hide single-value when variants enabled)
+        show_webm = is_manual and not is_gif
+        show_webm_single = show_webm and not webm_variants_enabled
+        show_webm_variants = show_webm and webm_variants_enabled
+        
+        # GIF Multi-variant toggle (always visible in GIF manual mode)
+        if hasattr(self, 'gif_ffmpeg_variants'):
+             self.gif_ffmpeg_variants.setVisible(show_gif)
+        
+        # GIF Single-value widgets (hidden when variants enabled)
+        if hasattr(self, 'ffmpeg_gif_fps_label'):
+             self.ffmpeg_gif_fps_label.setVisible(show_gif_single)
+             self.ffmpeg_gif_fps.setVisible(show_gif_single)
+        if hasattr(self, 'ffmpeg_gif_colors_label'):
+             self.ffmpeg_gif_colors_label.setVisible(show_gif_single)
+             self.ffmpeg_gif_colors.setVisible(show_gif_single)
+        if hasattr(self, 'gif_dither_quality_slider'):
+             self.gif_dither_quality_slider.setVisible(show_gif_single)
+             self.gif_dither_quality_row_label.setVisible(show_gif_single)
+        if hasattr(self, 'gif_dither_quality_label'):
+             self.gif_dither_quality_label.setVisible(show_gif_single)
+        if hasattr(self, 'ffmpeg_gif_blur'):
+             self.ffmpeg_gif_blur.setVisible(show_gif)
+             
+        # GIF Variant inputs
+        self.ffmpeg_gif_fps_variants_label.setVisible(show_gif_variants)
+        self.ffmpeg_gif_fps_variants.setVisible(show_gif_variants)
+        self.ffmpeg_gif_colors_variants_label.setVisible(show_gif_variants)
+        self.ffmpeg_gif_colors_variants.setVisible(show_gif_variants)
+        self.ffmpeg_gif_dither_variants_label.setVisible(show_gif_variants)
+        self.ffmpeg_gif_dither_variants.setVisible(show_gif_variants)
+             
+        # WebM Multi-variant toggle (always visible in WebM manual mode)
+        if hasattr(self, 'loop_webm_variants'):
+             self.loop_webm_variants.setVisible(show_webm)
+        
+        # WebM Single-value widgets (hidden when variants enabled)
+        if hasattr(self, 'loop_webm_quality'):
+             self.loop_webm_quality.setVisible(show_webm_single)
+             self.loop_webm_quality_value.setVisible(show_webm_single)
+             self.loop_webm_quality_row_label.setVisible(show_webm_single)
+        
+        # WebM Variant inputs
+        if hasattr(self, 'loop_webm_quality_variants'):
+             self.loop_webm_quality_variants.setVisible(show_webm_variants)
+             self.loop_webm_quality_variants_label.setVisible(show_webm_variants)
         
         # Presets visibility
         self.gif_presets_section.setVisible(is_presets)
+        
+        # Format visibility - hide in presets mode
+        self.loop_format.setVisible(not is_presets)
         
         # Transformation adjustments
         if is_presets:
             self.gif_resize_mode.setCurrentText("No resize")
 
         self.gif_transform_group.setVisible(not is_presets)
-
 
     def toggle_video_variant_mode(self, checked):
         """Toggle between single and multiple video size variant modes"""
@@ -2723,12 +3330,15 @@ class CommandPanel(QWidget):
             print(f"Error toggling GIF retime: {e}")
     
     def on_video_codec_changed(self, codec):
-        """Handle video codec change to show/hide bitrate and quality controls"""
-        # Show quality controls for all video formats
-        self.video_quality_label.setVisible(True)
-        self.video_quality.setVisible(True)
-        self.video_quality_value.setVisible(True)
-        self.multiple_video_qualities.setVisible(True)
+        """Handle video codec change - refresh visibility based on current mode"""
+        # Only refresh if video tab is fully initialized
+        if not hasattr(self, 'video_transform_group'):
+            return
+        # Re-apply size mode visibility to respect current mode and multi-variant state
+        current_mode = getattr(self, 'video_size_mode_value', 'max_size').replace('_', ' ').title()
+        self.on_video_size_mode_changed(current_mode)
+        # Update GPU indicator
+        self._update_gpu_indicator()
 
     
     def get_quality_values(self):
