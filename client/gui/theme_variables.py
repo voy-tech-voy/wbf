@@ -64,6 +64,7 @@ def get_theme(is_dark: bool = True) -> dict:
 def get_color(key: str, is_dark: bool = True) -> str:
     """Get a specific color from the theme"""
     theme = get_theme(is_dark)
+    return theme.get(key, "#FF00FF")  # Magenta fallback for missing keys
 
 class ThemeVariables:
     """Wrapper class for theme access"""

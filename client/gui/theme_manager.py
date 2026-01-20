@@ -225,6 +225,10 @@ class ThemeManager(QObject):
                     color: #ffffff;
                     font-family: 'Roboto Mono';
                 }
+                QFrame#ContentFrame {
+                    background-color: #2b2b2b;
+                    border-radius: 0px 0px 5px 5px; /* Optional: Adjust if window has rounded corners */
+                }
                 QMenuBar {
                     background-color: #3c3c3c;
                     color: #ffffff;
@@ -461,6 +465,10 @@ class ThemeManager(QObject):
                 QMainWindow {
                     background-color: transparent;
                     color: #000000;
+                }
+                QFrame#ContentFrame {
+                    background-color: #ffffff;
+                    border-radius: 0px 0px 5px 5px;
                 }
                 QMenuBar::item:selected {
                     background-color: #4CAF50;

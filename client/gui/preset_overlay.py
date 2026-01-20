@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, 
-                             QPushButton, QFrame, QGridLayout, QApplication)
+                             QPushButton, QFrame, QGridLayout, QApplication, QGraphicsOpacityEffect)
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QColor, QPalette
+from PyQt6.QtGui import QColor, QPalette, QMouseEvent, QPainter, QBrush, QPaintEvent
 
 from client.core.preset_registry import PresetRegistry
 from client.gui.preset_card import PresetCard
@@ -12,13 +12,19 @@ class PresetOverlay(QWidget):
     Full-window overlay displayed during Drag & Drop operations.
     Contains filtering tabs and a grid of PresetCards.
     """
-    preset_selected = pyqtSignal(object) # Emits PresetObject on drop
+    preset_selected = pyqtSignal(object)  # Emits PresetObject when card clicked
+    dismissed = pyqtSignal()  # Emits when background clicked (no preset selected)
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("PresetOverlay")
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False) # Must catch mouse events
-        self.setAcceptDrops(True) # It accepts drops physically
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)  # Must catch mouse events
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)  # Enable styled background
+        self.setAutoFillBackground(True)  # Required for background painting
+        self.setAcceptDrops(True)  # It accepts drops physically
+        
+        # Background color for the overlay dim effect
+        self._bg_color = QColor(18, 18, 18, 217)  # rgba(18, 18, 18, 0.85)
         
         # Styles
         self.setStyleSheet("""
@@ -85,12 +91,29 @@ class PresetOverlay(QWidget):
         self.populate_grid()
         self.set_filter("ALL")
         
-        # Animation setup
-        self.opacity_effect = None # To be implemented if using QGraphicsOpacityEffect, or just use window opacity if possible? 
-        # Since this is a child widget, we can't easily animate opacity of the whole widget tree without GraphicsEffect.
-        # For MVP, we toggle visibility.
+        # Animation setup - Fade in/out effect
+        self.opacity_effect = QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(self.opacity_effect)
+        self.opacity_effect.setOpacity(0.0)  # Start invisible
+        
+        self.fade_animation = QPropertyAnimation(self.opacity_effect, b"opacity")
+        self.fade_animation.setDuration(300)  # 300ms fade for visible effect
+        self.fade_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        
         self.hide()
 
+    def paintEvent(self, event: QPaintEvent):
+        """Explicitly paint the dark overlay background"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Draw rounded rect to match container
+        painter.setBrush(QBrush(self._bg_color))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(self.rect(), 12, 12)
+        
+        painter.end()
+        super().paintEvent(event)
     def populate_grid(self):
         """Create cards for all presets"""
         presets = PresetRegistry.get_all_presets()
@@ -157,3 +180,74 @@ class PresetOverlay(QWidget):
                 card.set_active_state(False)
                 
         return target_card
+    
+    def show_animated(self):
+        """Show overlay with fade-in animation"""
+        # Disconnect any pending hide
+        try:
+            self.fade_animation.finished.disconnect()
+        except:
+            pass
+        
+        # Resize to cover parent completely
+        if self.parent():
+            self.setGeometry(0, 0, self.parent().width(), self.parent().height())
+        
+        self.show()  # Make visible first
+        self.raise_()  # Bring to front
+        self.fade_animation.stop()
+        self.fade_animation.setStartValue(self.opacity_effect.opacity())
+        self.fade_animation.setEndValue(1.0)
+        self.fade_animation.start()
+    
+    def hide_animated(self):
+        """Hide overlay with fade-out animation"""
+        # Disconnect previous connections
+        try:
+            self.fade_animation.finished.disconnect()
+        except:
+            pass
+        
+        self.fade_animation.stop()
+        self.fade_animation.setStartValue(self.opacity_effect.opacity())
+        self.fade_animation.setEndValue(0.0)
+        self.fade_animation.finished.connect(self._on_fade_out_finished)
+        self.fade_animation.start()
+    
+    def _on_fade_out_finished(self):
+        """Called when fade-out animation completes"""
+        try:
+            self.fade_animation.finished.disconnect()
+        except:
+            pass
+        self.hide()
+
+    def mousePressEvent(self, event: QMouseEvent):
+        """Handle clicks - card click selects preset, background click dismisses"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            # Find if we clicked on a card
+            click_pos = event.pos()
+            clicked_widget = self.childAt(click_pos)
+            
+            # Traverse up to find PresetCard
+            target_card = None
+            curr = clicked_widget
+            while curr:
+                if isinstance(curr, PresetCard):
+                    target_card = curr
+                    break
+                curr = curr.parent()
+                if curr == self:
+                    break
+            
+            if target_card:
+                # Clicked on a card - emit preset_selected
+                target_card.trigger_success_animation()
+                self.preset_selected.emit(target_card.preset)
+            else:
+                # Clicked on background - emit dismissed
+                self.dismissed.emit()
+            
+            event.accept()
+        else:
+            super().mousePressEvent(event)

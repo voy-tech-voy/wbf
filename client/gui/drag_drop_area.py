@@ -365,6 +365,7 @@ class FileListItemWidget(QWidget):
 
 class DragDropArea(QWidget):
     files_added = pyqtSignal(list)  # Signal emitted when files are added
+    preset_applied = pyqtSignal(object, list)  # Emits (preset, files) when preset selected
     
     # Supported file extensions for graphics conversion
     SUPPORTED_EXTENSIONS = {
@@ -379,7 +380,9 @@ class DragDropArea(QWidget):
         self.theme_manager = None  # Will be set by parent
         self.setAcceptDrops(True)  # Enable drag/drop on the main widget
         self._current_processing_index = -1  # Track which file is being processed
+        self._pending_files = None  # Files waiting for preset selection
         self.setup_ui()
+        self._setup_overlay()
     
     def set_file_progress(self, file_index, progress):
         """Set progress for a specific file in the list (0.0 to 1.0) - No-op now"""
@@ -474,13 +477,59 @@ class DragDropArea(QWidget):
         # Initialize with cleared state
         self.file_list_widget.clear()
         
+    def _setup_overlay(self):
+        """Setup the preset overlay inside the drop area"""
+        from client.gui.preset_overlay import PresetOverlay
+        
+        # Parent to file_list_widget to stay inside the list styling
+        # self.file_list_widget is defined in setup_ui
+        self.preset_overlay = PresetOverlay(self.file_list_widget)
+        self.preset_overlay.hide()
+        self.preset_overlay.preset_selected.connect(self._on_preset_selected)
+        self.preset_overlay.dismissed.connect(self._on_overlay_dismissed)
+        
+        # Match border radius of the container
+        current_style = self.preset_overlay.styleSheet()
+        self.preset_overlay.setStyleSheet(current_style + "\nQWidget#PresetOverlay { border-radius: 12px; }")
+    
+    def show_preset_view(self):
+        """Manually show the preset overlay (e.g. from Presets button)"""
+        if hasattr(self, 'preset_overlay') and hasattr(self, 'file_list_widget'):
+            self.preset_overlay.setGeometry(0, 0, self.file_list_widget.width(), self.file_list_widget.height())
+            self.preset_overlay.show_animated()
+
+    def _on_preset_selected(self, preset_obj):
+        """Handle preset card click"""
+        self.preset_overlay.hide_animated()
+        
+        if self._pending_files:
+            # Emit signal with preset and files
+            self.preset_applied.emit(preset_obj, self._pending_files)
+            self._pending_files = None
+        else:
+            # No files pending - Emit for global preset change
+            self.preset_applied.emit(preset_obj, [])
+    
+    def _on_overlay_dismissed(self):
+        """Handle click on overlay background"""
+        self.preset_overlay.hide_animated()
+        
+        if self._pending_files:
+            # Add files without preset
+            self.add_files(self._pending_files)
+            self._pending_files = None
+    
     def resizeEvent(self, event):
-        """Update placeholder size when the widget is resized"""
+        """Update placeholder size and overlay geometry"""
         super().resizeEvent(event)
+        
+        # Update overlay geometry to cover the file list widget
+        if hasattr(self, 'preset_overlay') and hasattr(self, 'file_list_widget'):
+            self.preset_overlay.setGeometry(0, 0, self.file_list_widget.width(), self.file_list_widget.height())
+        
         if hasattr(self, 'file_list_widget') and self.file_list_widget.count() == 1:
             item = self.file_list_widget.item(0)
             if item and item.data(Qt.ItemDataRole.UserRole) == "PLACEHOLDER":
-                # Set a timer to update size after layout settles
                 from PyQt6.QtCore import QTimer
                 QTimer.singleShot(10, self.update_placeholder_size)
 
@@ -494,40 +543,47 @@ class DragDropArea(QWidget):
                     item.setSizeHint(viewport_size)
 
     def dragEnterEvent(self, event: QDragEnterEvent):
-        """Handle drag enter events"""
+        """Show overlay when files are dragged over"""
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
-            self.on_drag_enter()
+            # Show overlay
+            if hasattr(self, 'preset_overlay') and hasattr(self, 'file_list_widget'):
+                self.preset_overlay.setGeometry(0, 0, self.file_list_widget.width(), self.file_list_widget.height())
+                self.preset_overlay.show_animated()
         else:
             event.ignore()
             
     def dragLeaveEvent(self, event):
-        """Handle drag leave events"""
-        self.on_drag_leave()
-        super().dragLeaveEvent(event)
+        """Hide overlay when drag leaves"""
+        if hasattr(self, 'preset_overlay'):
+            self.preset_overlay.hide_animated()
+        event.accept()
         
     def dropEvent(self, event: QDropEvent):
-        """Handle file drop events"""
-        files = []
-        folders = []
-        
-        for url in event.mimeData().urls():
-            path = url.toLocalFile()
-            if os.path.isfile(path):
-                files.append(path)
-            elif os.path.isdir(path):
-                folders.append(path)
-                
-        # Add individual files
-        if files:
-            self.add_files(files)
+        """Store files as pending and wait for user action"""
+        if event.mimeData().hasUrls():
+            files = []
+            folders = []
             
-        # Handle dropped folders
-        if folders:
-            self.handle_dropped_folders(folders)
+            for url in event.mimeData().urls():
+                path = url.toLocalFile()
+                if os.path.isfile(path):
+                    files.append(path)
+                elif os.path.isdir(path):
+                    folders.append(path)
             
-        self.on_drag_leave()
-        event.acceptProposedAction()
+            # Collect all files including from folders
+            all_files = files.copy()
+            for folder in folders:
+                folder_files = self.get_supported_files_from_folder(folder, True)
+                all_files.extend(folder_files)
+            
+            # Store as pending - overlay stays visible
+            self._pending_files = all_files
+            
+            event.acceptProposedAction()
+        else:
+            event.ignore()
         
     def handle_dropped_folders(self, folders):
         """Handle dropped folder(s) with user options"""

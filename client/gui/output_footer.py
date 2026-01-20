@@ -6,171 +6,17 @@ Based on Design Spec v4.0 - Premium Industrial
 
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel,
-    QSizePolicy, QFrame, QFileDialog, QButtonGroup, QGraphicsOpacityEffect,
-    QGraphicsDropShadowEffect
+    QSizePolicy, QGraphicsOpacityEffect, QGraphicsDropShadowEffect
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QTimer
 from PyQt6.QtGui import QColor, QFont
 
 from client.utils.font_manager import FONT_FAMILY, FONT_FAMILY_APP_NAME, FONT_SIZE_BUTTON
 from client.gui.theme_variables import get_theme, get_color
+from client.gui.custom_widgets import SegmentedControl
 
 
-class SegmentedButton(QPushButton):
-    """Individual segment button for the toggle control"""
-    
-    def __init__(self, text, parent=None):
-        super().__init__(text, parent)
-        self.setCheckable(True)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setMinimumHeight(32)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-
-class SegmentedControl(QFrame):
-    """
-    Pill-style horizontal segmented control with sliding highlight.
-    Based on Design Spec: UI_Segment_Pill Class
-    """
-    selectionChanged = pyqtSignal(str)  # Emits: "source", "organized", "custom"
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._is_dark = True
-        self._custom_path = ""
-        
-        self.setObjectName("SegmentContainer")
-        
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(4)
-        
-        self.button_group = QButtonGroup(self)
-        self.button_group.setExclusive(True)
-        
-        # Create segments
-        self.source_btn = SegmentedButton("In Source")
-        self.organized_btn = SegmentedButton("Organized")
-        self.custom_btn = SegmentedButton("Custom...")
-        
-        self.buttons = {
-            "source": self.source_btn,
-            "organized": self.organized_btn,
-            "custom": self.custom_btn
-        }
-        
-        # Custom path label (shown when custom is selected) - create BEFORE connecting signals
-        self.path_label = QLabel("")
-        self.path_label.setVisible(False)
-        self.path_label.setMaximumWidth(150)
-        
-        for key, btn in self.buttons.items():
-            btn.setObjectName("SegmentBtn")
-            self.button_group.addButton(btn)
-            layout.addWidget(btn)
-            btn.toggled.connect(lambda checked, k=key: self._on_segment_changed(k, checked))
-        
-        layout.addWidget(self.path_label)
-        
-        # Default selection (after path_label is created)
-        self.source_btn.setChecked(True)
-        
-        self._apply_styles()
-        
-    def _on_segment_changed(self, key, checked):
-        if not checked:
-            return
-            
-        if key == "custom":
-            # Open folder picker
-            folder = QFileDialog.getExistingDirectory(
-                self, "Select Output Folder", "",
-                QFileDialog.Option.ShowDirsOnly
-            )
-            if folder:
-                self._custom_path = folder
-                # Truncate path for display
-                display = self._truncate_path(folder)
-                self.path_label.setText(display)
-                self.path_label.setVisible(True)
-                self.path_label.setToolTip(folder)
-                self.selectionChanged.emit("custom")
-            else:
-                # If cancelled, revert to previous selection
-                self.source_btn.setChecked(True)
-                return
-        else:
-            self.path_label.setVisible(False)
-            self.selectionChanged.emit(key)
-            
-    def _truncate_path(self, path, max_len=20):
-        """Truncate path for display"""
-        if len(path) <= max_len:
-            return path
-        parts = path.replace("\\", "/").split("/")
-        if len(parts) <= 2:
-            return "..." + path[-(max_len-3):]
-        return f".../{parts[-2]}/{parts[-1]}"
-    
-    def get_selection(self):
-        """Get current selection: 'source', 'organized', or 'custom'"""
-        for key, btn in self.buttons.items():
-            if btn.isChecked():
-                return key
-        return "source"
-    
-    def get_custom_path(self):
-        """Get the custom path if selected"""
-        return self._custom_path if self.get_selection() == "custom" else None
-    
-    def get_organized_name(self):
-        """Get the organized folder name"""
-        return "output"
-    
-    def update_theme(self, is_dark):
-        self._is_dark = is_dark
-        self._apply_styles()
-        
-    def _apply_styles(self):
-        theme = get_theme(self._is_dark)
-        
-        # Container styles (SegmentContainer)
-        self.setStyleSheet(f"""
-            QFrame#SegmentContainer {{
-                background-color: {theme['app_bg']};
-                border: 1px solid {theme['border_dim']};
-                border-radius: 10px;
-                min-height: 32px;
-            }}
-        """)
-        
-        # Button styles (SegmentBtn)
-        btn_style = f"""
-            QPushButton#SegmentBtn {{
-                background-color: transparent;
-                color: {theme['text_secondary']};
-                border: none;
-                border-radius: 6px;
-                padding: 6px 16px;
-                font-family: '{FONT_FAMILY}';
-                font-size: 12px;
-                font-weight: 500;
-            }}
-            QPushButton#SegmentBtn:hover:!checked {{
-                background-color: {theme['surface_element']};
-            }}
-            QPushButton#SegmentBtn:checked {{
-                background-color: {theme['border_dim']};
-                color: {theme['text_primary']};
-                font-weight: 600;
-            }}
-        """
-        
-        for btn in self.buttons.values():
-            btn.setStyleSheet(btn_style)
-            
-        # Update path label color
-        self.path_label.setStyleSheet(f"font-size: 10px; color: {theme['text_secondary']}; padding-left: 8px;")
 
 
 class OutputFooter(QWidget):

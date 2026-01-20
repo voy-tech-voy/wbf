@@ -22,7 +22,7 @@ from client.gui.custom_widgets import (
     TimeRangeSlider, ResizeFolder, RotationOptions, CustomComboBox,
     CustomTargetSizeSpinBox, ModeButtonsWidget, PresetButton,
     SquareButtonRow, SideButtonGroup, AnimatedSideModeButton, FormatButtonRow, RotationButtonRow,
-    LoopFormatSelector, GPUIndicator, VideoCodecSelector, install_app_tooltip
+    LoopFormatSelector, GPUIndicator, VideoCodecSelector, install_app_tooltip, MorphingButton, PresetStatusButton
 )
 from client.gui.custom_spinbox import CustomSpinBox
 from client.gui.command_group import CommandGroup
@@ -392,6 +392,7 @@ QRangeSlider = TimeRangeSlider
 class CommandPanel(QWidget):
     conversion_requested = pyqtSignal(dict)  # Signal with conversion parameters
     stop_conversion_requested = pyqtSignal()  # Signal to stop conversion
+    preset_btn_clicked = pyqtSignal() # Signal when PresetStatusButton is clicked
     
     def __init__(self):
         super().__init__()
@@ -403,28 +404,7 @@ class CommandPanel(QWidget):
         # Initialize GPU detection after UI is ready
         QTimer.singleShot(100, self._initialize_gpu_detection)
     
-    def resizeEvent(self, event):
-        """Handle resize to keep tab bar stretched to full width"""
-        super().resizeEvent(event)
-        if hasattr(self, 'tabs'):
-            tab_bar = self.tabs.tabBar()
-            # Force tab bar to match tab widget width (account for borders)
-            new_width = self.tabs.width() - 6
-            if new_width > 0:
-                tab_bar.setFixedWidth(new_width)
-    
-    def showEvent(self, event):
-        """Handle show to ensure tabs are properly sized"""
-        super().showEvent(event)
-        QTimer.singleShot(0, self._update_tab_bar_width)
-    
-    def _update_tab_bar_width(self):
-        """Update tab bar width to fill the tab widget"""
-        if hasattr(self, 'tabs'):
-            tab_bar = self.tabs.tabBar()
-            new_width = self.tabs.width() - 6
-            if new_width > 0:
-                tab_bar.setFixedWidth(new_width)
+
 
     def _initialize_gpu_detection(self):
         """Initialize GPU detection and determine which codecs have acceleration"""
@@ -628,34 +608,40 @@ class CommandPanel(QWidget):
         return QIcon(tinted_pixmap)
 
     def update_tab_icons(self):
-        """Update tab icons based on selection state and theme"""
-        if not hasattr(self, 'tabs'):
+        """Update Lab Button icon based on active tab"""
+        # Ensure buttons exist
+        if not hasattr(self, 'lab_btn'):
             return
             
-        # Determine colors
-        if self.is_dark_mode:
-            normal_color = QColor("#888888") # Grey in dark mode
-            selected_color = QColor("white") # White when selected
-        else:
-            normal_color = QColor("#888888") # Grey in light mode
-            selected_color = QColor("black") # Black when selected
-        
-        # Icon paths using existing files
-        icons = [
-            get_resource_path("client/assets/icons/pic_icon2.svg"),
-            get_resource_path("client/assets/icons/vid_icon2.svg"),
-            get_resource_path("client/assets/icons/loop_icon2.svg")
-        ]
-        
         current_index = self.tabs.currentIndex()
         
-        for i, icon_path in enumerate(icons):
-            if i == current_index:
-                color = selected_color
-            else:
-                color = normal_color
-                
-            self.tabs.setTabIcon(i, self._get_tinted_icon(icon_path, color))
+        # Icon paths matching tab order
+        icons = [
+            "client/assets/icons/pic_icon2.svg",
+            "client/assets/icons/vid_icon2.svg",
+            "client/assets/icons/loop_icon2.svg"
+        ]
+        
+        if 0 <= current_index < len(icons):
+            # Update Lab Button to show selected mode
+            self.lab_btn.set_main_icon(icons[current_index])
+            
+            # Set State: Lab Active (Manual Mode)
+            self.lab_btn.set_style_solid(True)
+            
+            # Reset Preset Button
+            if hasattr(self, 'preset_status_btn'):
+                self.preset_status_btn.set_active(False)
+
+    def _on_tab_btn_clicked(self, btn_id):
+        """Handle MorphingButton menu item click (btn_id is item ID)"""
+        # Convert item ID to index if needed (they map 1:1 currently)
+        index = btn_id
+        if self.tabs.currentIndex() != index:
+            self.tabs.setCurrentIndex(index)
+            # update_tab_icons will be called via signal
+
+
 
     def update_theme(self, is_dark):
         """Update theme-dependent styles"""
@@ -735,35 +721,37 @@ class CommandPanel(QWidget):
 
         # Tab icons remain at original size (no tinting)
 
-        # Update tab bar colors based on theme
-        tab_bg = "transparent"
-        tab_text = "#ffffff" if is_dark else "#000000"
-        tab_border = "#555555" if is_dark else "#cccccc"
-        
-        self.tabs.setStyleSheet(f"""
-            QTabBar::tab {{
-                padding: 8px 16px;
-                min-height: 36px;
-                margin: 2px;
-                color: {tab_text};
-                background-color: {tab_bg};
+        # Update tab buttons styling
+        # Replicating original green tab look
+        tab_btn_style = """
+            QPushButton {
+                background-color: transparent;
                 border: 1px solid rgba(128, 128, 128, 0.3);
                 border-radius: 6px;
-            }}
-            QTabBar::tab:selected {{
+                margin: 2px;
+            }
+            QPushButton:checked {
                 background-color: #00AA00;
-                color: white;
-                font-weight: bold;
                 border: 1px solid #008800;
-            }}
-            QTabBar::tab:hover:!selected {{
+            }
+            QPushButton:hover:!checked {
                 background-color: rgba(0, 170, 0, 0.2);
-            }}
-            QTabWidget::pane {{
-                border: none;
-                background-color: transparent;
-            }}
-        """)
+            }
+        """
+        
+        if hasattr(self, 'btn_tab_image'):
+            self.btn_tab_image.setStyleSheet(tab_btn_style)
+            self.btn_tab_video.setStyleSheet(tab_btn_style)
+            self.btn_tab_loop.setStyleSheet(tab_btn_style)
+        
+        # Update lab button (morphing button)
+        if hasattr(self, 'lab_btn'):
+            self.lab_btn.update_theme(is_dark)
+        
+        # Update all MorphingButton instances
+        morphing_buttons = self.findChildren(MorphingButton)
+        for mb in morphing_buttons:
+            mb.update_theme(is_dark)
 
         # Update all ModeButtonsWidget and SideButtonGroup instances
         mode_buttons = self.findChildren(ModeButtonsWidget)
@@ -839,10 +827,54 @@ class CommandPanel(QWidget):
         
         row1_layout.addWidget(sidebar_top)
         
-        # 2. Tabs (Right side of Row 1)
+        # 2. Right Content Area (Tab Buttons + Pages)
+        right_content_widget = QWidget()
+        right_content_layout = QVBoxLayout(right_content_widget)
+        right_content_layout.setContentsMargins(0, 0, 0, 0)
+        right_content_layout.setSpacing(0)
+        
+        # Top Bar Container (Presets Button + Lab Morph Button)
+        top_bar_widget = QWidget()
+        top_bar_widget.setFixedHeight(64) 
+        top_bar_layout = QHBoxLayout(top_bar_widget)
+        top_bar_layout.setContentsMargins(0, 8, 16, 8)
+        top_bar_layout.setSpacing(0)
+        
+        # 1. Preset Status Button (Left)
+        # Interactive now - opens Preset View
+        self.preset_status_btn = PresetStatusButton()
+        self.preset_status_btn.clicked.connect(self.preset_btn_clicked.emit)
+        top_bar_layout.addWidget(self.preset_status_btn)
+        
+        # Spacer
+        top_bar_layout.addStretch()
+        
+        # 2. Lab Button (Right)
+        # Using Vials icon as default
+        self.lab_btn = MorphingButton(main_icon_path="client/assets/icons/lab_icon.svg")
+        
+        # Add menu items (ID 0=Image, 1=Video, 2=Loop)
+        self.lab_btn.add_menu_item(0, "client/assets/icons/pic_icon2.svg", "Image Conversion")
+        self.lab_btn.add_menu_item(1, "client/assets/icons/vid_icon2.svg", "Video Conversion")
+        self.lab_btn.add_menu_item(2, "client/assets/icons/loop_icon2.svg", "Loop Conversion")
+        
+        self.lab_btn.itemClicked.connect(self._on_tab_btn_clicked)
+        
+        # Add Lab Button to layout
+        top_bar_layout.addWidget(self.lab_btn)
+        
+        # Add Top Bar to Main Layout
+        right_content_layout.addWidget(top_bar_widget)
+
+        
+        # Pages Container (QTabWidget)
         self.tabs = QTabWidget()
         self.tabs.setContentsMargins(0, 0, 0, 0)
-        row1_layout.addWidget(self.tabs)
+        self.tabs.tabBar().hide() # Hide native tab bar
+        self.tabs.setDocumentMode(True)
+        right_content_layout.addWidget(self.tabs)
+        
+        row1_layout.addWidget(right_content_widget)
         
         layout.addWidget(row1_widget, 1)  # Stretch factor 1: expand to fill vertical space
         
@@ -901,40 +933,7 @@ class CommandPanel(QWidget):
         
         self.tabs.currentChanged.connect(self._on_tab_changed)
         
-        # Tab Bar Styling
-        tab_bar = self.tabs.tabBar()
-        tab_bar.setExpanding(True)
-        tab_bar.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        
-        from PyQt6.QtWidgets import QTabBar
-        tab_bar.setUsesScrollButtons(False)
-        self.tabs.setDocumentMode(False)
-        tab_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        tab_bar.setMinimumWidth(0)
-        self.tabs.setIconSize(QSize(36, 36))
-        
-        self.tabs.setStyleSheet("""
-            QTabBar::tab {
-                padding: 8px 16px;
-                min-height: 36px;
-                margin: 2px;
-                background-color: transparent;
-                border: none;
-                border-radius: 6px;
-            }
-            QTabBar::tab:selected {
-                background-color: #00AA00;
-                color: white;
-                font-weight: bold;
-            }
-            QTabBar::tab:hover:!selected {
-                background-color: rgba(0, 170, 0, 0.2);
-            }
-            QTabWidget::pane {
-                border: none;
-                background-color: transparent;
-            }
-        """)
+
         
         # DEBUG: Gap between output folder and convert button
         layout.addWidget(self._create_debug_spacer(9))

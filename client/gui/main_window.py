@@ -22,7 +22,6 @@ from .drag_drop_area import DragDropArea
 from .command_panel import CommandPanel
 from .output_footer import OutputFooter
 from .theme_manager import ThemeManager
-from .preset_overlay import PresetOverlay
 from client.core.conversion_engine import ConversionEngine, ToolChecker
 from client.utils.trial_manager import TrialManager
 from client.utils.font_manager import AppFonts, FONT_FAMILY_APP_NAME
@@ -185,13 +184,7 @@ class MainWindow(QMainWindow):
         # Add content container to root layout
         root_layout.addWidget(self.content_container)
 
-        # Smart Preset Overlay (Absolute Positioning on top of everything)
-        # We add it last to root_layout but it needs to cover everything.
-        # Actually simplest is to make it a child of central_widget and resize it in resizeEvent
-        self.preset_overlay = PresetOverlay(central_widget)
-        self.preset_overlay.hide()
-        # Connect overlay signal
-        self.preset_overlay.preset_selected.connect(self.on_preset_drop)
+        # Note: Preset overlay is now inside DragDropArea
         
         # Process events to keep splash screen animated
         QApplication.processEvents()
@@ -573,6 +566,7 @@ class MainWindow(QMainWindow):
         """Connect signals between components"""
         # Connect drag-drop area signals
         self.drag_drop_area.files_added.connect(self.on_files_added)
+        self.drag_drop_area.preset_applied.connect(self.on_preset_applied)
         
         # Connect drag-drop area status updates to main window
         self.drag_drop_area.update_status = self.update_status
@@ -580,6 +574,7 @@ class MainWindow(QMainWindow):
         # Connect command panel signals
         self.command_panel.conversion_requested.connect(self.start_conversion)
         self.command_panel.stop_conversion_requested.connect(self.stop_conversion)
+        self.command_panel.preset_btn_clicked.connect(self.drag_drop_area.show_preset_view)
         
     def on_files_added(self, files):
         """Handle files added to drag-drop area"""
@@ -1310,87 +1305,85 @@ class MainWindow(QMainWindow):
             self.unsetCursor()
             
         super().mouseMoveEvent(event)
-        
-    # --- Drag & Drop Lifecycle for Smart Overlay ---
     
-    def dragEnterEvent(self, event: QDragEnterEvent):
-        """Wake the Overlay when files enter window"""
+    # --- Drag & Drop - Forward to DragDropArea ---
+    
+    def dragEnterEvent(self, event):
+        """Accept drag anywhere on window, forward to DragDropArea"""
         if event.mimeData().hasUrls():
-            # Show overlay
-            if hasattr(self, 'preset_overlay'):
-                self.preset_overlay.raise_()
-                self.preset_overlay.show()
-                # Fade in could go here
-            event.accept()
+            event.acceptProposedAction()
+            # Show overlay in DragDropArea
+            if hasattr(self, 'drag_drop_area') and hasattr(self.drag_drop_area, 'preset_overlay'):
+                list_widget = self.drag_drop_area.file_list_widget
+                self.drag_drop_area.preset_overlay.setGeometry(
+                    0, 0, list_widget.width(), list_widget.height()
+                )
+                self.drag_drop_area.preset_overlay.show_animated()
         else:
             event.ignore()
-
-    def dragMoveEvent(self, event: QDragEnterEvent): # dragEnterEvent type is reused often
-        """Seek logic during drag"""
+    
+    def dragMoveEvent(self, event):
+        """Accept drag move"""
         if event.mimeData().hasUrls():
-            event.accept()
-            # Hit test in overlay
-            if hasattr(self, 'preset_overlay') and self.preset_overlay.isVisible():
-                # Fix: Use mapToGlobal for compatibility
-                global_pos = self.mapToGlobal(event.position().toPoint())
-                self.preset_overlay.hit_test(global_pos)
+            event.acceptProposedAction()
         else:
             event.ignore()
-            
+    
     def dragLeaveEvent(self, event):
-        """Reset overlay if drag leaves window"""
-        if hasattr(self, 'preset_overlay'):
-            self.preset_overlay.hide()
+        """Hide overlay when drag leaves window"""
+        if hasattr(self, 'drag_drop_area') and hasattr(self.drag_drop_area, 'preset_overlay'):
+            self.drag_drop_area.preset_overlay.hide_animated()
         super().dragLeaveEvent(event)
-        
-    def dropEvent(self, event: QDropEvent):
-        """Commit logic on drop"""
-        # Hide overlay
-        if hasattr(self, 'preset_overlay'):
-            self.preset_overlay.hide()
-        
+    
+    def dropEvent(self, event):
+        """Forward drop to DragDropArea"""
         if event.mimeData().hasUrls():
-            # Check if dropped on a card
-            target_card = None
-            if hasattr(self, 'preset_overlay'):
-                 # Fix: Use mapToGlobal for compatibility
-                 global_pos = self.mapToGlobal(event.position().toPoint())
-                 target_card = self.preset_overlay.hit_test(global_pos)
+            files = []
+            folders = []
             
-            files = [u.toLocalFile() for u in event.mimeData().urls()]
+            for url in event.mimeData().urls():
+                path = url.toLocalFile()
+                import os
+                if os.path.isfile(path):
+                    files.append(path)
+                elif os.path.isdir(path):
+                    folders.append(path)
             
-            if target_card:
-                # Path A: Valid Target - Handled by signal preset_selected or direct trigger
-                target_card.trigger_success_animation() # Visuals
-                
-                # Apply preset
-                self.apply_preset_and_process(target_card.preset, files)
-            else:
-                # Path B: Void Drop - Default logic (Add to list)
-                self.drag_drop_area.add_files(files)
+            # Collect all files including from folders
+            all_files = files.copy()
+            for folder in folders:
+                folder_files = self.drag_drop_area.get_supported_files_from_folder(folder, True)
+                all_files.extend(folder_files)
             
-            event.accept()
+            # Store as pending in DragDropArea
+            self.drag_drop_area._pending_files = all_files
+            
+            event.acceptProposedAction()
         else:
             event.ignore()
-
-    def on_preset_drop(self, preset_obj):
-        """Handle proper signal based drop if we used signal"""
-        pass
         
-    def apply_preset_and_process(self, preset, files):
-        """Apply preset settings and add files"""
-        # Logic to apply settings from preset to the processing queue
-        # For now, we print info and add files to the list effectively
-        print(f"[Smart Drop] Applying preset: {preset.title} to {len(files)} files")
+    # --- Preset Selection Handler ---
+    
+    def on_preset_applied(self, preset, files):
+        """Handle preset applied from DragDropArea overlay"""
+        file_count = len(files) if files else 0
+        print(f"[Smart Drop] Applying preset: {preset.title} to {file_count} files")
         
-        # 1. Add files to the DragDropArea
-        self.drag_drop_area.add_files(files)
+        # 1. Add files to the DragDropArea if any
+        if files:
+            self.drag_drop_area.add_files(files)
         
         # 2. Configure CommandPanel with preset params
-        # This requires CommandPanel to be able to accept external config or 'Preset Mode'
-        # For specific preset params (e.g. format=mp4), we might need to set UI state.
+        # TODO: Implement full parameter mapping
         
-        # TODO: Implement full parameter mapping. 
-        # For now, we notify user and update status.
+        # 3. Update UI to reflect Active Preset State
+        if hasattr(self.command_panel, 'preset_status_btn'):
+            self.command_panel.preset_status_btn.set_active(True, preset.title)
+            
+        if hasattr(self.command_panel, 'lab_btn'):
+            # Set Lab button to ghost (inactive) since Preset is active
+            self.command_panel.lab_btn.set_style_solid(False)
+            # Reset icon to default Lab icon to indicate "Preset Mode" / Neutral state
+            self.command_panel.lab_btn.set_main_icon("client/assets/icons/lab_icon.svg")
+            
         self.update_status(f"Applied Preset: {preset.title}")
-
