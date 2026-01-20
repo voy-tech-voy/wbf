@@ -9,14 +9,20 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QMenuBar, QToolBar, QStatusBar, QSplitter,
     QListWidget, QTextEdit, QLabel, QPushButton,
-    QFrame, QGroupBox, QProgressBar, QMessageBox, QDialog, QApplication
+    QFrame, QGroupBox, QProgressBar, QMessageBox, QDialog, QApplication,
+    QGraphicsDropShadowEffect
 )
-from PyQt6.QtGui import QIcon, QDragEnterEvent, QDropEvent, QFont, QMouseEvent, QAction
-from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QSize, pyqtSlot, pyqtProperty
+from PyQt6.QtGui import QIcon, QDragEnterEvent, QDropEvent, QFont, QMouseEvent, QAction, QColor
+from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QSize, pyqtSlot, pyqtProperty, QRect
+import os
+import ctypes
+from ctypes import POINTER, Structure, c_int, byref, windll, sizeof
 
 from .drag_drop_area import DragDropArea
 from .command_panel import CommandPanel
+from .output_footer import OutputFooter
 from .theme_manager import ThemeManager
+from .preset_overlay import PresetOverlay
 from client.core.conversion_engine import ConversionEngine, ToolChecker
 from client.utils.trial_manager import TrialManager
 from client.utils.font_manager import AppFonts, FONT_FAMILY_APP_NAME
@@ -33,14 +39,23 @@ class DraggableTitleBar(QFrame):
     def mousePressEvent(self, event: QMouseEvent):
         """Store the mouse position when pressed"""
         if event.button() == Qt.MouseButton.LeftButton:
+            # Allow resizing on top edge - propagate to parent if near top
+            if event.position().y() <= 5:
+                event.ignore()
+                return
+                
             self.drag_position = event.globalPosition().toPoint() - self.parent_window.frameGeometry().topLeft()
-        super().mousePressEvent(event)
+            event.accept()
+        else:
+            super().mousePressEvent(event)
         
     def mouseMoveEvent(self, event: QMouseEvent):
         """Move the window when dragging"""
         if event.buttons() == Qt.MouseButton.LeftButton and self.drag_position is not None:
             self.parent_window.move(event.globalPosition().toPoint() - self.drag_position)
-        super().mouseMoveEvent(event)
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
         
     def mouseReleaseEvent(self, event: QMouseEvent):
         """Clear drag position when released"""
@@ -73,11 +88,15 @@ class MainWindow(QMainWindow):
             
         self.setWindowTitle(title)
         
-        # Make window frameless for custom title bar
+        # Make window frameless for custom title bar & transparent for rounded corners
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAcceptDrops(True) # Ensure window accepts drops for the overlay logic
             
         self.setGeometry(100, 100, 1200, 1000)
         self.setMinimumSize(800, 700)
+        self.setMouseTracking(True)  # Enable mouse tracking for edge resize cursors
         
         if self.is_trial:
             self.trial_manager = TrialManager()
@@ -119,31 +138,60 @@ class MainWindow(QMainWindow):
     def setup_ui(self):
         """Setup the main user interface layout"""
         central_widget = QWidget()
+        central_widget.setMouseTracking(True)
         self.setCentralWidget(central_widget)
         
-        # Main vertical layout
+        # Main vertical layout (No margins - direct window edge)
         main_layout = QVBoxLayout(central_widget)
         main_layout.setSpacing(0)
-        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setContentsMargins(0, 0, 0, 0)  # No margins
+        
+        # Root Frame (The visible container)
+        self.root_frame = QFrame()
+        self.root_frame.setMouseTracking(True)
+        self.root_frame.setObjectName("RootFrame")
+        # No shadow effect - clean window edges
+        
+        main_layout.addWidget(self.root_frame)
+        
+        # Root Layout inside the frame
+        root_layout = QVBoxLayout(self.root_frame)
+        root_layout.setSpacing(0)
+        root_layout.setContentsMargins(0, 0, 0, 0)
         
         # Add custom title bar
-        self.create_title_bar(main_layout)
+        self.create_title_bar(root_layout)
         QApplication.processEvents()
         
-        # Content area with normal spacing
-        content_layout = QVBoxLayout()
+        # Content area container (opaque)
+        self.content_container = QFrame()
+        self.content_container.setObjectName("ContentFrame")
+        content_layout = QVBoxLayout(self.content_container)
         content_layout.setSpacing(5)
         content_layout.setContentsMargins(5, 5, 5, 5)
         
         # Create the middle section with splitter
-        # Create the middle section with splitter
         self.create_middle_section(content_layout)
-        QApplication.processEvents()
         
         # Bottom section (status and progress)
         self.create_bottom_section(content_layout)
         
-        main_layout.addLayout(content_layout)
+        # Create output footer
+        self.output_footer = OutputFooter()
+        self.output_footer.start_conversion.connect(self.start_conversion)
+        self.output_footer.stop_conversion.connect(self.stop_conversion)
+        content_layout.addWidget(self.output_footer)
+        
+        # Add content container to root layout
+        root_layout.addWidget(self.content_container)
+
+        # Smart Preset Overlay (Absolute Positioning on top of everything)
+        # We add it last to root_layout but it needs to cover everything.
+        # Actually simplest is to make it a child of central_widget and resize it in resizeEvent
+        self.preset_overlay = PresetOverlay(central_widget)
+        self.preset_overlay.hide()
+        # Connect overlay signal
+        self.preset_overlay.preset_selected.connect(self.on_preset_drop)
         
         # Process events to keep splash screen animated
         QApplication.processEvents()
@@ -168,7 +216,7 @@ class MainWindow(QMainWindow):
                 logo_label.setPixmap(icon.pixmap(32, 32))
                 logo_label.setMaximumWidth(40)
                 logo_label.setCursor(Qt.CursorShape.PointingHandCursor)
-                logo_label.setStyleSheet("border: none; padding: 0px; margin: 0px;")
+                logo_label.setStyleSheet("border: none; padding: 0px; margin: 0px; background: transparent;")
                 title_layout.addWidget(logo_label)
                 self.logo_label = logo_label
         except Exception as e:
@@ -241,6 +289,15 @@ class MainWindow(QMainWindow):
         exit_action = QAction("Exit", self)
         exit_action.triggered.connect(self.close)
         self.title_menu.addAction(exit_action)
+        
+        # Status Bar Toggle
+        self.status_action = QAction("Show Status Bar", self)
+        self.status_action.setCheckable(True)
+        self.status_action.setChecked(False) 
+        self.status_action.triggered.connect(self.toggle_status_bar)
+        
+        self.title_menu.addSeparator()
+        self.title_menu.addAction(self.status_action)
         
         # Connect logo and title clicks to menu
         if hasattr(self, 'logo_label'):
@@ -468,10 +525,11 @@ class MainWindow(QMainWindow):
             if central_layout:
                 central_layout.addWidget(self.progress_container)
         
-        # Status bar
+        # Status bar - hidden (no resize grip shown)
         self.status_bar = QStatusBar()
+        self.status_bar.setSizeGripEnabled(False)  # Disable resize grip
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("Ready for image conversion")
+        self.status_bar.hide()  # Hide the status bar completely
         
     def update_status(self, message):
         """Update status in both status bar and status text area"""
@@ -526,7 +584,36 @@ class MainWindow(QMainWindow):
     def on_files_added(self, files):
         """Handle files added to drag-drop area"""
         self.update_status(f"Added {len(files)} file(s)")
+        # Update footer visibility
+        if hasattr(self, 'output_footer'):
+            has_files = len(self.drag_drop_area.get_files()) > 0
+            self.output_footer.set_has_files(has_files)
+    
+    def _on_footer_start(self):
+        """Handle start button click from output footer"""
+        # Build params from command panel and footer
+        params = self.command_panel.get_conversion_params()
         
+        # Override output settings from footer
+        output_mode = self.output_footer.get_output_mode()
+        if output_mode == "source":
+            params['output_same_folder'] = True
+            params['output_nested'] = False
+            params['output_custom'] = False
+        elif output_mode == "organized":
+            params['output_same_folder'] = False
+            params['output_nested'] = True
+            params['nested_folder_name'] = self.output_footer.get_organized_name()
+            params['output_custom'] = False
+        elif output_mode == "custom":
+            params['output_same_folder'] = False
+            params['output_nested'] = False
+            params['output_custom'] = True
+            params['output_dir'] = self.output_footer.get_custom_path()
+        
+        self.start_conversion(params)
+        
+
     def start_conversion(self, params):
         """Start the conversion process"""
         files = self.drag_drop_area.get_files()
@@ -552,8 +639,10 @@ class MainWindow(QMainWindow):
         resize_variants = self.command_panel.get_resize_values()
         video_variants = self.command_panel.get_video_variant_values()
         
-        # Set button to stop state
-        self.command_panel.set_conversion_state(True)
+        # Set button to stop state (handled by footer)
+        # Update footer state
+        if hasattr(self, 'output_footer'):
+            self.output_footer.set_converting(True)
         
         # Get current tab index to determine which settings to apply
         current_tab_index = self.command_panel.tabs.currentIndex()
@@ -647,9 +736,10 @@ class MainWindow(QMainWindow):
         
     def on_conversion_finished(self, success, message):
         """Handle conversion completion"""
-        # Reset button state
-        self.command_panel.set_conversion_state(False)
-        self.command_panel.convert_btn.setEnabled(True)  # Re-enable button
+        # Reset button state (handled by footer)
+        # Reset footer state
+        if hasattr(self, 'output_footer'):
+            self.output_footer.set_converting(False)
         
         self.show_progress(False)
         self.set_progress(0)
@@ -707,9 +797,7 @@ class MainWindow(QMainWindow):
         main_style = self.theme_manager.get_main_window_style()
         self.setStyleSheet(main_style)
         
-        # Apply button styles to convert button
-        button_style = self.theme_manager.get_button_styles()
-        self.command_panel.convert_btn.setStyleSheet(button_style)
+        # NOTE: convert_btn styling removed - button now in OutputFooter
         
         # Update drag drop area theme
         self.drag_drop_area.set_theme_manager(self.theme_manager)
@@ -729,34 +817,57 @@ class MainWindow(QMainWindow):
         from client.gui.custom_widgets import apply_tooltip_style
         apply_tooltip_style(is_dark)
         
+        # Update output footer theme
+        if hasattr(self, 'output_footer'):
+            self.output_footer.update_theme(is_dark)
+        
     def update_title_bar_theme(self, is_dark):
         """Update title bar colors based on theme"""
         if is_dark:
             # Dark theme
-            bg_color = "#3c3c3c"
+            # Frosted Glass: more transparent to show blur
+            bg_color = "rgba(43, 43, 43, 0.5)" 
+            content_bg = "#2b2b2b"
             text_color = "#ffffff"
             btn_bg = "#404040"
             btn_hover = "#4a4a4a"
             btn_pressed = "#363636"
+            border_color = "#555555"
         else:
             # Light theme
-            bg_color = "#e8e8e8"
+            bg_color = "rgba(232, 232, 232, 0.6)"
+            content_bg = "#ffffff"
             text_color = "#000000"
             btn_bg = "#f0f0f0"
             btn_hover = "#e0e0e0"
             btn_pressed = "#d0d0d0"
+            border_color = "#d0d0d0"
         
-        # Title bar styling
+        # Title bar styling (Rounded top corners, glass bg)
         title_bar_style = f"""
             QFrame {{
                 background-color: {bg_color};
-                border-bottom: 1px solid {'#555555' if is_dark else '#d0d0d0'};
+                border-bottom: 1px solid {border_color};
+                border-top-left-radius: 12px;
+                border-top-right-radius: 12px;
             }}
         """
         self.title_bar.setStyleSheet(title_bar_style)
         
-        # Title label (clean styling without decoration)
-        self.title_label.setStyleSheet(f"color: {text_color}; border: none; padding: 0px; margin: 0px; text-decoration: none; outline: none;")
+        # Content frame styling (Opaque, rounded bottom corners)
+        if hasattr(self, 'content_container'):
+            self.content_container.setStyleSheet(f"""
+                QFrame#ContentFrame {{
+                    background-color: {content_bg};
+                    border-bottom-left-radius: 12px;
+                    border-bottom-right-radius: 12px;
+                }}
+            """)
+        
+        # Title label (background: transparent)
+        self.title_label.setStyleSheet(f"color: {text_color}; border: none; padding: 0px; margin: 0px; text-decoration: none; outline: none; background: transparent;")
+        
+
         
         # Update theme toggle button icon color
         if hasattr(self, 'sun_moon_svg_path'):
@@ -818,19 +929,21 @@ class MainWindow(QMainWindow):
         # Menu styling
         menu_bg = "#2b2b2b" if is_dark else "#f5f5f5"
         menu_text = "#ffffff" if is_dark else "#000000"
-        menu_hover = "#404040" if is_dark else "#e0e0e0"
-        menu_style = f"""
+
+        self.title_menu.setStyleSheet(f"""
             QMenu {{
                 background-color: {menu_bg};
                 color: {menu_text};
                 border: 1px solid {'#555555' if is_dark else '#d0d0d0'};
             }}
+            QMenu::item {{
+                padding: 5px 20px;
+            }}
             QMenu::item:selected {{
-                background-color: {menu_hover};
+                background-color: {'#3c3c3c' if is_dark else '#e0e0e0'};
                 color: {menu_text};
             }}
-        """
-        self.title_menu.setStyleSheet(menu_style)
+        """)
         
         # Close button with red hover
         close_btn_style = f"""
@@ -1051,4 +1164,233 @@ class MainWindow(QMainWindow):
             # Use QTimer to show login window after event loop processes the close
             QTimer.singleShot(100, show_login_after_close)
 
+    def toggle_status_bar(self, checked):
+        """Toggle status bar visibility"""
+        if hasattr(self, 'bottom_frame'):
+            self.bottom_frame.setVisible(checked)
+            
+    def resizeEvent(self, event):
+        """Handle resize to update overlay geometry"""
+        super().resizeEvent(event)
+        if hasattr(self, 'preset_overlay'):
+            self.preset_overlay.setGeometry(0, 0, self.width(), self.height())
+
+    def showEvent(self, event):
+        """Override showEvent"""
+        super().showEvent(event)
+        self.enable_blur()
+        self.enable_mouse_tracking_all()
+        
+    def enable_mouse_tracking_all(self):
+        """Recursively enable mouse tracking for all widgets to ensure resize events propagate"""
+        self.setMouseTracking(True)
+        for widget in self.findChildren(QWidget):
+            widget.setMouseTracking(True)
+        
+    def enable_blur(self):
+        """Enable Windows Blur/Acrylic effect"""
+        if os.name != 'nt':
+            return
+            
+        try:
+            class ACCENT_POLICY(Structure):
+                _fields_ = [
+                    ("AccentState", c_int),
+                    ("AccentFlags", c_int),
+                    ("GradientColor", c_int),
+                    ("AnimationId", c_int)
+                ]
+
+            class WINDOWCOMPOSITIONATTRIBDATA(Structure):
+                _fields_ = [
+                    ("Attribute", c_int),
+                    ("Data", ctypes.c_void_p), # Use void pointer
+                    ("SizeOfData", c_int)
+                ]
+                
+            # SetAccentPolicy constants
+            ACCENT_ENABLE_BLURBEHIND = 3
+            
+            hwnd = int(self.winId())
+            
+            accent = ACCENT_POLICY()
+            accent.AccentState = ACCENT_ENABLE_BLURBEHIND
+            accent.GradientColor = 0 
+            
+            data = WINDOWCOMPOSITIONATTRIBDATA()
+            data.Attribute = 19
+            data.Data = ctypes.cast(byref(accent), ctypes.c_void_p)
+            data.SizeOfData = sizeof(accent)
+            
+            windll.user32.SetWindowCompositionAttribute(hwnd, byref(data))
+            
+        except Exception as e:
+            print(f"Failed to enable blur: {e}")
+
+
+    
+    def mousePressEvent(self, event):
+        """Start manual window resize calculation"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            pos = event.pos()
+            border = 8
+            w = self.width()
+            h = self.height()
+            
+            left = pos.x() < border
+            right = pos.x() > w - border
+            top = pos.y() < border
+            bottom = pos.y() > h - border
+            
+            self.resize_edge = ""
+            if top: self.resize_edge += "top"
+            if bottom: self.resize_edge += "bottom"
+            if left: self.resize_edge += "left"
+            if right: self.resize_edge += "right"
+            
+            if self.resize_edge:
+                self.resize_start_pos = event.globalPosition().toPoint()
+                self.resize_start_geo = self.geometry()
+                event.accept()
+                return
+                    
+        super().mousePressEvent(event)
+        
+    def mouseReleaseEvent(self, event):
+        """Reset resize state"""
+        self.resize_edge = ""
+        super().mouseReleaseEvent(event)
+
+    def mouseMoveEvent(self, event):
+        """Handle manual resizing and cursor updates"""
+        # Handle resizing if active
+        if hasattr(self, 'resize_edge') and self.resize_edge:
+            bg = self.resize_start_geo
+            delta = event.globalPosition().toPoint() - self.resize_start_pos
+            
+            new_geo = QRect(bg)
+            
+            if "top" in self.resize_edge:
+                new_geo.setTop(bg.top() + delta.y())
+            if "bottom" in self.resize_edge:
+                new_geo.setBottom(bg.bottom() + delta.y())
+            if "left" in self.resize_edge:
+                new_geo.setLeft(bg.left() + delta.x())
+            if "right" in self.resize_edge:
+                new_geo.setRight(bg.right() + delta.x())
+                
+            # Respect minimum size
+            if new_geo.width() >= self.minimumWidth() and new_geo.height() >= self.minimumHeight():
+                self.setGeometry(new_geo)
+            
+            event.accept()
+            return
+
+        # Regular cursor update logic
+        pos = event.pos()
+        border = 8
+        w = self.width()
+        h = self.height()
+        
+        left = pos.x() < border
+        right = pos.x() > w - border
+        top = pos.y() < border
+        bottom = pos.y() > h - border
+        
+        # Set appropriate cursor
+        if (top and left) or (bottom and right):
+            self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+        elif (top and right) or (bottom and left):
+            self.setCursor(Qt.CursorShape.SizeBDiagCursor)
+        elif left or right:
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
+        elif top or bottom:
+            self.setCursor(Qt.CursorShape.SizeVerCursor)
+        else:
+            self.unsetCursor()
+            
+        super().mouseMoveEvent(event)
+        
+    # --- Drag & Drop Lifecycle for Smart Overlay ---
+    
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        """Wake the Overlay when files enter window"""
+        if event.mimeData().hasUrls():
+            # Show overlay
+            if hasattr(self, 'preset_overlay'):
+                self.preset_overlay.raise_()
+                self.preset_overlay.show()
+                # Fade in could go here
+            event.accept()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event: QDragEnterEvent): # dragEnterEvent type is reused often
+        """Seek logic during drag"""
+        if event.mimeData().hasUrls():
+            event.accept()
+            # Hit test in overlay
+            if hasattr(self, 'preset_overlay') and self.preset_overlay.isVisible():
+                # Fix: Use mapToGlobal for compatibility
+                global_pos = self.mapToGlobal(event.position().toPoint())
+                self.preset_overlay.hit_test(global_pos)
+        else:
+            event.ignore()
+            
+    def dragLeaveEvent(self, event):
+        """Reset overlay if drag leaves window"""
+        if hasattr(self, 'preset_overlay'):
+            self.preset_overlay.hide()
+        super().dragLeaveEvent(event)
+        
+    def dropEvent(self, event: QDropEvent):
+        """Commit logic on drop"""
+        # Hide overlay
+        if hasattr(self, 'preset_overlay'):
+            self.preset_overlay.hide()
+        
+        if event.mimeData().hasUrls():
+            # Check if dropped on a card
+            target_card = None
+            if hasattr(self, 'preset_overlay'):
+                 # Fix: Use mapToGlobal for compatibility
+                 global_pos = self.mapToGlobal(event.position().toPoint())
+                 target_card = self.preset_overlay.hit_test(global_pos)
+            
+            files = [u.toLocalFile() for u in event.mimeData().urls()]
+            
+            if target_card:
+                # Path A: Valid Target - Handled by signal preset_selected or direct trigger
+                target_card.trigger_success_animation() # Visuals
+                
+                # Apply preset
+                self.apply_preset_and_process(target_card.preset, files)
+            else:
+                # Path B: Void Drop - Default logic (Add to list)
+                self.drag_drop_area.add_files(files)
+            
+            event.accept()
+        else:
+            event.ignore()
+
+    def on_preset_drop(self, preset_obj):
+        """Handle proper signal based drop if we used signal"""
+        pass
+        
+    def apply_preset_and_process(self, preset, files):
+        """Apply preset settings and add files"""
+        # Logic to apply settings from preset to the processing queue
+        # For now, we print info and add files to the list effectively
+        print(f"[Smart Drop] Applying preset: {preset.title} to {len(files)} files")
+        
+        # 1. Add files to the DragDropArea
+        self.drag_drop_area.add_files(files)
+        
+        # 2. Configure CommandPanel with preset params
+        # This requires CommandPanel to be able to accept external config or 'Preset Mode'
+        # For specific preset params (e.g. format=mp4), we might need to set UI state.
+        
+        # TODO: Implement full parameter mapping. 
+        # For now, we notify user and update status.
+        self.update_status(f"Applied Preset: {preset.title}")
 

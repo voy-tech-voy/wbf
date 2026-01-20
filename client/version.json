@@ -1,7 +1,7 @@
 {
-  "version": "9.2",
-  "build": 2,
-  "last_build": "2025-12-23T11:18:34.376226Z",
+  "version": "11.0.0",
+  "build": 3,
+  "last_build": "2026-01-20T11:11:49.592081Z",
   "changelog": {
     "7.4": "Phase 1 enterprise implementation (backup system, trial conversion, server health)",
     "7.3": "Login error UX improvements (inline errors, removed popups)",
@@ -22,6 +22,7 @@
     "8.8": "Build 2025-12-22",
     "8.9": "Build 2025-12-22",
     "9.0": "Build 2025-12-22",
-    "9.2": "Build 2025-12-23"
+    "9.2": "Build 2025-12-23",
+    "11.0.0": "Build 2026-01-20"
   }
 }

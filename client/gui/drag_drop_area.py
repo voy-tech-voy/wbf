@@ -16,6 +16,7 @@ import tempfile
 import re
 from pathlib import Path
 from client.utils.resource_path import get_resource_path
+from client.gui.theme_variables import get_theme, get_color
 
 class HoverIconButton(QPushButton):
     """Button that changes its SVG icon colors based on hover state and theme"""
@@ -412,7 +413,7 @@ class DragDropArea(QWidget):
         
         # Control buttons at top
         button_layout = QHBoxLayout()
-        icon_size = QSize(28, 28)
+        icon_size = QSize(24, 24)  # 24px icon in 36px square (6px padding)
         
         self.add_files_btn = HoverIconButton("addfile.svg", icon_size)
         self.add_files_btn.setFixedSize(36, 36)
@@ -432,6 +433,11 @@ class DragDropArea(QWidget):
         self.clear_files_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.clear_files_btn.clicked.connect(self.clear_files)
         
+        # Apply ActionSquare object name for identification
+        self.add_files_btn.setObjectName("ActionSquare")
+        self.add_folder_btn.setObjectName("ActionSquare")
+        self.clear_files_btn.setObjectName("ActionSquare")
+        
         button_layout.addWidget(self.add_files_btn)
         button_layout.addWidget(self.add_folder_btn)
         button_layout.addWidget(self.clear_files_btn)
@@ -441,6 +447,7 @@ class DragDropArea(QWidget):
         
         # Combined file list widget that serves as both drop area and display
         self.file_list_widget = QListWidget()
+        self.file_list_widget.setObjectName("DropZone")  # V4.0 branding
         self.file_list_widget.setMinimumHeight(300)
         
         # Disable dashed focus rectangle
@@ -607,29 +614,35 @@ class DragDropArea(QWidget):
         self.reset_list_style()
         
     def reset_list_style(self):
-        """Reset the list widget to default style"""
+        """Reset the list widget to default style using V4.0 Theme Variables"""
+        is_dark = True
         if self.theme_manager:
-            styles = self.theme_manager.get_drag_drop_styles()
-            base_style = styles['normal']
-            # Append scrollbar styling
-            full_style = base_style + self._get_scrollbar_style()
-            self.file_list_widget.setStyleSheet(full_style)
-        else:
-            # Fallback to light theme
-            self.file_list_widget.setStyleSheet("""
-                DragDropArea {
-                    border: 3px dashed #aaa;
-                    border-radius: 10px;
-                    background-color: #f9f9f9;
-                    color: #666;
-                    font-size: 14px;
-                    padding: 10px;
-                }
-                DragDropArea:hover {
-                    border-color: #4CAF50;
-                    background-color: #f0f8f0;
-                }
-            """)
+            is_dark = self.theme_manager.current_theme == 'dark'
+            
+        surface_main = get_color("surface_main", is_dark)
+        border_dim = get_color("border_dim", is_dark)
+        border_focus = get_color("border_focus", is_dark)
+        text_primary = get_color("text_primary", is_dark)
+        
+        # Base DropZone style
+        base_style = f"""
+            QListWidget#DropZone {{
+                background-color: {surface_main};
+                border: 2px dashed {border_dim};
+                border-radius: 12px;
+                color: {text_primary};
+                font-size: 14px;
+                padding: 10px;
+                outline: none;
+            }}
+            QListWidget#DropZone:hover {{
+                border-color: {border_focus};
+                background-color: {surface_main}; /* Keep same or slightly lighter? */
+            }}
+        """
+        # Append scrollbar styling
+        full_style = base_style + self._get_scrollbar_style()
+        self.file_list_widget.setStyleSheet(full_style)
         
         # Restore completion backgrounds for completed items
         is_dark = self.theme_manager and self.theme_manager.current_theme == 'dark'
@@ -798,53 +811,32 @@ class DragDropArea(QWidget):
             self.add_folder_btn.set_dark_mode(is_dark)
             self.clear_files_btn.set_dark_mode(is_dark)
             
-            if is_dark:
-                base_style = """
-                    QPushButton {
-                        background-color: #404040;
-                        color: #ffffff;
-                        border: 1px solid #555555;
-                        padding: 4px;
-                        border-radius: 4px;
-                    }
-                    QPushButton:hover {
-                        background-color: #4a4a4a;
-                        border-color: #4CAF50;
-                    }
-                """
-                clear_hover_border = "#f44336"
-                clear_pressed_border = "#d32f2f"
-            else:
-                base_style = """
-                    QPushButton {
-                        background-color: #f0f0f0;
-                        color: #333333;
-                        border: 1px solid #cccccc;
-                        padding: 4px;
-                        border-radius: 4px;
-                    }
-                    QPushButton:hover {
-                        background-color: #e8e8e8;
-                        border-color: #4CAF50;
-                    }
-                """
-                clear_hover_border = "#f44336"
-                clear_pressed_border = "#d32f2f"
-            
-            self.add_files_btn.setStyleSheet(base_style)
-            self.add_folder_btn.setStyleSheet(base_style)
-            
-            # Clear button with red hover/pressed states
-            clear_style = base_style + f"""
-                QPushButton:hover {{
-                    border-color: {clear_hover_border};
-                }}
-                QPushButton:pressed {{
-                    background-color: {"#363636" if is_dark else "#d8d8d8"};
-                    border-color: {clear_pressed_border};
-                }}
-            """
-            self.clear_files_btn.setStyleSheet(clear_style)
+            # Apply V4 Action Button Styling
+            self._update_action_buttons_style(is_dark)
+
+    def _update_action_buttons_style(self, is_dark):
+        """Apply ActionSquare styling from theme variables"""
+        surface_element = get_color("surface_element", is_dark)
+        border_dim = get_color("border_dim", is_dark)
+        border_focus = get_color("border_focus", is_dark)
+        
+        # Spec: Rounded square, surface_element bg, border_dim border
+        style = f"""
+            QPushButton {{
+                background-color: {surface_element};
+                border: 1px solid {border_dim};
+                border-radius: 8px;
+            }}
+            QPushButton:hover {{
+                background-color: {border_dim};
+                border-color: {border_focus};
+            }}
+            QPushButton:pressed {{
+                background-color: #000000;
+            }}
+        """
+        for btn in [self.add_files_btn, self.add_folder_btn, self.clear_files_btn]:
+            btn.setStyleSheet(style)
         
     def add_files_dialog(self):
         """Open file dialog to add files"""

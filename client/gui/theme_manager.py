@@ -221,7 +221,7 @@ class ThemeManager(QObject):
         if self.current_theme == 'dark':
             return """
                 QMainWindow {
-                    background-color: #2b2b2b;
+                    background-color: transparent;
                     color: #ffffff;
                     font-family: 'Roboto Mono';
                 }
@@ -458,6 +458,10 @@ class ThemeManager(QObject):
             """
         else:
             return """
+                QMainWindow {
+                    background-color: transparent;
+                    color: #000000;
+                }
                 QMenuBar::item:selected {
                     background-color: #4CAF50;
                     font-family: 'Roboto Mono';

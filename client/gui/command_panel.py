@@ -305,18 +305,37 @@ class DynamicFontButton(QPushButton):
 BG_COLOR = "#2b2b2b" if is_dark_mode() else "#ffffff"
 TEXT_COLOR = "white" if is_dark_mode() else "black"
 
+from client.gui.theme_variables import get_color
+
 def get_toggle_style(is_dark):
-    """Get toggle style based on theme"""
-    bg_color = "#2b2b2b" if is_dark else "#ffffff"
-    text_color = "white" if is_dark else "black"
+    """Get Tesla-style toggle switch stylesheet based on theme"""
+    border_dim = get_color("border_dim", is_dark)
+    accent_success = get_color("accent_success", is_dark)
+    text_color = get_color("text_primary", is_dark)
     
-    return (
-        f"QCheckBox, QRadioButton {{ color: {text_color}; }} "
-        "QCheckBox::indicator, QRadioButton::indicator { width: 16px; height: 16px; border-radius: 8px;"
-        f" border: 2px solid #43a047; background: {bg_color}; }}"
-        "QCheckBox::indicator:checked, QRadioButton::indicator:checked { background: #43a047; border: 2px solid #2e7d32; }"
-        "QCheckBox::indicator:unchecked:hover, QRadioButton::indicator:unchecked:hover { border: 2px solid #2e7d32; }"
-    )
+    return f"""
+        QCheckBox, QRadioButton {{ 
+            color: {text_color}; 
+            spacing: 8px;
+        }}
+        QCheckBox::indicator, QRadioButton::indicator {{ 
+            width: 32px; 
+            height: 18px; 
+            border-radius: 9px;
+        }}
+        QCheckBox::indicator:unchecked, QRadioButton::indicator:unchecked {{ 
+            background-color: {border_dim}; 
+            border: 1px solid {border_dim};
+        }}
+        QCheckBox::indicator:checked, QRadioButton::indicator:checked {{ 
+            background-color: {accent_success}; 
+            border: 1px solid {accent_success};
+        }}
+        /* Hover styles */
+        QCheckBox::indicator:unchecked:hover, QRadioButton::indicator:unchecked:hover {{ 
+            border: 1px solid #555;
+        }}
+    """
 
 # Initial style
 TOGGLE_STYLE = get_toggle_style(is_dark_mode())
@@ -380,8 +399,7 @@ class CommandPanel(QWidget):
         self._gpu_detector = None  # Lazy-loaded GPU detector
         self._gpu_available_codecs = set()  # Codecs with GPU acceleration
         self.setup_ui()
-        # Ensure the convert button starts in the blue (idle) style before first use
-        self.set_conversion_state(False)
+        # NOTE: Convert button initialization moved to OutputFooter
         # Initialize GPU detection after UI is ready
         QTimer.singleShot(100, self._initialize_gpu_detection)
     
@@ -713,43 +731,7 @@ class CommandPanel(QWidget):
         if hasattr(self, 'transform_buttons'):
             self.transform_buttons.update_theme(is_dark)
         
-        # Update output side button icon and styling
-        if hasattr(self, 'output_side_btn'):
-            color = QColor("white") if is_dark else QColor("black")
-            self.output_side_btn.setIcon(self._get_tinted_icon("client/assets/icons/output.svg", color))
-            
-            # Update button styling for theme
-            bg_color = "#3c3c3c" if is_dark else "#f0f0f0"
-            hover_bg = "#4a4a4a" if is_dark else "#e8e8e8"
-            
-            self.output_side_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {bg_color};
-                    border: none;
-                    border-top-left-radius: 12px;
-                    border-top-right-radius: 0px;
-                    border-bottom-right-radius: 0px;
-                    border-bottom-left-radius: 12px;
-                    padding: 4px;
-                }}
-                QPushButton:hover {{
-                    background-color: {hover_bg};
-                }}
-            """)
-        
-        # Update output folder styling (square upper-right corner)
-        if hasattr(self, 'output_group'):
-            bg_color = "#3c3c3c" if is_dark else "#ffffff"
-            border_color = "none" if is_dark else "2px solid #cccccc"
-            self.output_group.setStyleSheet(f"""
-                QGroupBox {{
-                    background-color: {bg_color};
-                    border: {border_color};
-                    border-radius: 8px 0px 8px 8px;
-                    margin: 0px;
-                    padding: 0px;
-                }}
-            """)
+        # NOTE: output_side_btn and output_group have been moved to OutputFooter
 
         # Tab icons remain at original size (no tinting)
 
@@ -807,11 +789,7 @@ class CommandPanel(QWidget):
         for selector in video_selectors:
             selector.update_theme(is_dark)
         
-        # Update nested output name styling
-        self._update_nested_output_style()
-        
-        # Update custom output directory field styling
-        self._update_custom_output_style()
+        # NOTE: nested_output_name and output_dir styling removed - widgets moved to OutputFooter
         
         # Update tab icons (tinting)
         self.update_tab_icons()
@@ -821,55 +799,7 @@ class CommandPanel(QWidget):
         if AppTooltip._instance is not None:
             AppTooltip._instance.update_theme(is_dark)
     
-    def _update_nested_output_style(self):
-        """Update nested output name field styling based on enabled state and theme"""
-        is_enabled = self.nested_output_name.isEnabled()
-        
-        if self.is_dark_mode:
-            if is_enabled:
-                text_color = "#ffffff"
-            else:
-                text_color = "#666666"  # Grey for disabled
-            bg_color = "#2b2b2b"
-        else:
-            if is_enabled:
-                text_color = "#333333"
-            else:
-                text_color = "#999999"  # Grey for disabled
-            bg_color = "white"
-        
-        style = f"""
-            QLineEdit {{
-                color: {text_color};
-                background-color: {bg_color};
-                border: 1px solid #555555;
-                border-radius: 3px;
-                padding: 4px;
-            }}
-        """
-        self.nested_output_name.setStyleSheet(style)
-    
-    def _update_custom_output_style(self):
-        """Update custom output directory field styling based on theme"""
-        if self.is_dark_mode:
-            text_color = "#ffffff"
-            bg_color = "#2b2b2b"
-            border_color = "#555555"
-        else:
-            text_color = "#333333"
-            bg_color = "white"
-            border_color = "#cccccc"
-        
-        style = f"""
-            QLineEdit {{
-                color: {text_color};
-                background-color: {bg_color};
-                border: 1px solid {border_color};
-                border-radius: 3px;
-                padding: 4px;
-            }}
-        """
-        self.output_dir.setStyleSheet(style)
+    # NOTE: _update_nested_output_style and _update_custom_output_style removed - moved to OutputFooter
 
     def setup_ui(self):
         """Setup the command panel interface"""
@@ -925,61 +855,7 @@ class CommandPanel(QWidget):
         tabs_end_label.move(2, -6)
         layout.addWidget(tabs_end_marker)
         
-        # Gap between Transform folder and Output folder
-        layout.addWidget(self._create_debug_spacer(8))
-        
-        # --- Row 2: Output (Sidebar Bottom + Output Group) ---
-        row2_widget = QWidget()
-        row2_layout = QHBoxLayout(row2_widget)
-        row2_layout.setContentsMargins(-12, 0, 0, 0) # Match indentation
-        row2_layout.setSpacing(0)
-        
-        # 3. Sidebar Bottom (Output Icon)
-        sidebar_bottom = QWidget()
-        sidebar_bottom.setFixedWidth(44)
-        sb_bot_layout = QVBoxLayout(sidebar_bottom)
-        # No top margin - aligns with top of Output Group
-        sb_bot_layout.setContentsMargins(0, 0, 0, 0) 
-        sb_bot_layout.setSpacing(0)
-        
-        # Output Icon
-        self.output_side_btn = QPushButton()
-        self.output_side_btn.setFixedSize(44, 44)
-        self.output_side_btn.setIconSize(QSize(32, 32))  # Increased from 24x24
-        color = QColor("white") if self.is_dark_mode else QColor("black")
-        self.output_side_btn.setIcon(self._get_tinted_icon("client/assets/icons/output.svg", color))
-        self.output_side_btn.setToolTip("Output Settings")
-        
-        # Custom styling: no border, rounded left corners, square right corners
-        bg_color = "#3c3c3c" if self.is_dark_mode else "#f0f0f0"
-        hover_bg = "#4a4a4a" if self.is_dark_mode else "#e8e8e8"
-        
-        self.output_side_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {bg_color};
-                border: none;
-                border-top-left-radius: 12px;
-                border-top-right-radius: 0px;
-                border-bottom-right-radius: 0px;
-                border-bottom-left-radius: 12px;
-                padding: 4px;
-            }}
-            QPushButton:hover {{
-                background-color: {bg_color};
-                border: none;
-            }}
-        """)
-        
-        sb_bot_layout.addWidget(self.output_side_btn)
-        sb_bot_layout.addStretch()
-        
-        row2_layout.addWidget(sidebar_bottom)
-        
-        # 4. Output Group (Right side of Row 2)
-        self.output_group = self.create_output_settings()
-        row2_layout.addWidget(self.output_group)
-        
-        layout.addWidget(row2_widget)
+        # NOTE: Output settings (Row 2) has been moved to OutputFooter in main_window.py
         
         # --- Content Initialization ---
         
@@ -1064,23 +940,7 @@ class CommandPanel(QWidget):
         layout.addWidget(self._create_debug_spacer(9))
         
         # Control buttons (Row 3 - Aligned with content)
-        # Create a container to match the sidebar+content structure
-        control_row = QWidget()
-        control_row_layout = QHBoxLayout(control_row)
-        control_row_layout.setContentsMargins(-12, 0, 0, 0) # Match indentation of Row 2
-        control_row_layout.setSpacing(0)
-        
-        # Invisible spacer for sidebar alignment
-        sidebar_spacer = QWidget()
-        sidebar_spacer.setFixedWidth(44)
-        control_row_layout.addWidget(sidebar_spacer)
-        
-        # Add button layout
-        button_layout = self.create_control_buttons()
-        # Ensure button fills width
-        control_row_layout.addLayout(button_layout)
-        
-        layout.addWidget(control_row)
+        # NOTE: Control buttons (START/STOP) have been moved to OutputFooter in main_window.py
         
         # Install event filter
         self._install_input_field_filters()
@@ -2152,154 +2012,19 @@ class CommandPanel(QWidget):
         # Update GPU indicator
         self._update_gpu_indicator()
 
-    def create_output_settings(self):
-        """Create output directory and naming settings"""
-        group = CommandGroup("Output", None, size_policy=QSizePolicy.Policy.Fixed)
-        
-        # Custom styling: square upper-right corner, rounded others
-        # border-radius: top-left top-right bottom-right bottom-left
-        is_dark = self.is_dark_mode
-        bg_color = "#3c3c3c" if is_dark else "#ffffff"
-        border_color = "none" if is_dark else "2px solid #cccccc"
-        
-        group.setStyleSheet(f"""
-            QGroupBox {{
-                background-color: {bg_color};
-                border: {border_color};
-                border-radius: 8px 0px 8px 8px;
-                margin: 0px;
-                padding: 0px;
-            }}
-        """)
-        
-        # Reduce vertical spacing for output settings as requested
-        group.get_content_layout().setVerticalSpacing(4)
-        
-        # Output location options
-        self.output_mode_same = QRadioButton("Same folder as source")
-        self.output_mode_nested = QRadioButton("Nested folder inside source")
-        self.output_mode_same.setChecked(True)
-
-        # Apply shared green toggle styling and white text
-        self.output_mode_same.setStyleSheet(TOGGLE_STYLE)
-        self.output_mode_nested.setStyleSheet(TOGGLE_STYLE)
-
-        self.nested_output_name = QLineEdit("output")
-        self.nested_output_name.setPlaceholderText("output")
-        self.nested_output_name.setEnabled(False)  # Disabled by default
-        
-        # Connect toggle to enable/disable nested output name
-        self.output_mode_nested.toggled.connect(self.nested_output_name.setEnabled)
-        self.output_mode_nested.toggled.connect(self._update_nested_output_style)
-        
-        nested_layout = QHBoxLayout()
-        nested_layout.addWidget(self.output_mode_nested)
-        nested_layout.addSpacing(10)  # Add 10px spacing between label and input
-        nested_layout.addWidget(self.nested_output_name)
-        nested_layout.setContentsMargins(0, 0, 0, 0)  # Removed top margin to decrease gap
-
-        group.add_row(self.output_mode_same)
-        group.add_row(nested_layout)
-
-        # Toggle for custom output directory (as radio button)
-        self.output_mode_custom = QRadioButton("Custom")
-        self.output_mode_custom.setChecked(False)
-        self.output_mode_custom.toggled.connect(self.on_custom_output_toggled)
-        # Apply shared green toggle styling
-        self.output_mode_custom.setStyleSheet(TOGGLE_STYLE)
-        
-        # Custom output directory section (hidden by default)
-        self.output_dir = QLineEdit()
-        self.output_dir.setPlaceholderText("Select output directory")
-        self.output_dir.setVisible(False)
-        
-        self.browse_output_btn = QPushButton("Browse...")
-        self.browse_output_btn.clicked.connect(self.browse_output_directory)
-        self.browse_output_btn.setVisible(False)
-        
-        custom_layout = QHBoxLayout()
-        custom_layout.addWidget(self.output_mode_custom)
-        custom_layout.addSpacing(10)  # Add 10px spacing between toggle and input
-        custom_layout.addWidget(self.output_dir)
-        custom_layout.addWidget(self.browse_output_btn)
-        
-        group.add_row(custom_layout)
-        
-        return group
-        
-    def create_control_buttons(self):
-        """Create conversion control buttons"""
-        layout = QVBoxLayout()
-        
-        # Horizontal layout for button
-        button_row = QHBoxLayout()
-        button_row.setSpacing(8)
-        
-        self.convert_btn = DynamicFontButton("START")
-        self.convert_btn.clicked.connect(self.on_convert_button_clicked)
-        self.is_converting = False
-        
-        # Make button expand to full width
-        self.convert_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        
-        button_row.addWidget(self.convert_btn)
-        
-        # DynamicFontButton handles stylesheet with font properties automatically
-        layout.addLayout(button_row)
-        return layout
-        
-    def on_convert_button_clicked(self):
-        """Handle convert button click - either start or stop"""
-        if self.is_converting:
-            self.stop_conversion()
-        else:
-            self.start_conversion()
-    
-    def set_conversion_state(self, is_converting: bool):
-        """Set the conversion state and update button appearance"""
-        self.is_converting = is_converting
-        
-        if is_converting:
-            self.convert_btn.setText("STOP")
-            # Trigger stylesheet update with current font values
-            self.convert_btn.update_stylesheet()
-        else:
-            self.convert_btn.setText("START")
-            # Trigger stylesheet update with current font values
-            self.convert_btn.update_stylesheet()
-    
-    def stop_conversion(self):
-        """Request to stop the current conversion"""
-        self.stop_conversion_requested.emit()
-        # Disable the button temporarily to prevent multiple clicks
-        self.convert_btn.setEnabled(False)
-        self.convert_btn.setText("STOPPING...")
-    
-    def on_custom_output_toggled(self, state):
-        """Handle custom output directory toggle - show controls only when custom is selected"""
-        if state:  # If custom radio button is selected
-            self.output_dir.setVisible(True)
-            self.browse_output_btn.setVisible(True)
-        else:
-            self.output_dir.setVisible(False)
-            self.browse_output_btn.setVisible(False)
-            self.output_dir.clear()
-        
-    def browse_output_directory(self):
-        """Browse for output directory"""
-        from PyQt6.QtWidgets import QFileDialog
-        directory = QFileDialog.getExistingDirectory(self, "Select Output Directory")
-        if directory:
-            self.output_dir.setText(directory)
+    # NOTE: create_output_settings, create_control_buttons, on_convert_button_clicked,
+    # set_conversion_state, stop_conversion, on_custom_output_toggled, browse_output_directory
+    # have been removed - functionality moved to OutputFooter in main_window.py
             
     def get_conversion_params(self):
         """Get current conversion parameters"""
         current_tab = self.tabs.currentIndex()
         
+        # Default output settings (will be overwritten by OutputFooter in main_window)
         params = {
-            'output_dir': self.output_dir.text().strip(),
-            'use_nested_output': self.output_mode_nested.isChecked(),
-            'nested_output_name': (self.nested_output_name.text().strip() or 'output'),
+            'output_dir': '',
+            'use_nested_output': False,
+            'nested_output_name': 'output',
             'suffix': '_converted',
             'overwrite': True,  # default overwrite when targeting output directory
         }
