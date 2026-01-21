@@ -3,7 +3,7 @@ Custom PyQt6 Widgets with Dark Mode Support
 Provides TimeRangeSlider, ResizeFolder, and Rotation classes
 """
 
-from PyQt6.QtCore import Qt, pyqtSignal, QRect, QRectF, QPoint, QSize, QPropertyAnimation, QEasingCurve, pyqtProperty, QTimer, QObject
+from PyQt6.QtCore import Qt, pyqtSignal, QRect, QRectF, QPoint, QPointF, QSize, QPropertyAnimation, QEasingCurve, pyqtProperty, QTimer, QObject
 from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QPalette, QIcon, QPixmap, QFont, QFontMetrics
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, 
@@ -3102,13 +3102,12 @@ class MorphingButton(QPushButton):
     # Constants
     COLLAPSED_SIZE = 48
     EXPAND_DELAY_MS = 200
-    SPRING_ANIM_DURATION = 400
+    ANIMATION_DURATION = 400  # Luxurious weighted motion: 650ms
     EXPANDED_WIDTH = 200
-    ANIMATION_DURATION = 300
+    STAGGER_DELAY = 50 # ms between items
     
     # Debug flag for alignment visualization
     DEBUG_ALIGNMENT = False
-    STAGGER_DELAY = 50 # ms between items
     
     # Expansion directions (currently supports LEFT expansion as per spec)
     LEFT = 'left'
@@ -3154,9 +3153,15 @@ class MorphingButton(QPushButton):
         self.setMinimumWidth(self.COLLAPSED_SIZE)
         self.setMaximumWidth(self.COLLAPSED_SIZE)
         
+        # Weighted Motion with Delicate Spring: 650ms with subtle overshoot
         self._width_anim = QPropertyAnimation(self, b"animWidth")
-        self._width_anim.setDuration(self.SPRING_ANIM_DURATION)
-        self._width_anim.setEasingCurve(QEasingCurve.Type.OutElastic)
+        self._width_anim.setDuration(self.ANIMATION_DURATION)
+        
+        # OutBack easing: Smooth deceleration with gentle spring overshoot
+        # Amplitude controls the spring intensity (lower = more subtle)
+        easing = QEasingCurve(QEasingCurve.Type.OutBack)
+        easing.setOvershoot(.8)  # Delicate spring effect (default is 1.70158)
+        self._width_anim.setEasingCurve(easing)
         
         self._update_main_icon()
 
@@ -3481,9 +3486,9 @@ class PresetStatusButton(QWidget):
     clicked = pyqtSignal()
     
     # Constants
-    MIN_WIDTH = 100
-    MAX_WIDTH = 220
-    PADDING = 32 # 16px left + 16px right
+    MIN_WIDTH = 130  # Minimum to fit "PRESETS" text
+    MAX_WIDTH = 280  # Max for longer preset names
+    PADDING = 40  # 20px left + 20px right for better spacing
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -3498,15 +3503,15 @@ class PresetStatusButton(QWidget):
         self._bg_color = QColor(255, 255, 255, 12) # Ghost default
         self._text_color = QColor(255, 255, 255, 150) # Inactive text
         self._current_width = self.MIN_WIDTH
+        self._temp_shrink = False # Flag to temporarily shrink button (e.g. when Lab button expands)
         
         # Animations
         self._width_anim = QPropertyAnimation(self, b"animWidth", self)
         self._width_anim.setDuration(400)
         self._width_anim.setEasingCurve(QEasingCurve.Type.OutElastic) # Spring effect
         
-        # Initial geometry
-        self.setFixedWidth(self.MIN_WIDTH)
-        self._temp_shrink = False # Flag to temporarily shrink button (e.g. when Lab button expands)
+        # Calculate proper initial width based on text
+        self._calculate_and_set_initial_width()
 
     @pyqtProperty(int)
     def animWidth(self):
@@ -3517,6 +3522,19 @@ class PresetStatusButton(QWidget):
         self._current_width = w
         self.setFixedWidth(w)
         self.update()
+    
+    def _calculate_and_set_initial_width(self):
+        """Calculate and set initial width using the exact drawing font"""
+        # Use the same font configuration as paintEvent
+        font = QFont()
+        font.setFamily(FONT_FAMILY)
+        font.setPixelSize(16)
+        font.setWeight(QFont.Weight.DemiBold)  # Use bold weight for measurement
+        fm = QFontMetrics(font)
+        text_width = fm.horizontalAdvance(self._text)
+        initial_width = max(self.MIN_WIDTH, min(self.MAX_WIDTH, text_width + self.PADDING))
+        self._current_width = initial_width
+        self.setFixedWidth(initial_width)
         
     def shrink_for_overlap(self, shrink):
         """Temporarily shrink button to make room for other widgets"""
@@ -3547,16 +3565,18 @@ class PresetStatusButton(QWidget):
         self.update()
             
     def _update_width(self):
-        """Update width based on active state and shrinking override"""
+        """Update width based on text content (always fits text)"""
         if self._temp_shrink:
             target = self.MIN_WIDTH
-        elif self._is_active:
-             # Calculate target width
-            fm = QFontMetrics(self.font())
+        else:
+            # Always calculate width to fit text using exact UI font
+            font = QFont()
+            font.setFamily(FONT_FAMILY)
+            font.setPixelSize(16)
+            font.setWeight(QFont.Weight.DemiBold) # Use bold for safe measurement
+            fm = QFontMetrics(font)
             text_width = fm.horizontalAdvance(self._text)
             target = max(self.MIN_WIDTH, min(self.MAX_WIDTH, text_width + self.PADDING))
-        else:
-            target = self.MIN_WIDTH
             
         # Animate Width
         if self.width() != target:
