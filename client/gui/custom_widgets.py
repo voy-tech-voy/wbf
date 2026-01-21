@@ -3225,7 +3225,9 @@ class MorphingButton(QWidget):
         painter.setBrush(QColor("red"))
         cx = int(curr_width / 2)
         cy = int(curr_height / 2)
-        painter.drawEllipse(QPoint(cx, cy), 3, 3)
+        # Draw ellipse centered on (cx, cy) - need to offset by radius
+        painter.drawEllipse(cx - 3, cy - 3, 6, 6)
+        
         
         # Draw Main Icon using QIcon.paint() for sharp, centered rendering
         if self._current_icon and not self._current_icon.isNull() and self._icon_opacity_val > 0:
@@ -3260,9 +3262,13 @@ class MorphingButton(QWidget):
             # Draw icon using paint() - this gives sharp, auto-centered rendering
             self._current_icon.paint(painter, icon_rect, Qt.AlignmentFlag.AlignCenter)
             
-            # Debug yellow dot at center of icon rect
+            # Debug yellow dot at center of the 48x48 target area (should align with red dot when collapsed)
             painter.setBrush(QColor("yellow"))
-            painter.drawEllipse(icon_rect.center(), 2, 2)
+            # Use same center calculation as red dot: x + width/2, y + height/2
+            center_x = target_rect.x() + target_rect.width() // 2
+            center_y = target_rect.y() + target_rect.height() // 2
+            # Draw ellipse centered on the point - offset by radius
+            painter.drawEllipse(center_x - 2, center_y - 2, 4, 4)
             
             painter.setOpacity(1.0)
             
