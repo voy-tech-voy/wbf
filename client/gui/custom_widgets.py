@@ -3132,6 +3132,7 @@ class MorphingButton(QWidget):
         self._main_icon_path = main_icon_path
         self._is_dark = True
         self._current_pixmap = None
+        self._current_icon = None
         
         # UI Setup
         self._setup_ui()
@@ -3226,39 +3227,42 @@ class MorphingButton(QWidget):
         cy = int(curr_height / 2)
         painter.drawEllipse(QPoint(cx, cy), 3, 3)
         
-        # Draw Main Icon
-        if self._current_pixmap and self._icon_opacity_val > 0:
+        # Draw Main Icon using QIcon.paint() for sharp, centered rendering
+        if self._current_icon and not self._current_icon.isNull() and self._icon_opacity_val > 0:
             painter.setOpacity(self._icon_opacity_val)
             
-            # Center icon in the collapsed area (which is at left or right depending on expansion)
-            # Logic: If collapsed, center in width. If expanded (left), icon stays at right.
-            
+            # Calculate icon area - anchored to right when expanded
             icon_x = 0
             if self._is_expanded or self.width() > self.COLLAPSED_SIZE:
-                # Icon anchored to Right
                 icon_x = self.width() - self.COLLAPSED_SIZE
             
-            # Center of the 48x48 area
+            # The target rect for the icon (the 48x48 circle area)
             target_rect = QRect(icon_x, 0, self.COLLAPSED_SIZE, self.COLLAPSED_SIZE)
+            
+            # Calculate icon size as 80% of button
+            icon_size = int(self.COLLAPSED_SIZE * 0.80)
+            if icon_size % 2 == 1:
+                icon_size += 1
+            
+            # Center the icon rect within target_rect
+            icon_rect = QRect(
+                target_rect.x() + (target_rect.width() - icon_size) // 2,
+                target_rect.y() + (target_rect.height() - icon_size) // 2,
+                icon_size,
+                icon_size
+            )
             
             # DEBUG: Draw semi-transparent blue background for icon area
             painter.setBrush(QColor(0, 0, 255, 150))
             painter.setPen(Qt.PenStyle.NoPen)
-            # Calculate exact pixmap rect for background using SYMMETRIC centering
-            pix_w = self._current_pixmap.width()
-            pix_h = self._current_pixmap.height()
-            # Use integer division for symmetric margins
-            px = target_rect.x() + (target_rect.width() - pix_w) // 2
-            py = target_rect.y() + (target_rect.height() - pix_h) // 2
-            painter.drawRect(px, py, pix_w, pix_h)
+            painter.drawRect(icon_rect)
             
-            painter.drawPixmap(px, py, self._current_pixmap)
+            # Draw icon using paint() - this gives sharp, auto-centered rendering
+            self._current_icon.paint(painter, icon_rect, Qt.AlignmentFlag.AlignCenter)
             
-            # Debug yellow dot at center of drawn icon pixmap
+            # Debug yellow dot at center of icon rect
             painter.setBrush(QColor("yellow"))
-            icon_center_x = px + self._current_pixmap.width() // 2
-            icon_center_y = py + self._current_pixmap.height() // 2
-            painter.drawEllipse(QPoint(icon_center_x, icon_center_y), 2, 2)
+            painter.drawEllipse(icon_rect.center(), 2, 2)
             
             painter.setOpacity(1.0)
             
@@ -3270,69 +3274,9 @@ class MorphingButton(QWidget):
         if self._main_icon_path:
             abs_path = get_resource_path(self._main_icon_path)
             if os.path.exists(abs_path):
-                from PyQt6.QtSvg import QSvgRenderer
-                from PyQt6.QtCore import QRectF
-                
-                # Calculate icon size as 80% of button, force even
-                icon_size = int(self.COLLAPSED_SIZE * 0.80)
-                if icon_size % 2 == 1:
-                    icon_size += 1
-                
-                # Create SVG renderer
-                renderer = QSvgRenderer(abs_path)
-                if not renderer.isValid():
-                    return
-                
-                # Get SVG's natural size
-                svg_size = renderer.defaultSize()
-                
-                # Create pixmap at target size
-                pixmap = QPixmap(icon_size, icon_size)
-                pixmap.fill(Qt.GlobalColor.transparent)
-                
-                # Calculate centered rect maintaining aspect ratio
-                svg_aspect = svg_size.width() / svg_size.height() if svg_size.height() > 0 else 1.0
-                
-                if svg_aspect >= 1.0:
-                    # Wider than tall - fit to width
-                    draw_w = icon_size
-                    draw_h = int(icon_size / svg_aspect)
-                else:
-                    # Taller than wide - fit to height
-                    draw_h = icon_size
-                    draw_w = int(icon_size * svg_aspect)
-                
-                # Center the drawing rect
-                draw_x = (icon_size - draw_w) / 2
-                draw_y = (icon_size - draw_h) / 2
-                draw_rect = QRectF(draw_x, draw_y, draw_w, draw_h)
-                
-                # Render SVG centered
-                p = QPainter(pixmap)
-                p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-                p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-                renderer.render(p, draw_rect)
-                p.end()
-                
-                # Tint white if solid bg or active
-                if self._is_solid_style or self._is_expanded:
-                    tinted = QPixmap(pixmap.size())
-                    tinted.fill(Qt.GlobalColor.transparent)
-                    p = QPainter(tinted)
-                    p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-                    p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-                    
-                    # Draw original pixmap
-                    p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
-                    p.drawPixmap(0, 0, pixmap)
-                    
-                    # Apply white tint
-                    p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-                    p.fillRect(tinted.rect(), QColor("white"))
-                    p.end()
-                    pixmap = tinted
-                
-                self._current_pixmap = pixmap
+                # Store the icon for direct painting (same method as menu buttons)
+                self._current_icon = QIcon(abs_path)
+                self._current_pixmap = None  # Clear pixmap, we'll use icon directly
                 self.update()
             
     def add_menu_item(self, item_id, icon_path, tooltip=""):
