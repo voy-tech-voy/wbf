@@ -619,7 +619,7 @@ class CommandPanel(QWidget):
         icons = [
             "client/assets/icons/pic_icon2.svg",
             "client/assets/icons/vid_icon2.svg",
-            "client/assets/icons/loop_icon2.svg"
+            "client/assets/icons/loop_icon3.svg"
         ]
         
         if 0 <= current_index < len(icons):
@@ -856,7 +856,7 @@ class CommandPanel(QWidget):
         # Add menu items (ID 0=Image, 1=Video, 2=Loop)
         self.lab_btn.add_menu_item(0, "client/assets/icons/pic_icon2.svg", "Image Conversion")
         self.lab_btn.add_menu_item(1, "client/assets/icons/vid_icon2.svg", "Video Conversion")
-        self.lab_btn.add_menu_item(2, "client/assets/icons/loop_icon2.svg", "Loop Conversion")
+        self.lab_btn.add_menu_item(2, "client/assets/icons/loop_icon3.svg", "Loop Conversion")
         
         self.lab_btn.itemClicked.connect(self._on_tab_btn_clicked)
         
@@ -906,7 +906,7 @@ class CommandPanel(QWidget):
         
         # Loop conversion tab (was GIF)
         self.loop_tab = self.create_loop_tab()
-        self.tabs.addTab(self.loop_tab, QIcon(get_resource_path("client/assets/icons/loop_icon2.svg")), "")
+        self.tabs.addTab(self.loop_tab, QIcon(get_resource_path("client/assets/icons/loop_icon3.svg")), "")
         if hasattr(self, 'loop_side_buttons'):
             self.side_buttons_stack.addWidget(self.loop_side_buttons)
         

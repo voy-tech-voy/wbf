@@ -105,7 +105,7 @@ class GenericSegmentedControl(QFrame):
                 background-color: rgba(255, 255, 255, 12);
                 border: 1px solid {theme['border_dim']};
                 border-radius: 10px;
-                min-height: 32px;
+                min-height: 42px;
             }}
         """)
         
@@ -118,9 +118,9 @@ class GenericSegmentedControl(QFrame):
                 color: {theme['text_secondary']};
                 border: none;
                 border-radius: 6px;
-                padding: 6px 16px;
+                padding: 10px 22px;
                 font-family: '{font_family}';
-                font-size: 11px;
+                font-size: 15px;
                 font-weight: 500;
             }}
             QPushButton#SegmentBtn:hover:!checked {{
@@ -2887,13 +2887,13 @@ class LoopFormatSelector(QWidget):
         # Primary buttons style (larger)
         primary_style = f"""
             QPushButton {{
-                padding: 8px 16px;
+                padding: 10px 20px;
                 border-radius: 8px;
                 border: 2px solid {border_color};
                 background-color: {bg_color};
                 color: {text_color};
                 font-weight: 600;
-                font-size: 15px;
+                font-size: 18px;
             }}
             QPushButton:hover {{
                 background-color: {hover_bg};
@@ -2911,13 +2911,13 @@ class LoopFormatSelector(QWidget):
         # Codec buttons style (smaller, segmented look)
         codec_style = f"""
             QPushButton {{
-                padding: 4px 12px;
+                padding: 8px 16px;
                 border-radius: 4px;
                 border: 1px solid {border_color};
                 background-color: {bg_color};
                 color: {text_color};
                 font-weight: 500;
-                font-size: 12px;
+                font-size: 16px;
             }}
             QPushButton:hover {{
                 background-color: {hover_bg};
@@ -2943,7 +2943,7 @@ class HardwareAwareCodecButton(QPushButton):
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         # Fixed size policy to match other segmented buttons
-        self.setMinimumHeight(32)
+        self.setMinimumHeight(40)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
         # GPU state
@@ -3128,8 +3128,10 @@ class MorphingButton(QWidget):
         self._is_solid_style = False # False = Ghost, True = Solid
         self._active_item_id = None
         self._items = [] # List of item widgets
+        self._item_animations = [] # Keep animations alive to prevent GC
         self._main_icon_path = main_icon_path
         self._is_dark = True
+        self._current_pixmap = None
         
         # UI Setup
         self._setup_ui()
@@ -3172,16 +3174,6 @@ class MorphingButton(QWidget):
         self.update()
         
     def _setup_ui(self):
-        # Layout for centering main icon and menu
-        self._main_layout = QHBoxLayout(self)
-        self._main_layout.setContentsMargins(0, 0, 0, 0)
-        self._main_layout.setSpacing(0)
-        
-        # Main Icon Widget
-        self._main_icon = QLabel(self)
-        self._main_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._main_icon.setFixedSize(self.COLLAPSED_SIZE, self.COLLAPSED_SIZE)
-        
         # Menu Container
         self._menu_container = QWidget(self)
         self._menu_container.setVisible(False)
@@ -3189,14 +3181,17 @@ class MorphingButton(QWidget):
         self._menu_layout.setContentsMargins(8, 0, 48, 0) # Right margin to avoid overlap with icon pos
         self._menu_layout.setSpacing(8)
         
-        # Effects
-        self._main_icon_opacity = QGraphicsOpacityEffect(self._main_icon)
-        self._main_icon.setGraphicsEffect(self._main_icon_opacity)
-        
-        # We'll use absolute positioning for components but self as canvas
-        self._main_icon.setParent(self)
         self._menu_container.setParent(self)
-        self._main_icon.move(0, 0)
+        self._icon_opacity_val = 1.0
+        
+    @pyqtProperty(float)
+    def iconOpacity(self):
+        return self._icon_opacity_val
+
+    @iconOpacity.setter
+    def iconOpacity(self, val):
+        self._icon_opacity_val = val
+        self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -3221,8 +3216,52 @@ class MorphingButton(QWidget):
         
         # Use integer coordinates to be absolutely safe with PyQt6 overloads.
         # This fixes the TypeError: argument 1 has unexpected type 'float'
-        painter.drawRoundedRect(0, 0, int(curr_width), int(curr_height), int(radius), int(radius))
+        # Fix clipping: inset by 1px so border stroke (width 1-1.5) is inside bounds
+        painter.drawRoundedRect(1, 1, int(curr_width)-2, int(curr_height)-2, int(radius), int(radius))
+
+        # DEBUG: Draw red dot at center to verify alignment
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("red"))
+        cx = int(curr_width / 2)
+        cy = int(curr_height / 2)
+        painter.drawEllipse(QPoint(cx, cy), 3, 3)
         
+        # Draw Main Icon
+        if self._current_pixmap and self._icon_opacity_val > 0:
+            painter.setOpacity(self._icon_opacity_val)
+            
+            # Center icon in the collapsed area (which is at left or right depending on expansion)
+            # Logic: If collapsed, center in width. If expanded (left), icon stays at right.
+            
+            icon_x = 0
+            if self._is_expanded or self.width() > self.COLLAPSED_SIZE:
+                # Icon anchored to Right
+                icon_x = self.width() - self.COLLAPSED_SIZE
+            
+            # Center of the 48x48 area
+            target_rect = QRect(icon_x, 0, self.COLLAPSED_SIZE, self.COLLAPSED_SIZE)
+            
+            # DEBUG: Draw semi-transparent blue background for icon area
+            painter.setBrush(QColor(0, 0, 255, 150))
+            painter.setPen(Qt.PenStyle.NoPen)
+            # Calculate exact pixmap rect for background using SYMMETRIC centering
+            pix_w = self._current_pixmap.width()
+            pix_h = self._current_pixmap.height()
+            # Use integer division for symmetric margins
+            px = target_rect.x() + (target_rect.width() - pix_w) // 2
+            py = target_rect.y() + (target_rect.height() - pix_h) // 2
+            painter.drawRect(px, py, pix_w, pix_h)
+            
+            painter.drawPixmap(px, py, self._current_pixmap)
+            
+            # Debug yellow dot at center of drawn icon pixmap
+            painter.setBrush(QColor("yellow"))
+            icon_center_x = px + self._current_pixmap.width() // 2
+            icon_center_y = py + self._current_pixmap.height() // 2
+            painter.drawEllipse(QPoint(icon_center_x, icon_center_y), 2, 2)
+            
+            painter.setOpacity(1.0)
+            
     def set_main_icon(self, icon_path):
         self._main_icon_path = icon_path
         self._update_main_icon()
@@ -3231,21 +3270,70 @@ class MorphingButton(QWidget):
         if self._main_icon_path:
             abs_path = get_resource_path(self._main_icon_path)
             if os.path.exists(abs_path):
-                pixmap = QIcon(abs_path).pixmap(24, 24)
+                from PyQt6.QtSvg import QSvgRenderer
+                from PyQt6.QtCore import QRectF
+                
+                # Calculate icon size as 80% of button, force even
+                icon_size = int(self.COLLAPSED_SIZE * 0.80)
+                if icon_size % 2 == 1:
+                    icon_size += 1
+                
+                # Create SVG renderer
+                renderer = QSvgRenderer(abs_path)
+                if not renderer.isValid():
+                    return
+                
+                # Get SVG's natural size
+                svg_size = renderer.defaultSize()
+                
+                # Create pixmap at target size
+                pixmap = QPixmap(icon_size, icon_size)
+                pixmap.fill(Qt.GlobalColor.transparent)
+                
+                # Calculate centered rect maintaining aspect ratio
+                svg_aspect = svg_size.width() / svg_size.height() if svg_size.height() > 0 else 1.0
+                
+                if svg_aspect >= 1.0:
+                    # Wider than tall - fit to width
+                    draw_w = icon_size
+                    draw_h = int(icon_size / svg_aspect)
+                else:
+                    # Taller than wide - fit to height
+                    draw_h = icon_size
+                    draw_w = int(icon_size * svg_aspect)
+                
+                # Center the drawing rect
+                draw_x = (icon_size - draw_w) / 2
+                draw_y = (icon_size - draw_h) / 2
+                draw_rect = QRectF(draw_x, draw_y, draw_w, draw_h)
+                
+                # Render SVG centered
+                p = QPainter(pixmap)
+                p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+                p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+                renderer.render(p, draw_rect)
+                p.end()
                 
                 # Tint white if solid bg or active
                 if self._is_solid_style or self._is_expanded:
                     tinted = QPixmap(pixmap.size())
                     tinted.fill(Qt.GlobalColor.transparent)
                     p = QPainter(tinted)
+                    p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+                    p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+                    
+                    # Draw original pixmap
                     p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
                     p.drawPixmap(0, 0, pixmap)
+                    
+                    # Apply white tint
                     p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
                     p.fillRect(tinted.rect(), QColor("white"))
                     p.end()
                     pixmap = tinted
                 
-                self._main_icon.setPixmap(pixmap)
+                self._current_pixmap = pixmap
+                self.update()
             
     def add_menu_item(self, item_id, icon_path, tooltip=""):
         """Add an icon-based item to the expansion menu"""
@@ -3273,7 +3361,9 @@ class MorphingButton(QWidget):
             }}
         """)
         
-        btn.clicked.connect(lambda: self._on_item_clicked(item_id))
+        # IMPORTANT: Use default arg to capture item_id by VALUE, not reference
+        # This fixes the closure bug where all buttons would emit the last item_id
+        btn.clicked.connect(lambda checked=False, iid=item_id: self._on_item_clicked(iid))
         self._menu_layout.addWidget(btn)
         self._items.append(btn)
         
@@ -3322,11 +3412,7 @@ class MorphingButton(QWidget):
             
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # Position main icon at the right when expanded (since it expands left)
-        if self._is_expanded or self._width_anim.state() == QPropertyAnimation.State.Running:
-            self._main_icon.move(self.width() - self.COLLAPSED_SIZE, 0)
-        else:
-            self._main_icon.move(0, 0)
+        # Icon positioning handled in paintEvent now
         
         self._menu_container.resize(self.width(), self.height())
             
@@ -3343,7 +3429,7 @@ class MorphingButton(QWidget):
         self._width_anim.start()
         
         # 2. Main Icon Shift (Fade slightly or just stay at right)
-        self.icon_anim_op = QPropertyAnimation(self._main_icon_opacity, b"opacity")
+        self.icon_anim_op = QPropertyAnimation(self, b"iconOpacity")
         self.icon_anim_op.setDuration(300)
         self.icon_anim_op.setStartValue(1.0)
         self.icon_anim_op.setEndValue(0.4) # Keep it visible but faded
@@ -3351,11 +3437,13 @@ class MorphingButton(QWidget):
         
         # 3. Menu Items In
         self._menu_container.setVisible(True)
+        self._item_animations.clear()  # Clear previous animations
         for i, btn in enumerate(self._items):
             anim = QPropertyAnimation(btn.graphicsEffect(), b"opacity")
             anim.setDuration(250)
             anim.setStartValue(0.0)
             anim.setEndValue(1.0)
+            self._item_animations.append(anim)  # Keep reference to prevent GC
             QTimer.singleShot(i * self.STAGGER_DELAY, anim.start)
             
         self.expanded.emit(True)
@@ -3389,7 +3477,6 @@ class MorphingButton(QWidget):
         except: pass
         if not self._is_expanded:
             self.setFixedWidth(self.COLLAPSED_SIZE)
-            self._main_icon.move(0, 0)
             self.update()
 
 
@@ -3513,14 +3600,15 @@ class PresetStatusButton(QWidget):
         else:
             painter.setPen(Qt.PenStyle.NoPen)
             
-        painter.drawRoundedRect(0, 0, w, h, radius, radius)
+        # Fix clipping: inset by 1px so border stroke is inside bounds
+        painter.drawRoundedRect(1, 1, w-2, h-2, int(radius), int(radius))
         
         # Draw Text
         painter.setPen(self._text_color)
         font = self.font()
         font.setFamily(FONT_FAMILY)
         font.setWeight(QFont.Weight.DemiBold if self._is_active else QFont.Weight.Medium)
-        font.setPixelSize(14)
+        font.setPixelSize(16)
         painter.setFont(font)
         
         # Calculate text bounds
