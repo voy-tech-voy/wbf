@@ -3089,31 +3089,25 @@ class VideoCodecSelector(GenericSegmentedControl):
 
 
 
-class MorphingButton(QWidget):
+
+class MorphingButton(QPushButton):
     """
-    A sophisticated morphing button that transforms from a status indicator into a menu.
-    
-    States:
-    - Idle: Circle/Squircle (48x48), displaying main status icon.
-    - Expanded: Pill shape, displaying menu items.
-    
-    Styles:
-    - Solid: Active accent color (for Lab Active state).
-    - Ghost: Outline with 30% opacity (for Preset Active state).
-    
-    Animation:
-    - Spring physics for expansion/collapse.
-    - Staggered animation for menu items.
+    Button that morphs between icon-only and expanded menu.
     """
-    
     # Signals
+    toggled_state = pyqtSignal(bool)
     expanded = pyqtSignal(bool)
     itemClicked = pyqtSignal(object)  # Emits item ID
     
     # Constants
     COLLAPSED_SIZE = 48
     EXPAND_DELAY_MS = 200
-    SPRING_ANIM_DURATION = 400 # ms for spring effect
+    SPRING_ANIM_DURATION = 400
+    EXPANDED_WIDTH = 200
+    ANIMATION_DURATION = 300
+    
+    # Debug flag for alignment visualization
+    DEBUG_ALIGNMENT = False
     STAGGER_DELAY = 50 # ms between items
     
     # Expansion directions (currently supports LEFT expansion as per spec)
@@ -3221,12 +3215,13 @@ class MorphingButton(QWidget):
         painter.drawRoundedRect(1, 1, int(curr_width)-2, int(curr_height)-2, int(radius), int(radius))
 
         # DEBUG: Draw red dot at center to verify alignment
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("red"))
-        cx = int(curr_width / 2)
-        cy = int(curr_height / 2)
-        # Draw ellipse centered on (cx, cy) - need to offset by radius
-        painter.drawEllipse(cx - 3, cy - 3, 6, 6)
+        if self.DEBUG_ALIGNMENT:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("red"))
+            cx = int(curr_width / 2)
+            cy = int(curr_height / 2)
+            # Draw ellipse centered on (cx, cy) - need to offset by radius
+            painter.drawEllipse(cx - 3, cy - 3, 6, 6)
         
         
         # Draw Main Icon using QIcon.paint() for sharp, centered rendering
@@ -3241,8 +3236,8 @@ class MorphingButton(QWidget):
             # The target rect for the icon (the 48x48 circle area)
             target_rect = QRect(icon_x, 0, self.COLLAPSED_SIZE, self.COLLAPSED_SIZE)
             
-            # Calculate icon size as 80% of button
-            icon_size = int(self.COLLAPSED_SIZE * 0.80)
+            # Calculate icon size as 70% of button
+            icon_size = int(self.COLLAPSED_SIZE * 0.66)
             if icon_size % 2 == 1:
                 icon_size += 1
             
@@ -3255,20 +3250,22 @@ class MorphingButton(QWidget):
             )
             
             # DEBUG: Draw semi-transparent blue background for icon area
-            painter.setBrush(QColor(0, 0, 255, 150))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRect(icon_rect)
+            if self.DEBUG_ALIGNMENT:
+                painter.setBrush(QColor(0, 0, 255, 150))
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.drawRect(icon_rect)
             
             # Draw icon using paint() - this gives sharp, auto-centered rendering
             self._current_icon.paint(painter, icon_rect, Qt.AlignmentFlag.AlignCenter)
             
             # Debug yellow dot at center of the 48x48 target area (should align with red dot when collapsed)
-            painter.setBrush(QColor("yellow"))
-            # Use same center calculation as red dot: x + width/2, y + height/2
-            center_x = target_rect.x() + target_rect.width() // 2
-            center_y = target_rect.y() + target_rect.height() // 2
-            # Draw ellipse centered on the point - offset by radius
-            painter.drawEllipse(center_x - 2, center_y - 2, 4, 4)
+            if self.DEBUG_ALIGNMENT:
+                painter.setBrush(QColor("yellow"))
+                # Use same center calculation as red dot: x + width/2, y + height/2
+                center_x = target_rect.x() + target_rect.width() // 2
+                center_y = target_rect.y() + target_rect.height() // 2
+                # Draw ellipse centered on the point - offset by radius
+                painter.drawEllipse(center_x - 2, center_y - 2, 4, 4)
             
             painter.setOpacity(1.0)
             
