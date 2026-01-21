@@ -28,6 +28,70 @@ from client.utils.font_manager import AppFonts, FONT_FAMILY_APP_NAME
 from client.utils.resource_path import get_app_icon_path, get_resource_path
 from client.version import APP_NAME, AUTHOR
 
+from PyQt6.QtCore import QObject, QEvent, QTimer
+
+DEBUG_INTERACTIVITY = True
+
+class EventDebugFilter(QObject):
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.MouseButtonPress:
+            # Only care about left click press for triggering actions
+            if hasattr(event, 'button') and event.button() != Qt.MouseButton.LeftButton:
+                return False
+                
+            # Helper to get hierarchy
+            def get_hierarchy(w):
+                chain = []
+                curr = w
+                while curr:
+                    name = curr.objectName() or curr.__class__.__name__
+                    chain.append(name)
+                    curr = curr.parent()
+                return " -> ".join(chain)
+            
+            hierarchy = get_hierarchy(obj)
+            
+            # --- 1. PRESETS STATUS ---
+            top_level = None
+            if hasattr(obj, 'window'):
+                top_level = obj.window()
+            
+            preset_mode = "OFF"
+            if top_level and hasattr(top_level, 'command_panel') and hasattr(top_level.command_panel, 'preset_status_btn'):
+                if top_level.command_panel.preset_status_btn._is_active:
+                    preset_mode = "ON"
+            
+            # --- 2. DETECT LAB CLICK ---
+            lab_action = None
+            
+            # Check hierarchy for MorphingButton
+            curr = obj
+            while curr:
+                if "MorphingButton" in curr.__class__.__name__:
+                    # Found Lab Button
+                    mb = curr
+                    # Check if obj is one of the sub-items
+                    if hasattr(mb, '_items') and obj in mb._items:
+                        idx = mb._items.index(obj)
+                        type_map = {0: "IMAGE", 1: "VIDEO", 2: "LOOP"}
+                        lab_action = type_map.get(idx, "UNKNOWN")
+                    break
+                curr = curr.parent()
+            
+            if lab_action:
+                print(f"\n>>> DEBUG EVENT: Click inside Lab Button")
+                print(f"    Preset Mode: {preset_mode}")
+                print(f"    Target: {lab_action}")
+            elif "PresetStatusButton" in hierarchy:
+                print(f"\n>>> DEBUG EVENT: Click on Preset Button")
+                print(f"    Current Mode: {preset_mode}")
+                
+            return False
+                         
+            return False 
+            
+        return super().eventFilter(obj, event)
+
 class DraggableTitleBar(QFrame):
     """Custom title bar that allows dragging the window"""
     def __init__(self, parent_window):
@@ -74,6 +138,13 @@ class ClickableLabel(QLabel):
 class MainWindow(QMainWindow):
     def __init__(self, is_trial=False):
         super().__init__()
+        
+        # Install interactive debugger
+        if DEBUG_INTERACTIVITY:
+            self._debug_filter = EventDebugFilter()
+            QApplication.instance().installEventFilter(self._debug_filter)
+            print("[DEBUG] Interactive Debug Filter Installed")
+            
         self.is_trial = is_trial
         
         # Development mode detection
@@ -583,6 +654,10 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'output_footer'):
             has_files = len(self.drag_drop_area.get_files()) > 0
             self.output_footer.set_has_files(has_files)
+            
+        # USER REQUEST: "After dragging the file the PRESET view is on"
+        # Manually trigger the preset view when new files are added
+        self.drag_drop_area.show_preset_view()
     
     def _on_footer_start(self):
         """Handle start button click from output footer"""

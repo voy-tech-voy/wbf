@@ -3127,6 +3127,7 @@ class MorphingButton(QPushButton):
         self._is_dark = True
         self._current_pixmap = None
         self._current_icon = None
+        self._current_icon_grey = None  # Grey-tinted icon for inactive state
         
         # UI Setup
         self._setup_ui()
@@ -3233,10 +3234,12 @@ class MorphingButton(QPushButton):
             if self._is_expanded or self.width() > self.COLLAPSED_SIZE:
                 icon_x = self.width() - self.COLLAPSED_SIZE
             
-            # The target rect for the icon (the 48x48 circle area)
-            target_rect = QRect(icon_x, 0, self.COLLAPSED_SIZE, self.COLLAPSED_SIZE)
+            # The target rect for the icon - matches the visible circle area (1px border inset)
+            # The circle is drawn at (1,1) with size (COLLAPSED_SIZE-2, COLLAPSED_SIZE-2)
+            # so we center the icon within that same visible area
+            target_rect = QRect(icon_x + 1, 1, self.COLLAPSED_SIZE - 2, self.COLLAPSED_SIZE - 2)
             
-            # Calculate icon size as 70% of button
+            # Calculate icon size as 66% of button
             icon_size = int(self.COLLAPSED_SIZE * 0.66)
             if icon_size % 2 == 1:
                 icon_size += 1
@@ -3255,17 +3258,34 @@ class MorphingButton(QPushButton):
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.drawRect(icon_rect)
             
-            # Draw icon using paint() - this gives sharp, auto-centered rendering
-            self._current_icon.paint(painter, icon_rect, Qt.AlignmentFlag.AlignCenter)
+            # Draw icon using pixmap at explicit coordinates for perfect centering
+            # ALWAYS use original SVG-based icon to get pixmap (preserves proper scaling)
+            # Apply grey tint at paint time if in ghost/inactive state
             
-            # Debug yellow dot at center of the 48x48 target area (should align with red dot when collapsed)
-            if self.DEBUG_ALIGNMENT:
-                painter.setBrush(QColor("yellow"))
-                # Use same center calculation as red dot: x + width/2, y + height/2
-                center_x = target_rect.x() + target_rect.width() // 2
-                center_y = target_rect.y() + target_rect.height() // 2
-                # Draw ellipse centered on the point - offset by radius
-                painter.drawEllipse(center_x - 2, center_y - 2, 4, 4)
+            apply_grey_tint = not self._is_solid_style
+            
+            # Get pixmap from ORIGINAL icon (not the pre-created grey one)
+            pixmap = self._current_icon.pixmap(icon_size, icon_size)
+            if not pixmap.isNull():
+                # Apply grey tinting at paint time if needed
+                if apply_grey_tint:
+                    # Create a grey-tinted copy of the pixmap
+                    # CRITICAL: Preserve devicePixelRatio for proper DPI scaling
+                    grey_pixmap = QPixmap(pixmap.size())
+                    grey_pixmap.setDevicePixelRatio(pixmap.devicePixelRatio())
+                    grey_pixmap.fill(Qt.GlobalColor.transparent)
+                    tint_painter = QPainter(grey_pixmap)
+                    tint_painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                    tint_painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                    tint_painter.drawPixmap(0, 0, pixmap)
+                    tint_painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+                    tint_painter.fillRect(grey_pixmap.rect(), QColor(136, 136, 136))
+                    tint_painter.end()
+                    pixmap = grey_pixmap
+                
+                # Draw pixmap scaled to icon_rect - this handles DPI scaling properly
+                # The pixmap may be larger due to devicePixelRatio, but drawPixmap with QRect scales it
+                painter.drawPixmap(icon_rect, pixmap)
             
             painter.setOpacity(1.0)
             
@@ -3280,6 +3300,27 @@ class MorphingButton(QPushButton):
                 # Store the icon for direct painting (same method as menu buttons)
                 self._current_icon = QIcon(abs_path)
                 self._current_pixmap = None  # Clear pixmap, we'll use icon directly
+                
+                # Create grey-tinted icon for inactive/ghost state
+                icon_size = int(self.COLLAPSED_SIZE * 0.66)
+                if icon_size % 2 == 1:
+                    icon_size += 1
+                pixmap = self._current_icon.pixmap(icon_size, icon_size)
+                if not pixmap.isNull():
+                    grey_pixmap = QPixmap(pixmap.size())
+                    grey_pixmap.fill(Qt.GlobalColor.transparent)
+                    painter = QPainter(grey_pixmap)
+                    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                    painter.drawPixmap(0, 0, pixmap)
+                    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+                    # Use a medium grey (#888888) for inactive state
+                    painter.fillRect(grey_pixmap.rect(), QColor(136, 136, 136))
+                    painter.end()
+                    self._current_icon_grey = QIcon(grey_pixmap)
+                else:
+                    self._current_icon_grey = None
+                    
                 self.update()
             
     def add_menu_item(self, item_id, icon_path, tooltip=""):
@@ -3338,6 +3379,8 @@ class MorphingButton(QPushButton):
         self.update()
 
     def _on_item_clicked(self, item_id):
+        type_map = {0: "IMAGE", 1: "VIDEO", 2: "LOOP"}
+        print(f"[DEBUG_INTERNAL] MorphingButton item clicked. ID={item_id} ({type_map.get(item_id, 'UNKNOWN')})")
         self._active_item_id = item_id
         self.itemClicked.emit(item_id)
         self._collapse()
@@ -3366,6 +3409,7 @@ class MorphingButton(QPushButton):
     def _expand(self):
         if self._is_expanded: return
         self._is_expanded = True
+        self.raise_() # Ensure button is on top of siblings when expanding
         
         # 1. Expand Width
         menu_width = self._menu_layout.sizeHint().width()
@@ -3451,8 +3495,6 @@ class PresetStatusButton(QWidget):
         self._text = "PRESETS"
         self._is_active = False # False = Manual/Ghost, True = Preset/Solid
         self._is_hovered = False
-        self._scroll_offset = 0.0
-        self._scroll_active = False
         self._bg_color = QColor(255, 255, 255, 12) # Ghost default
         self._text_color = QColor(255, 255, 255, 150) # Inactive text
         self._current_width = self.MIN_WIDTH
@@ -3462,19 +3504,9 @@ class PresetStatusButton(QWidget):
         self._width_anim.setDuration(400)
         self._width_anim.setEasingCurve(QEasingCurve.Type.OutElastic) # Spring effect
         
-        self._scroll_timer = QTimer(self)
-        self._scroll_timer.setInterval(20) # ~50 FPS
-        self._scroll_timer.timeout.connect(self._update_scroll)
-        self._scroll_direction = 1 # 1 = right-to-left (text moves left), -1 = return
-        self._scroll_pause_frames = 0
-        
-        self._hover_delay_timer = QTimer(self)
-        self._hover_delay_timer.setSingleShot(True)
-        self._hover_delay_timer.setInterval(500)
-        self._hover_delay_timer.timeout.connect(self._start_marquee)
-        
         # Initial geometry
         self.setFixedWidth(self.MIN_WIDTH)
+        self._temp_shrink = False # Flag to temporarily shrink button (e.g. when Lab button expands)
 
     @pyqtProperty(int)
     def animWidth(self):
@@ -3485,26 +3517,25 @@ class PresetStatusButton(QWidget):
         self._current_width = w
         self.setFixedWidth(w)
         self.update()
+        
+    def shrink_for_overlap(self, shrink):
+        """Temporarily shrink button to make room for other widgets"""
+        if self._temp_shrink == shrink:
+            return
+            
+        self._temp_shrink = shrink
+        
+        # Recalculate width target
+        self._update_width()
 
     def set_active(self, is_active, text="PRESETS"):
         self._is_active = is_active
         self._text = text.upper()
         
-        # Calculate target width
-        fm = QFontMetrics(self.font())
-        text_width = fm.horizontalAdvance(self._text)
-        target = max(self.MIN_WIDTH, min(self.MAX_WIDTH, text_width + self.PADDING))
-        
-        # Stop any running scroll to reset text position during transition
-        self._stop_marquee()
         
         # Update colors/style
         if self._is_active:
-            # Active: Solid White (or Green as per prev design, but prompt asked for "White" fill in example, 
-            # though prev design was Green. I'll utilize the Green scheme to maintain consistency with Lab Button ghosting logic,
-            # or White if strict to prompt. Prompt: "Button background fills White". 
-            # I will use #E0E0E0 (almost white) to ensure text contrast if text is black, OR keep green logic if text is white.
-            # Let's stick to the Green Accent design but obey "Solid".
+            # Active: Solid Green
             self._bg_color = QColor("#00AA00") 
             self._text_color = QColor(255, 255, 255, 255)
         else:
@@ -3512,14 +3543,27 @@ class PresetStatusButton(QWidget):
             self._bg_color = QColor(255, 255, 255, 12)
             self._text_color = QColor(255, 255, 255, 100) # Faded
             
+        self._update_width()
+        self.update()
+            
+    def _update_width(self):
+        """Update width based on active state and shrinking override"""
+        if self._temp_shrink:
+            target = self.MIN_WIDTH
+        elif self._is_active:
+             # Calculate target width
+            fm = QFontMetrics(self.font())
+            text_width = fm.horizontalAdvance(self._text)
+            target = max(self.MIN_WIDTH, min(self.MAX_WIDTH, text_width + self.PADDING))
+        else:
+            target = self.MIN_WIDTH
+            
         # Animate Width
         if self.width() != target:
             self._width_anim.stop()
             self._width_anim.setStartValue(self.width())
             self._width_anim.setEndValue(target)
             self._width_anim.start()
-            
-        self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -3566,19 +3610,14 @@ class PresetStatusButton(QWidget):
         # Clipping region for text
         painter.setClipRect(16, 0, w - 32, h)
         
-        if self._scroll_active:
-            # Marquee drawing
-            x_pos = 16 - self._scroll_offset
-            painter.drawText(int(x_pos), 0, int(text_width + 50), int(h), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self._text)
+        # Standard drawing (with ellipsis if needed)
+        if text_width > avail_width:
+             # Elide
+             elided = fm.elidedText(self._text, Qt.TextElideMode.ElideRight, avail_width)
+             painter.drawText(QRect(16, 0, w - 32, h), Qt.AlignmentFlag.AlignCenter, elided)
         else:
-            # Standard drawing (with ellipsis if needed)
-            if text_width > avail_width:
-                 # Elide
-                 elided = fm.elidedText(self._text, Qt.TextElideMode.ElideRight, avail_width)
-                 painter.drawText(QRect(16, 0, w - 32, h), Qt.AlignmentFlag.AlignCenter, elided)
-            else:
-                 # Center
-                 painter.drawText(QRect(0, 0, w, h), Qt.AlignmentFlag.AlignCenter, self._text)
+             # Center
+             painter.drawText(QRect(0, 0, w, h), Qt.AlignmentFlag.AlignCenter, self._text)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -3589,59 +3628,8 @@ class PresetStatusButton(QWidget):
     def enterEvent(self, event):
         self._is_hovered = True
         self.update()
-        
-        # Check for overflow to trigger marquee
-        fm = QFontMetrics(self.font())
-        text_width = fm.horizontalAdvance(self._text)
-        avail_width = self.width() - self.PADDING
-        
-        if text_width > avail_width:
-            self._hover_delay_timer.start() # Wait 500ms
             
     def leaveEvent(self, event):
         self._is_hovered = False
-        self._stop_marquee()
-        self.update()
-
-    def _start_marquee(self):
-        self._scroll_active = True
-        self._scroll_offset = 0
-        self._scroll_direction = 1
-        self._scroll_pause_frames = 0
-        self._scroll_timer.start()
-
-    def _stop_marquee(self):
-        self._hover_delay_timer.stop()
-        self._scroll_timer.stop()
-        self._scroll_active = False
-        self._scroll_offset = 0
-        self.update()
-
-    def _update_scroll(self):
-        if not self._scroll_active: return
-        
-        # Pause logic at ends
-        if self._scroll_pause_frames > 0:
-            self._scroll_pause_frames -= 1
-            return
-            
-        fm = QFontMetrics(self.font())
-        text_width = fm.horizontalAdvance(self._text)
-        avail_width = self.width() - self.PADDING
-        max_offset = text_width - avail_width
-        
-        # Move
-        speed = 0.5
-        self._scroll_offset += (speed * self._scroll_direction)
-        
-        # Bounds check
-        if self._scroll_offset >= max_offset + 10: # +10 pad
-            self._scroll_direction = -1
-            self._scroll_pause_frames = 25 # ~0.5s pause
-        elif self._scroll_offset <= 0:
-            self._scroll_offset = 0
-            self._scroll_direction = 1
-            self._scroll_pause_frames = 25
-            
         self.update()
 

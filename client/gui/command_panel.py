@@ -607,8 +607,13 @@ class CommandPanel(QWidget):
         
         return QIcon(tinted_pixmap)
 
-    def update_tab_icons(self):
-        """Update Lab Button icon based on active tab"""
+    def update_tab_icons(self, activate_lab=False):
+        """Update Lab Button icon based on active tab
+        
+        Args:
+            activate_lab: If True, sets lab button to active/solid state. 
+                         If False (default), only updates the icon without changing state.
+        """
         # Ensure buttons exist
         if not hasattr(self, 'lab_btn'):
             return
@@ -622,7 +627,7 @@ class CommandPanel(QWidget):
             "client/assets/icons/loop_icon3.svg"
         ]
         
-        if 0 <= current_index < len(icons):
+        if 0 <= current_index < len(icons) and activate_lab:
             # Update Lab Button to show selected mode
             self.lab_btn.set_main_icon(icons[current_index])
             
@@ -633,13 +638,22 @@ class CommandPanel(QWidget):
             if hasattr(self, 'preset_status_btn'):
                 self.preset_status_btn.set_active(False)
 
+
     def _on_tab_btn_clicked(self, btn_id):
         """Handle MorphingButton menu item click (btn_id is item ID)"""
+        print(f"[DEBUG_COMMAND] Received Lab Button Click Signal. ID={btn_id}")
+        
         # Convert item ID to index if needed (they map 1:1 currently)
         index = btn_id
         if self.tabs.currentIndex() != index:
+            print(f"    RESULT: Switching TO -> {btn_id} (Success)")
             self.tabs.setCurrentIndex(index)
-            # update_tab_icons will be called via signal
+        else:
+            print(f"    RESULT: Tab {index} already active, refreshing icons")
+        
+        # Always activate lab button when user explicitly clicks lab menu item
+        # This ensures clicking Lab button always exits preset mode and activates lab
+        self.update_tab_icons(activate_lab=True)
 
 
 
@@ -859,6 +873,8 @@ class CommandPanel(QWidget):
         self.lab_btn.add_menu_item(2, "client/assets/icons/loop_icon3.svg", "Loop Conversion")
         
         self.lab_btn.itemClicked.connect(self._on_tab_btn_clicked)
+        # Handle layout constraint: shrink preset button when lab button expands
+        self.lab_btn.expanded.connect(self.preset_status_btn.shrink_for_overlap)
         
         # Add Lab Button to layout
         top_bar_layout.addWidget(self.lab_btn)
@@ -931,7 +947,17 @@ class CommandPanel(QWidget):
         self._update_video_transform_visibility('resize')
         self._update_loop_transform_visibility('resize')
         
+        
         self.tabs.currentChanged.connect(self._on_tab_changed)
+        
+        # Initialize buttons to OFF state (Preset mode OFF, Lab button OFF)
+        # This ensures the app starts in manual mode with default lab icon
+        if hasattr(self, 'preset_status_btn'):
+            self.preset_status_btn.set_active(False, "PRESETS")
+        if hasattr(self, 'lab_btn'):
+            self.lab_btn.set_style_solid(False)
+            self.lab_btn.set_main_icon("client/assets/icons/lab_icon.svg")
+        
         
 
         

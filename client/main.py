@@ -252,34 +252,37 @@ class StartupWorker(QThread):
 
 # ----------------------------------------------------------------------------
 
-def initialize_main_window(is_trial=False):
+def initialize_main_window(is_trial=False, skip_splash=False):
     """
     Initialize the main window with splash screen and tool validation.
     This logic is extracted so it can be reused during re-login.
     
     Args:
         is_trial (bool): Whether to start in trial mode
+        skip_splash (bool): Whether to skip the splash screen (e.g. in dev mode)
         
     Returns:
         MainWindow: The initialized main window (not yet shown)
     """
-    # Show a lightweight splash while bundled tools initialize
-    version_text = get_version()
-    splash = ToolLoadingWindow(version_text)
-    splash.show()
-    splash.raise_()
-    splash.activateWindow()
-    
-    # Force the splash to render
-    splash.update()
-    splash.repaint()
-    for _ in range(5):
-        QApplication.processEvents()
-    
-    print(f"🪟 Splash visible: {splash.isVisible()}")
-    
-    # Record start time
-    splash_start_time = time.time()
+    splash = None
+    if not skip_splash:
+        # Show a lightweight splash while bundled tools initialize
+        version_text = get_version()
+        splash = ToolLoadingWindow(version_text)
+        splash.show()
+        splash.raise_()
+        splash.activateWindow()
+        
+        # Force the splash to render
+        splash.update()
+        splash.repaint()
+        for _ in range(5):
+            QApplication.processEvents()
+        
+        print(f"🪟 Splash visible: {splash.isVisible()}")
+        
+        # Record start time
+        splash_start_time = time.time()
     
     # ------------------------------------------------------------------------
     # Start background validation
@@ -305,20 +308,21 @@ def initialize_main_window(is_trial=False):
     print("✅ Main window created")
     
     # Ensure splash displays for minimum 2 seconds (non-blocking wait)
-    MIN_SPLASH_TIME = 2.0
-    elapsed = time.time() - splash_start_time
-    if elapsed < MIN_SPLASH_TIME:
-        remaining_ms = int((MIN_SPLASH_TIME - elapsed) * 1000)
-        print(f"⏳ Waiting {remaining_ms}ms more for splash (non-blocking)...")
-        # Non-blocking wait - keeps UI responsive
-        end_time = time.time() + (MIN_SPLASH_TIME - elapsed)
-        while time.time() < end_time:
-            QApplication.processEvents()
-            time.sleep(0.016)  # ~60fps update rate
+    if not skip_splash and splash:
+        MIN_SPLASH_TIME = 2.0
+        elapsed = time.time() - splash_start_time
+        if elapsed < MIN_SPLASH_TIME:
+            remaining_ms = int((MIN_SPLASH_TIME - elapsed) * 1000)
+            print(f"⏳ Waiting {remaining_ms}ms more for splash (non-blocking)...")
+            # Non-blocking wait - keeps UI responsive
+            end_time = time.time() + (MIN_SPLASH_TIME - elapsed)
+            while time.time() < end_time:
+                QApplication.processEvents()
+                time.sleep(0.016)  # ~60fps update rate
     
-    # Close splash
-    splash.close()
-    print("✅ Splash closed, returning main window")
+        # Close splash
+        splash.close()
+        print("✅ Splash closed, returning main window")
     
     return window
 
@@ -427,7 +431,7 @@ def main():
             log_info("Launching main application", "startup")
 
         # Use extracted initialization function
-        window = initialize_main_window(is_trial)
+        window = initialize_main_window(is_trial, skip_splash=dev_mode)
         window.show()
         
         if CRASH_REPORTING_AVAILABLE:
