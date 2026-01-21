@@ -16,7 +16,9 @@ import tempfile
 import re
 from pathlib import Path
 from client.utils.resource_path import get_resource_path
+from client.utils.resource_path import get_resource_path
 from client.gui.theme_variables import get_theme, get_color
+from client.gui.custom_widgets import PresetStatusButton
 
 class HoverIconButton(QPushButton):
     """Button that changes its SVG icon colors based on hover state and theme"""
@@ -400,6 +402,11 @@ class DragDropArea(QWidget):
             widget = self.file_list_widget.itemWidget(item)
             if widget and hasattr(widget, 'set_completed'):
                 widget.set_completed()
+
+    def set_preset_active(self, active, text="PRESETS"):
+        """Update the state of the integrated preset button"""
+        if hasattr(self, 'preset_status_btn'):
+            self.preset_status_btn.set_active(active, text)
     
     def clear_all_progress(self):
         """Clear progress indicators from all files"""
@@ -416,22 +423,22 @@ class DragDropArea(QWidget):
         
         # Control buttons at top
         button_layout = QHBoxLayout()
-        icon_size = QSize(24, 24)  # 24px icon in 36px square (6px padding)
+        icon_size = QSize(28, 28)  # 28px icon in 48px square
         
         self.add_files_btn = HoverIconButton("addfile.svg", icon_size)
-        self.add_files_btn.setFixedSize(36, 36)
+        self.add_files_btn.setFixedSize(48, 48)
         self.add_files_btn.setToolTip("Add Files")
         self.add_files_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.add_files_btn.clicked.connect(self.add_files_dialog)
         
         self.add_folder_btn = HoverIconButton("addfolder.svg", icon_size)
-        self.add_folder_btn.setFixedSize(36, 36)
+        self.add_folder_btn.setFixedSize(48, 48)
         self.add_folder_btn.setToolTip("Add Folder")
         self.add_folder_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.add_folder_btn.clicked.connect(self.add_folder_dialog)
         
         self.clear_files_btn = HoverIconButton("removefile.svg", icon_size)
-        self.clear_files_btn.setFixedSize(36, 36)
+        self.clear_files_btn.setFixedSize(48, 48)
         self.clear_files_btn.setToolTip("Clear All")
         self.clear_files_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.clear_files_btn.clicked.connect(self.clear_files)
@@ -445,6 +452,11 @@ class DragDropArea(QWidget):
         button_layout.addWidget(self.add_folder_btn)
         button_layout.addWidget(self.clear_files_btn)
         button_layout.addStretch()
+        
+        # Presets Button (Right Aligned)
+        self.preset_status_btn = PresetStatusButton()
+        self.preset_status_btn.clicked.connect(self.show_preset_view)
+        button_layout.addWidget(self.preset_status_btn)
         
         layout.addLayout(button_layout)
         
@@ -501,6 +513,9 @@ class DragDropArea(QWidget):
     def _on_preset_selected(self, preset_obj):
         """Handle preset card click"""
         self.preset_overlay.hide_animated()
+        
+        # Update button state immediately (don't wait for signal round-trip)
+        self.set_preset_active(True, preset_obj.title)
         
         if self._pending_files:
             # Emit signal with preset and files

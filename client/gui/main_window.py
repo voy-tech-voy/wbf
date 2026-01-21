@@ -23,6 +23,7 @@ from .command_panel import CommandPanel
 from .output_footer import OutputFooter
 from .theme_manager import ThemeManager
 from client.core.conversion_engine import ConversionEngine, ToolChecker
+from client.gui.custom_widgets import PresetStatusButton
 from client.utils.trial_manager import TrialManager
 from client.utils.font_manager import AppFonts, FONT_FAMILY_APP_NAME
 from client.utils.resource_path import get_app_icon_path, get_resource_path
@@ -57,8 +58,8 @@ class EventDebugFilter(QObject):
                 top_level = obj.window()
             
             preset_mode = "OFF"
-            if top_level and hasattr(top_level, 'command_panel') and hasattr(top_level.command_panel, 'preset_status_btn'):
-                if top_level.command_panel.preset_status_btn._is_active:
+            if top_level and hasattr(top_level, 'drag_drop_area') and hasattr(top_level.drag_drop_area, 'preset_status_btn'):
+                if top_level.drag_drop_area.preset_status_btn._is_active:
                     preset_mode = "ON"
             
             # --- 2. DETECT LAB CLICK ---
@@ -645,7 +646,7 @@ class MainWindow(QMainWindow):
         # Connect command panel signals
         self.command_panel.conversion_requested.connect(self.start_conversion)
         self.command_panel.stop_conversion_requested.connect(self.stop_conversion)
-        self.command_panel.preset_btn_clicked.connect(self.drag_drop_area.show_preset_view)
+        self.command_panel.global_mode_changed.connect(self.on_mode_changed)
         
     def on_files_added(self, files):
         """Handle files added to drag-drop area"""
@@ -1452,8 +1453,9 @@ class MainWindow(QMainWindow):
         # TODO: Implement full parameter mapping
         
         # 3. Update UI to reflect Active Preset State
-        if hasattr(self.command_panel, 'preset_status_btn'):
-            self.command_panel.preset_status_btn.set_active(True, preset.title)
+        # 3. Update UI to reflect Active Preset State
+        if hasattr(self.drag_drop_area, 'set_preset_active'):
+             self.drag_drop_area.set_preset_active(True, preset.title)
             
         if hasattr(self.command_panel, 'lab_btn'):
             # Set Lab button to ghost (inactive) since Preset is active
@@ -1462,3 +1464,9 @@ class MainWindow(QMainWindow):
             self.command_panel.lab_btn.set_main_icon("client/assets/icons/lab_icon.svg")
             
         self.update_status(f"Applied Preset: {preset.title}")
+
+    def on_mode_changed(self, mode):
+        """Handle global mode change (e.g. switching to Manual)"""
+        # If switching away from Presets (e.g. to Manual or Max Size), reset the preset button
+        if mode != "Presets" and hasattr(self.drag_drop_area, 'set_preset_active'):
+            self.drag_drop_area.set_preset_active(False)

@@ -341,6 +341,24 @@ class AnimatedSideModeButton(QPushButton):
         
         # Connect toggled signal to handle selection state change
         self.toggled.connect(self._handle_toggled)
+        self._force_hidden = False
+        
+    def set_force_hidden(self, hidden):
+        """Set whether the button should be forced into hidden state (offset 40)"""
+        if self._force_hidden == hidden:
+            return
+            
+        self._force_hidden = hidden
+        
+        # Calculate new target
+        if self._force_hidden:
+            target = 40 # Hide 90% behind edge
+        else:
+            target = 0 if self.isChecked() or self.underMouse() else 8
+            
+        self.animation.stop()
+        self.animation.setEndValue(target)
+        self.animation.start()
         
     @pyqtProperty(int)
     def pos_offset(self):
@@ -353,6 +371,9 @@ class AnimatedSideModeButton(QPushButton):
         
     def _handle_toggled(self, checked):
         """Update animation when selection state changes"""
+        if self._force_hidden:
+            return
+            
         # If checked, move to 0 (flush). If unchecked and not hovering, hide behind (8).
         target = 0 if checked or self.underMouse() else 8
         if target != self._offset:
@@ -362,13 +383,17 @@ class AnimatedSideModeButton(QPushButton):
             
     def enterEvent(self, event):
         """Slide out (to 0) when mouse enters"""
-        self.animation.stop()
-        self.animation.setEndValue(0)
-        self.animation.start()
+        if not self._force_hidden:
+            self.animation.stop()
+            self.animation.setEndValue(0)
+            self.animation.start()
         super().enterEvent(event)
         
     def leaveEvent(self, event):
         """Slide back behind folder when mouse leaves, unless selected"""
+        if self._force_hidden:
+            return
+            
         if not self.isChecked():
             self.animation.stop()
             self.animation.setEndValue(8)
@@ -379,7 +404,10 @@ class AnimatedSideModeButton(QPushButton):
         """Ensure correct initial position based on selected state"""
         super().showEvent(event)
         # Set initial offset immediately without animation
-        self._offset = 0 if self.isChecked() else 8
+        if self._force_hidden:
+            self._offset = 40
+        else:
+            self._offset = 0 if self.isChecked() else 8
         self.update()
 
     def paintEvent(self, event):
@@ -540,6 +568,14 @@ class ModeButtonsWidget(QWidget):
             self.setFixedHeight(42)
             self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     
+    def set_hidden_mode(self, hidden):
+        """Force buttons into hidden (shy) mode"""
+        if self.orientation == Qt.Orientation.Vertical:
+            btn_list = [self.max_size_btn, self.presets_btn, self.manual_btn]
+            for btn in btn_list:
+                if hasattr(btn, 'set_force_hidden'):
+                    btn.set_force_hidden(hidden)
+
     def _get_tinted_icon(self, icon_path, color):
         """Load SVG and apply tint color"""
         abs_path = get_resource_path(icon_path)
@@ -652,7 +688,8 @@ class SideButtonGroup(QWidget):
         
         # Create buttons from config
         for config in buttons_config:
-            btn = QPushButton()
+            # Use AnimatedSideModeButton for "shy" behavior and hiding support
+            btn = AnimatedSideModeButton()
             btn.setCheckable(True)
             btn.setFixedSize(QSize(44, 44))
             btn.setIconSize(QSize(24, 24))
@@ -688,6 +725,12 @@ class SideButtonGroup(QWidget):
         from client.utils.theme_utils import is_dark_mode
         self.update_theme(is_dark_mode())
     
+    def set_hidden_mode(self, hidden):
+        """Force all side buttons into hidden mode (offset 40px)"""
+        for btn in self.buttons.values():
+            if hasattr(btn, 'set_force_hidden'):
+                btn.set_force_hidden(hidden)
+
     def _get_tinted_icon(self, icon_path, color):
         """Create a tinted icon from the given path"""
         abs_path = get_resource_path(icon_path)
@@ -3097,6 +3140,7 @@ class MorphingButton(QPushButton):
     # Signals
     toggled_state = pyqtSignal(bool)
     expanded = pyqtSignal(bool)
+    styleChanged = pyqtSignal(bool)  # Emitted when solid/ghost style changes
     itemClicked = pyqtSignal(object)  # Emits item ID
     
     # Constants
@@ -3365,9 +3409,15 @@ class MorphingButton(QPushButton):
         op.setOpacity(0)
         
     def set_style_solid(self, is_solid):
-        self._is_solid_style = is_solid
-        self._update_main_icon()
-        self.update()
+        if self._is_solid_style != is_solid:
+            self._is_solid_style = is_solid
+            self._update_main_icon()
+            self.update()
+            self.styleChanged.emit(is_solid)
+            
+    @property
+    def is_solid(self):
+        return self._is_solid_style
         
     def flash_border(self):
         self._is_flashing = True
@@ -3488,7 +3538,7 @@ class PresetStatusButton(QWidget):
     # Constants
     MIN_WIDTH = 130  # Minimum to fit "PRESETS" text
     MAX_WIDTH = 280  # Max for longer preset names
-    PADDING = 40  # 20px left + 20px right for better spacing
+    PADDING = 60  # 30px left + 30px right for wider look
     
     def __init__(self, parent=None):
         super().__init__(parent)

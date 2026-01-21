@@ -60,7 +60,7 @@ class OutputFooter(QWidget):
         # Left side: Segmented toggle
         self.segment_control = SegmentedControl()
         self.segment_control.selectionChanged.connect(self._on_mode_changed)
-        self.segment_control.setMaximumWidth(350)
+        self.segment_control.setMaximumWidth(600) # Increased width to prevent clipping
         layout.addWidget(self.segment_control)
         
         # Tooltip for "Organized" mode
@@ -80,6 +80,9 @@ class OutputFooter(QWidget):
         self.start_btn.clicked.connect(self._on_start_clicked)
         self.start_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         layout.addWidget(self.start_btn)
+        
+        # Set default selection AFTER UI is fully built to avoid AttributeError
+        self.segment_control.set_selected("organized")
         
     def _on_mode_changed(self, mode):
         # Show tooltip for organized mode
