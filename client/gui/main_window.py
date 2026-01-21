@@ -58,8 +58,8 @@ class EventDebugFilter(QObject):
                 top_level = obj.window()
             
             preset_mode = "OFF"
-            if top_level and hasattr(top_level, 'drag_drop_area') and hasattr(top_level.drag_drop_area, 'preset_status_btn'):
-                if top_level.drag_drop_area.preset_status_btn._is_active:
+            if top_level and hasattr(top_level, 'preset_status_btn'):
+                if top_level.preset_status_btn._is_active:
                     preset_mode = "ON"
             
             # --- 2. DETECT LAB CLICK ---
@@ -241,6 +241,9 @@ class MainWindow(QMainWindow):
         content_layout.setSpacing(5)
         content_layout.setContentsMargins(5, 5, 5, 5)
         
+        # Create unified control bar (File Buttons | Preset | Lab)
+        self.create_control_bar(content_layout)
+        
         # Create the middle section with splitter
         self.create_middle_section(content_layout)
         
@@ -260,6 +263,160 @@ class MainWindow(QMainWindow):
         
         # Process events to keep splash screen animated
         QApplication.processEvents()
+    
+    def create_control_bar(self, parent_layout):
+        """Create the unified control bar with file buttons, preset, and lab button"""
+        from PyQt6.QtCore import QSize
+        from PyQt6.QtGui import QCursor
+        from client.gui.drag_drop_area import HoverIconButton
+        from client.gui.custom_widgets import PresetStatusButton, MorphingButton
+        
+        control_bar = QWidget()
+        control_bar.setFixedHeight(64)  # Match button heights + padding
+        control_bar.setObjectName("ControlBar")
+        
+        control_layout = QHBoxLayout(control_bar)
+        control_layout.setContentsMargins(16, 8, 16, 8)
+        control_layout.setSpacing(8)
+        
+        # --- Left Section: File Buttons ---
+        icon_size = QSize(28, 28)
+        
+        self.add_files_btn = HoverIconButton("addfile.svg", icon_size)
+        self.add_files_btn.setFixedSize(48, 48)
+        self.add_files_btn.setToolTip("Add Files")
+        self.add_files_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        
+        self.add_folder_btn = HoverIconButton("addfolder.svg", icon_size)
+        self.add_folder_btn.setFixedSize(48, 48)
+        self.add_folder_btn.setToolTip("Add Folder")
+        self.add_folder_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        
+        self.clear_files_btn = HoverIconButton("removefile.svg", icon_size)
+        self.clear_files_btn.setFixedSize(48, 48)
+        self.clear_files_btn.setToolTip("Clear All")
+        self.clear_files_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        
+        # Apply Styles
+        # Standard Action Button Style
+        base_style = """
+            QPushButton {
+                background-color: rgba(255, 255, 255, 5);
+                border: 1px solid rgba(255, 255, 255, 20);
+                border-radius: 8px;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 10);
+                border: 1px solid rgba(255, 255, 255, 50);
+            }
+            QPushButton:pressed {
+                background-color: rgba(0, 0, 0, 50);
+            }
+        """
+        self.add_files_btn.setStyleSheet(base_style)
+        self.add_folder_btn.setStyleSheet(base_style)
+        
+        # Clear Button Style (Red Outline)
+        # Clear Button Style (Red Outline ONLY on Hover)
+        clear_style = """
+            QPushButton {
+                background-color: rgba(255, 255, 255, 5);
+                border: 1px solid rgba(255, 255, 255, 20);
+                border-radius: 8px;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 50, 50, 15);
+                border: 1px solid #FF4444;
+            }
+            QPushButton:pressed {
+                background-color: rgba(50, 0, 0, 50);
+            }
+        """
+        self.clear_files_btn.setStyleSheet(clear_style)
+        
+        control_layout.addWidget(self.add_files_btn)
+        control_layout.addWidget(self.add_folder_btn)
+        control_layout.addWidget(self.clear_files_btn)
+        
+        # --- Spacer (Left) ---
+        control_layout.addStretch()
+        
+        # --- Center: Preset Button ---
+        self.preset_status_btn = PresetStatusButton()
+        self.preset_status_btn.clicked.connect(self._on_preset_btn_clicked)
+        control_layout.addWidget(self.preset_status_btn)
+        
+        # --- Spacer (Right) ---
+        control_layout.addStretch()
+        
+        # --- Right: Lab Button (in fixed-width container to prevent layout shift) ---
+        lab_container = QWidget()
+        lab_container.setFixedWidth(220)  # Slightly larger than EXPANDED_WIDTH to prevent clipping
+        lab_container_layout = QHBoxLayout(lab_container)
+        lab_container_layout.setContentsMargins(0, 0, 0, 0)
+        lab_container_layout.setSpacing(0)
+        lab_container_layout.addStretch()  # Push lab button to right edge
+        
+        self.lab_btn = MorphingButton(main_icon_path="client/assets/icons/lab_icon.svg")
+        self.lab_btn.add_menu_item(0, "client/assets/icons/pic_icon2.svg", "Image Conversion")
+        self.lab_btn.add_menu_item(1, "client/assets/icons/vid_icon2.svg", "Video Conversion")
+        self.lab_btn.add_menu_item(2, "client/assets/icons/loop_icon3.svg", "Loop Conversion")
+        self.lab_btn.itemClicked.connect(self._on_lab_item_clicked)
+        lab_container_layout.addWidget(self.lab_btn)
+        
+        control_layout.addWidget(lab_container)
+        
+        parent_layout.addWidget(control_bar)
+        
+        # Store reference
+        self.control_bar = control_bar
+    
+    def _on_preset_btn_clicked(self):
+        """Handle preset button click - show preset overlay"""
+        # 1. Hide Command Panel
+        self.toggle_command_panel(False)
+        
+        # 2. Deactivate Lab Button (Ghost style)
+        if hasattr(self, 'lab_btn'):
+            self.lab_btn.set_style_solid(False)
+            self.lab_btn.set_main_icon("client/assets/icons/lab_icon.svg")
+            
+        # 3. Notify CommandPanel state
+        if hasattr(self, 'command_panel'):
+            self.command_panel.set_lab_mode_active(False)
+            self.command_panel.set_top_bar_preset_mode(True)
+            
+        # 4. Show Overlay
+        if hasattr(self, 'drag_drop_area'):
+            self.drag_drop_area.show_preset_view()
+    
+    def _on_lab_item_clicked(self, item_id):
+        """Handle lab button menu item click"""
+        type_map = {0: "IMAGE", 1: "VIDEO", 2: "LOOP"}
+        print(f"[DEBUG_MAIN] Lab item clicked. ID={item_id} ({type_map.get(item_id, 'UNKNOWN')})")
+        
+        # Icon paths matching tab order
+        icons = [
+            "client/assets/icons/pic_icon2.svg",
+            "client/assets/icons/vid_icon2.svg",
+            "client/assets/icons/loop_icon3.svg"
+        ]
+        
+        # Update lab button immediately
+        if 0 <= item_id < len(icons):
+            self.lab_btn.set_main_icon(icons[item_id])
+            self.lab_btn.set_style_solid(True)
+        
+        # Notify CommandPanel that Lab mode is active
+        if hasattr(self, 'command_panel'):
+            self.command_panel.set_lab_mode_active(True)
+        
+        # Forward to command panel for tab switching
+        if hasattr(self, 'command_panel'):
+            self.command_panel._on_tab_btn_clicked(item_id)
+            
+        # Show Command Panel with animation
+        self.toggle_command_panel(True)
         
     def create_title_bar(self, parent_layout):
         """Create custom title bar with logo, theme toggle, menu, and window controls"""
@@ -440,16 +597,75 @@ class MainWindow(QMainWindow):
         right_layout.setSpacing(0)
         
         self.command_panel = CommandPanel()
+        self.command_panel.setMinimumWidth(0) # Ensure it can animate from 0
         right_layout.addWidget(self.command_panel)
+        
+        # Store right frame reference for toggling
+        self.right_frame = right_frame
+        self.right_frame.setMinimumWidth(0) # Ensure frame can animate from 0
+        self.right_frame.setVisible(False)  # Hidden on init
         
         # Add panels to splitter
         splitter.addWidget(left_frame)
         splitter.addWidget(right_frame)
         
-        # Set initial sizes (60% left, 40% right)
-        splitter.setSizes([720, 480])
+        # Set initial sizes (100% left, 0% right)
+        # Note: Since right_frame is hidden, sizes might be ignored, but good to set
+        splitter.setSizes([1200, 0])
         
         parent_layout.addWidget(splitter)
+
+    def toggle_command_panel(self, show):
+        """Animate Command Panel sliding in/out (Linear, 750ms)"""
+        if show == self.right_frame.isVisible():
+            return
+            
+        # Import moved here to keep global namespace clean or if not imported top-level
+        from PyQt6.QtCore import QVariantAnimation, QEasingCurve
+        
+        # Stop any running animation
+        if hasattr(self, 'anim') and self.anim.state() == QVariantAnimation.State.Running:
+            self.anim.stop()
+        
+        # Get dimensions
+        start_sizes = self.splitter.sizes()
+        total_width = sum(start_sizes)
+        
+        if show:
+            # Prepare to show: Set Visible and Force 0 width to prevent jump
+            self.right_frame.setVisible(True)
+            current_left = total_width
+            self.splitter.setSizes([total_width, 0])
+            
+            # Calculate Target (Left shrinks to make room for Right)
+            target_right = int(total_width * 0.4)
+            target_left = total_width - target_right
+            
+            start_val = 0
+            end_val = target_left
+        else:
+            # Prepare to hide: Left grows to take full width
+            start_val = start_sizes[0]
+            end_val = total_width
+            
+        # Setup Animation
+        self.anim = QVariantAnimation()
+        self.anim.setDuration(750)
+        self.anim.setEasingCurve(QEasingCurve.Type.Linear) # Requested: Simple Linear
+        
+        self.anim.setStartValue(start_val)
+        self.anim.setEndValue(end_val)
+        
+        def update_splitter(left_w):
+            right_w = total_width - left_w
+            self.splitter.setSizes([left_w, right_w])
+            
+        self.anim.valueChanged.connect(update_splitter)
+        
+        if not show:
+            self.anim.finished.connect(lambda: self.right_frame.setVisible(False))
+            
+        self.anim.start()
         
     def create_bottom_section(self, parent_layout):
         """Create the bottom section with status and progress"""
@@ -647,6 +863,18 @@ class MainWindow(QMainWindow):
         self.command_panel.conversion_requested.connect(self.start_conversion)
         self.command_panel.stop_conversion_requested.connect(self.stop_conversion)
         self.command_panel.global_mode_changed.connect(self.on_mode_changed)
+        self.command_panel.lab_state_changed.connect(self._on_lab_state_changed)
+        
+        # Connect unified control bar buttons to drag-drop area
+        self.add_files_btn.clicked.connect(self.drag_drop_area.add_files_dialog)
+        self.add_folder_btn.clicked.connect(self.drag_drop_area.add_folder_dialog)
+        self.clear_files_btn.clicked.connect(self.drag_drop_area.clear_files)
+    
+    def _on_lab_state_changed(self, icon_path, is_solid):
+        """Handle lab button state change from CommandPanel"""
+        if hasattr(self, 'lab_btn'):
+            self.lab_btn.set_main_icon(icon_path)
+            self.lab_btn.set_style_solid(is_solid)
         
     def on_files_added(self, files):
         """Handle files added to drag-drop area"""
@@ -1453,20 +1681,31 @@ class MainWindow(QMainWindow):
         # TODO: Implement full parameter mapping
         
         # 3. Update UI to reflect Active Preset State
-        # 3. Update UI to reflect Active Preset State
-        if hasattr(self.drag_drop_area, 'set_preset_active'):
-             self.drag_drop_area.set_preset_active(True, preset.title)
+        if hasattr(self, 'preset_status_btn'):
+            self.preset_status_btn.set_active(True, preset.title)
             
-        if hasattr(self.command_panel, 'lab_btn'):
+        if hasattr(self, 'lab_btn'):
             # Set Lab button to ghost (inactive) since Preset is active
-            self.command_panel.lab_btn.set_style_solid(False)
+            self.lab_btn.set_style_solid(False)
             # Reset icon to default Lab icon to indicate "Preset Mode" / Neutral state
-            self.command_panel.lab_btn.set_main_icon("client/assets/icons/lab_icon.svg")
+            self.lab_btn.set_main_icon("client/assets/icons/lab_icon.svg")
+        
+        # 4. Notify CommandPanel that Lab mode is inactive and top bar preset mode is active
+        if hasattr(self, 'command_panel'):
+            self.command_panel.set_lab_mode_active(False)
+            self.command_panel.set_top_bar_preset_mode(True)
             
         self.update_status(f"Applied Preset: {preset.title}")
+        
+        # Hide Command Panel with animation (Preset mode is simple drag & drop)
+        self.toggle_command_panel(False)
 
     def on_mode_changed(self, mode):
         """Handle global mode change (e.g. switching to Manual)"""
         # If switching away from Presets (e.g. to Manual or Max Size), reset the preset button
-        if mode != "Presets" and hasattr(self.drag_drop_area, 'set_preset_active'):
-            self.drag_drop_area.set_preset_active(False)
+        if mode != "Presets" and hasattr(self, 'preset_status_btn'):
+            self.preset_status_btn.set_active(False)
+            
+        # Notify CommandPanel that top bar preset mode is inactive
+        if mode != "Presets" and hasattr(self, 'command_panel'):
+            self.command_panel.set_top_bar_preset_mode(False)

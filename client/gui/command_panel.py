@@ -393,12 +393,15 @@ class CommandPanel(QWidget):
     conversion_requested = pyqtSignal(dict)  # Signal with conversion parameters
     stop_conversion_requested = pyqtSignal()  # Signal to stop conversion
     global_mode_changed = pyqtSignal(str) # Signal when global mode changes
+    lab_state_changed = pyqtSignal(str, bool) # Signal: (icon_path, is_solid) for lab button updates
     
     def __init__(self):
         super().__init__()
         self.is_dark_mode = is_dark_mode()
         self._gpu_detector = None  # Lazy-loaded GPU detector
         self._gpu_available_codecs = set()  # Codecs with GPU acceleration
+        self._top_bar_preset_active = False  # Track if top bar preset mode is ON
+        self._lab_mode_active = False  # Track if Lab mode is ON (Lab button active)
         self.setup_ui()
         # NOTE: Convert button initialization moved to OutputFooter
         # Initialize GPU detection after UI is ready
@@ -628,14 +631,8 @@ class CommandPanel(QWidget):
         ]
         
         if 0 <= current_index < len(icons) and activate_lab:
-            # Update Lab Button to show selected mode
-            self.lab_btn.set_main_icon(icons[current_index])
-            
-            # Set State: Lab Active (Manual Mode)
-            self.lab_btn.set_style_solid(True)
-            
-            # Set State: Lab Active (Manual Mode)
-            self.lab_btn.set_style_solid(True)
+            # Emit signal to update Lab Button (now in MainWindow)
+            self.lab_state_changed.emit(icons[current_index], True)
 
 
     def _on_tab_btn_clicked(self, btn_id):
@@ -757,9 +754,7 @@ class CommandPanel(QWidget):
             self.btn_tab_video.setStyleSheet(tab_btn_style)
             self.btn_tab_loop.setStyleSheet(tab_btn_style)
         
-        # Update lab button (morphing button)
-        if hasattr(self, 'lab_btn'):
-            self.lab_btn.update_theme(is_dark)
+        # Note: lab_btn has been moved to MainWindow's control bar
         
         # Update all MorphingButton instances
         morphing_buttons = self.findChildren(MorphingButton)
@@ -816,7 +811,9 @@ class CommandPanel(QWidget):
         
         # 1. Sidebar Top (Mode Buttons + Stack)
         sidebar_top = QWidget()
-        sidebar_top.setFixedWidth(44) # Match Mode Buttons width
+        # Allow shrinking for animation: Min 0, Max 44
+        sidebar_top.setMinimumWidth(0)
+        sidebar_top.setMaximumWidth(44)
         sb_top_layout = QVBoxLayout(sidebar_top)
         sb_top_layout.setContentsMargins(0, 100, 0, 0) # 100px top margin
         sb_top_layout.setSpacing(12)
@@ -840,43 +837,13 @@ class CommandPanel(QWidget):
         
         row1_layout.addWidget(sidebar_top)
         
-        # 2. Right Content Area (Tab Buttons + Pages)
+        # 2. Right Content Area (Tab Pages only - Lab Button moved to MainWindow)
         right_content_widget = QWidget()
         right_content_layout = QVBoxLayout(right_content_widget)
         right_content_layout.setContentsMargins(0, 0, 0, 0)
         right_content_layout.setSpacing(0)
         
-        # Top Bar Container (Presets Button + Lab Morph Button)
-        top_bar_widget = QWidget()
-        top_bar_widget.setFixedHeight(64) 
-        top_bar_layout = QHBoxLayout(top_bar_widget)
-        top_bar_layout.setContentsMargins(0, 8, 16, 8)
-        top_bar_layout.setSpacing(0)
-        
-        # Spacer (Left)
-        top_bar_layout.addStretch()
-
-        # Spacer
-        top_bar_layout.addStretch()
-        
-        # 2. Lab Button (Right)
-        # Using Vials icon as default
-        self.lab_btn = MorphingButton(main_icon_path="client/assets/icons/lab_icon.svg")
-        
-        # Add menu items (ID 0=Image, 1=Video, 2=Loop)
-        self.lab_btn.add_menu_item(0, "client/assets/icons/pic_icon2.svg", "Image Conversion")
-        self.lab_btn.add_menu_item(1, "client/assets/icons/vid_icon2.svg", "Video Conversion")
-        self.lab_btn.add_menu_item(2, "client/assets/icons/loop_icon3.svg", "Loop Conversion")
-        
-        self.lab_btn.itemClicked.connect(self._on_tab_btn_clicked)
-        # Note: preset button overlap logic removed (button moved to main window)
-        
-        # Add Lab Button to layout
-        top_bar_layout.addWidget(self.lab_btn)
-        
-        # Add Top Bar to Main Layout
-        right_content_layout.addWidget(top_bar_widget)
-
+        # Note: Top bar with Lab Button has been moved to MainWindow's control bar
         
         # Pages Container (QTabWidget)
         self.tabs = QTabWidget()
@@ -945,12 +912,9 @@ class CommandPanel(QWidget):
         
         self.tabs.currentChanged.connect(self._on_tab_changed)
         
-        # Initialize buttons to OFF state (Lab button OFF for default state)
-        # Note: preset_status_btn is now in DragDropArea
-        if hasattr(self, 'lab_btn'):
-            self.lab_btn.set_style_solid(False)
-            self.lab_btn.set_main_icon("client/assets/icons/lab_icon.svg")
-            self.lab_btn.styleChanged.connect(self._on_lab_style_changed)
+        # Initialize buttons to OFF state
+        # Note: lab_btn and preset_status_btn are now in MainWindow's control bar
+        # Initial state is set by MainWindow
         
         
 
@@ -966,15 +930,14 @@ class CommandPanel(QWidget):
         
         # Force initial UI visibility update
         # This ensures side buttons are hidden if Lab Mode is OFF (default)
-        if hasattr(self, 'lab_btn') and not self.lab_btn.is_solid:
-             initial_mode = "Max Size"
-             # If we have mode buttons, check what they say
-             if hasattr(self, 'mode_buttons'):
-                 try:
-                    initial_mode = self.mode_buttons.get_mode()
-                 except: pass
-                 
-             self._on_global_mode_changed(initial_mode)
+        initial_mode = "Max Size"
+        # If we have mode buttons, check what they say
+        if hasattr(self, 'mode_buttons'):
+            try:
+                initial_mode = self.mode_buttons.get_mode()
+            except: pass
+             
+        self._on_global_mode_changed(initial_mode)
         
     def _install_input_field_filters(self):
         """Install event filter on all input fields to handle Enter key"""
@@ -1085,18 +1048,16 @@ class CommandPanel(QWidget):
             self.on_loop_size_mode_changed(mode)
             
         # Side Buttons visibility:
-        # Hide side buttons (shy mode) if Presets Mode (Lab Off) OR if Lab Button is Inactive
-        is_presets = (mode == "Presets")
-        is_lab_active = self.lab_btn.is_solid if hasattr(self, 'lab_btn') else False
+        # User Rule: Show ONLY when Lab Mode is ON (Lab button active) AND Top Bar Preset Mode is OFF
+        should_hide_side = (not self._lab_mode_active) or self._top_bar_preset_active
         
-        # Logic: If Lab is Inactive, we are in "Default/Hidden" state -> Hide side buttons
-        # If Presets Mode, we are in Presets state -> Hide side buttons
-        should_hide_side = is_presets or (not is_lab_active)
+        # User Rule: Colored ONLY in Lab Mode (Manual). Uncolored in Max Size.
+        should_be_colored = (mode == "Manual")
         
         if hasattr(self, 'side_buttons_stack'):
             self.side_buttons_stack.setVisible(True)
             
-            # Apply hidden mode to side buttons
+            # Apply hidden mode and color mode to side buttons
             # We apply to all potential groups to ensure consistent state
             groups = []
             if hasattr(self, 'image_side_buttons'): groups.append(self.image_side_buttons)
@@ -1105,11 +1066,29 @@ class CommandPanel(QWidget):
             
             for group in groups:
                  if hasattr(group, 'set_hidden_mode'):
-                     group.set_hidden_mode(should_hide_side)
+                     group.set_hidden_mode(should_hide_side, colored=should_be_colored)
                      
         # Update Main Mode Buttons (Max Size, Presets, Manual)
         if hasattr(self, 'mode_buttons'):
             self.mode_buttons.set_hidden_mode(should_hide_side)
+    
+    def set_lab_mode_active(self, active):
+        """Set whether Lab mode is active (Lab button items selected)"""
+        if self._lab_mode_active != active:
+            self._lab_mode_active = active
+            # Trigger visibility update
+            current_tab = self.tabs.currentIndex()
+            mode = self.tab_modes.get(current_tab, "Max Size")
+            self._on_global_mode_changed(mode)
+    
+    def set_top_bar_preset_mode(self, active):
+        """Set whether the top bar preset mode is active (controls side button visibility)"""
+        if self._top_bar_preset_active != active:
+            self._top_bar_preset_active = active
+            # Trigger visibility update
+            current_tab = self.tabs.currentIndex()
+            mode = self.tab_modes.get(current_tab, "Max Size")
+            self._on_global_mode_changed(mode)
 
     def _on_tab_changed(self, index):
         """Sync global mode buttons when tab changes"""
@@ -2781,19 +2760,23 @@ class CommandPanel(QWidget):
 
     def on_image_size_mode_changed(self, mode):
         """Handle Image size mode change between Manual, Max Size, and Presets"""
-        if mode not in ["Max Size", "Manual", "Presets"]:
+        if mode not in ["Max Size", "Manual", "Presets", "Lab_presets"]:
             return
             
         is_max_size = (mode == "Max Size")
         is_manual = (mode == "Manual")
-        is_presets = (mode == "Presets")
+        is_presets = (mode == "Presets" or mode == "Lab_presets")
         
         # Override visibility if Lab inactive (hide manual controls)
         if hasattr(self, 'lab_btn') and not self.lab_btn.is_solid and not is_presets:
              is_max_size = False
              is_manual = False
         
-        self.image_size_mode_value = mode.lower().replace(" ", "_")
+        # Normalize internal value
+        if is_presets:
+            self.image_size_mode_value = "presets"
+        else:
+            self.image_size_mode_value = mode.lower().replace(" ", "_")
         
         # Max Size visibility
         self.image_max_size_label.setVisible(is_max_size)
@@ -2823,19 +2806,23 @@ class CommandPanel(QWidget):
 
     def on_video_size_mode_changed(self, mode):
         """Handle Video size mode change between Manual, Max Size, and Presets"""
-        if mode not in ["Max Size", "Manual", "Presets"]:
+        if mode not in ["Max Size", "Manual", "Presets", "Lab_presets"]:
             return
             
         is_max_size = (mode == "Max Size")
         is_manual = (mode == "Manual")
-        is_presets = (mode == "Presets")
+        is_presets = (mode == "Presets" or mode == "Lab_presets")
         
         # Override visibility if Lab inactive (hide manual controls)
         if hasattr(self, 'lab_btn') and not self.lab_btn.is_solid and not is_presets:
              is_max_size = False
              is_manual = False
         
-        self.video_size_mode_value = mode.lower().replace(" ", "_")
+        # Normalize internal value
+        if is_presets:
+            self.video_size_mode_value = "presets"
+        else:
+            self.video_size_mode_value = mode.lower().replace(" ", "_")
         
         # Max Size visibility
         self.video_max_size_label.setVisible(is_max_size)
@@ -2865,19 +2852,23 @@ class CommandPanel(QWidget):
 
     def on_loop_size_mode_changed(self, mode):
         """Handle Loop size mode change (GIF/WebM)"""
-        if mode not in ["Max Size", "Manual", "Presets"]:
+        if mode not in ["Max Size", "Manual", "Presets", "Lab_presets"]:
             return
             
         is_max_size = (mode == "Max Size")
         is_manual = (mode == "Manual")
-        is_presets = (mode == "Presets")
+        is_presets = (mode == "Presets" or mode == "Lab_presets")
         
         # Override visibility if Lab inactive (hide manual controls)
         if hasattr(self, 'lab_btn') and not self.lab_btn.is_solid and not is_presets:
              is_max_size = False
              is_manual = False
         
-        self.loop_size_mode_value = mode.lower().replace(" ", "_")
+        # Normalize internal value
+        if is_presets:
+            self.loop_size_mode_value = "presets"
+        else:
+            self.loop_size_mode_value = mode.lower().replace(" ", "_")
         
         # Determine format for manual visibility
         format_name = self.loop_format.currentText()

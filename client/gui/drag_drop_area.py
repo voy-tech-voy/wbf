@@ -420,45 +420,10 @@ class DragDropArea(QWidget):
     def setup_ui(self):
         """Setup the drag and drop interface"""
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         
-        # Control buttons at top
-        button_layout = QHBoxLayout()
-        icon_size = QSize(28, 28)  # 28px icon in 48px square
-        
-        self.add_files_btn = HoverIconButton("addfile.svg", icon_size)
-        self.add_files_btn.setFixedSize(48, 48)
-        self.add_files_btn.setToolTip("Add Files")
-        self.add_files_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.add_files_btn.clicked.connect(self.add_files_dialog)
-        
-        self.add_folder_btn = HoverIconButton("addfolder.svg", icon_size)
-        self.add_folder_btn.setFixedSize(48, 48)
-        self.add_folder_btn.setToolTip("Add Folder")
-        self.add_folder_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.add_folder_btn.clicked.connect(self.add_folder_dialog)
-        
-        self.clear_files_btn = HoverIconButton("removefile.svg", icon_size)
-        self.clear_files_btn.setFixedSize(48, 48)
-        self.clear_files_btn.setToolTip("Clear All")
-        self.clear_files_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.clear_files_btn.clicked.connect(self.clear_files)
-        
-        # Apply ActionSquare object name for identification
-        self.add_files_btn.setObjectName("ActionSquare")
-        self.add_folder_btn.setObjectName("ActionSquare")
-        self.clear_files_btn.setObjectName("ActionSquare")
-        
-        button_layout.addWidget(self.add_files_btn)
-        button_layout.addWidget(self.add_folder_btn)
-        button_layout.addWidget(self.clear_files_btn)
-        button_layout.addStretch()
-        
-        # Presets Button (Right Aligned)
-        self.preset_status_btn = PresetStatusButton()
-        self.preset_status_btn.clicked.connect(self.show_preset_view)
-        button_layout.addWidget(self.preset_status_btn)
-        
-        layout.addLayout(button_layout)
+        # Note: File buttons and Preset button have been moved to MainWindow control bar
         
         # Combined file list widget that serves as both drop area and display
         self.file_list_widget = QListWidget()
@@ -514,8 +479,7 @@ class DragDropArea(QWidget):
         """Handle preset card click"""
         self.preset_overlay.hide_animated()
         
-        # Update button state immediately (don't wait for signal round-trip)
-        self.set_preset_active(True, preset_obj.title)
+        # Note: Preset button is now in MainWindow, state update handled via preset_applied signal
         
         if self._pending_files:
             # Emit signal with preset and files
@@ -872,42 +836,9 @@ class DragDropArea(QWidget):
         self.reset_list_style()
         self.update_placeholder_text()
         
-        # Apply specific styling to the buttons (compact icon buttons)
-        if self.theme_manager:
-            current_theme = self.theme_manager.get_current_theme()
-            is_dark = current_theme == 'dark'
-            
-            # Update icons for theme and hover behavior
-            self.add_files_btn.set_dark_mode(is_dark)
-            self.add_folder_btn.set_dark_mode(is_dark)
-            self.clear_files_btn.set_dark_mode(is_dark)
-            
-            # Apply V4 Action Button Styling
-            self._update_action_buttons_style(is_dark)
-
-    def _update_action_buttons_style(self, is_dark):
-        """Apply ActionSquare styling from theme variables"""
-        surface_element = get_color("surface_element", is_dark)
-        border_dim = get_color("border_dim", is_dark)
-        border_focus = get_color("border_focus", is_dark)
-        
-        # Spec: Rounded square, surface_element bg, border_dim border
-        style = f"""
-            QPushButton {{
-                background-color: {surface_element};
-                border: 1px solid {border_dim};
-                border-radius: 8px;
-            }}
-            QPushButton:hover {{
-                background-color: {border_dim};
-                border-color: {border_focus};
-            }}
-            QPushButton:pressed {{
-                background-color: #000000;
-            }}
-        """
-        for btn in [self.add_files_btn, self.add_folder_btn, self.clear_files_btn]:
-            btn.setStyleSheet(style)
+        # Note: File buttons and Preset button have been moved to MainWindow's control bar
+        # Theme updates for those buttons are handled by MainWindow
+        pass
         
     def add_files_dialog(self):
         """Open file dialog to add files"""

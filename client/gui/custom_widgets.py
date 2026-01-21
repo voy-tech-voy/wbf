@@ -502,7 +502,7 @@ class ModeButtonsWidget(QWidget):
         self.presets_btn.setIcon(QIcon(get_resource_path("client/assets/icons/presets.svg")))
         self.presets_btn.setIconSize(icon_size)
         self.presets_btn.setCheckable(True)
-        self.presets_btn.setToolTip("Presets: Select from social media and common aspect ratio presets")
+        self.presets_btn.setToolTip("Lab Presets: Select from social media and common aspect ratio presets")
         if button_size:
             self.presets_btn.setFixedSize(button_size)
         else:
@@ -635,18 +635,18 @@ class ModeButtonsWidget(QWidget):
         self.manual_btn.setStyleSheet(button_style)
     
     def get_mode(self):
-        """Get current mode: 'Max Size', 'Presets', or 'Manual'"""
+        """Get current mode: 'Max Size', 'Lab_presets', or 'Manual'"""
         if self.max_size_btn.isChecked():
             return "Max Size"
         elif self.presets_btn.isChecked():
-            return "Presets"
+            return "Lab_presets"
         return "Manual"
     
     def set_mode(self, mode):
         """Set the mode programmatically"""
         if mode == "Max Size":
             self.max_size_btn.setChecked(True)
-        elif mode == "Presets":
+        elif mode == "Lab_presets" or mode == "Presets":
             self.presets_btn.setChecked(True)
         else:
             self.manual_btn.setChecked(True)
@@ -725,11 +725,48 @@ class SideButtonGroup(QWidget):
         from client.utils.theme_utils import is_dark_mode
         self.update_theme(is_dark_mode())
     
-    def set_hidden_mode(self, hidden):
-        """Force all side buttons into hidden mode (offset 40px)"""
+    def set_hidden_mode(self, hidden, colored=True):
+        """
+        Force all side buttons into hidden mode (offset 40px).
+        visible: if True, buttons are hidden (shy).
+        colored: if True, buttons use vibrant colors. If False, grayscale.
+        """
         for btn in self.buttons.values():
             if hasattr(btn, 'set_force_hidden'):
                 btn.set_force_hidden(hidden)
+        
+        # Update button styles based on state
+        from client.utils.theme_utils import is_dark_mode
+        is_dark = is_dark_mode()
+        
+        if is_dark:
+            bg_hover = "rgba(255, 255, 255, 0.1)"
+            border_color = "#555555"
+        else:
+            bg_hover = "rgba(0, 0, 0, 0.05)"
+            border_color = "#cccccc"
+        
+        if not colored:
+            # Grayscale / No Color style
+            button_style = (
+                f"QPushButton {{ padding: 6px; border-top-left-radius: 8px; border-bottom-left-radius: 8px; "
+                f"border-top-right-radius: 0px; border-bottom-right-radius: 0px; "
+                f"border: 1px solid {border_color}; border-right: none; background-color: transparent; }}"
+                f"QPushButton:hover {{ background-color: {bg_hover}; }}"
+                "QPushButton:checked { background-color: rgba(128, 128, 128, 0.2); color: #888888; border-color: #666666; }"
+            )
+        else:
+            # Vibrant Colored style
+            button_style = (
+                f"QPushButton {{ padding: 6px; border-top-left-radius: 8px; border-bottom-left-radius: 8px; "
+                f"border-top-right-radius: 0px; border-bottom-right-radius: 0px; "
+                f"border: 1px solid {border_color}; border-right: none; background-color: transparent; }}"
+                f"QPushButton:hover {{ background-color: {bg_hover}; }}"
+                "QPushButton:checked { background-color: #2196F3; color: white; border-color: #1e88e5; }"
+            )
+        
+        for btn in self.buttons.values():
+            btn.setStyleSheet(button_style)
 
     def _get_tinted_icon(self, icon_path, color):
         """Create a tinted icon from the given path"""
@@ -3560,6 +3597,14 @@ class PresetStatusButton(QWidget):
         self._width_anim.setDuration(400)
         self._width_anim.setEasingCurve(QEasingCurve.Type.OutElastic) # Spring effect
         
+        # Glow Effect (Premium "Turbo" Spec)
+        self._glow = QGraphicsDropShadowEffect(self)
+        self._glow.setBlurRadius(20) # Spec-compliant blur
+        self._glow.setColor(QColor(0, 224, 255, 100)) # Cyan/Turbo (Spec)
+        self._glow.setOffset(0, 0)
+        self._glow.setEnabled(False)
+        self.setGraphicsEffect(self._glow)
+        
         # Calculate proper initial width based on text
         self._calculate_and_set_initial_width()
 
@@ -3697,9 +3742,11 @@ class PresetStatusButton(QWidget):
             
     def enterEvent(self, event):
         self._is_hovered = True
+        self._glow.setEnabled(True)
         self.update()
             
     def leaveEvent(self, event):
         self._is_hovered = False
+        self._glow.setEnabled(False)
         self.update()
 
