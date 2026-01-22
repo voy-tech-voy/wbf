@@ -3570,11 +3570,71 @@ class SiriGlowOverlay(QWidget):
     Parented to top-level window to avoid clipping.
     """
     
+    # ========== GLOW EFFECT CONFIGURATION ==========
+    # Adjust these parameters to tune the glow appearance
+    
+    # Blob appearance
+    BLOB_RADIUS = 55                    # Size of each color blob
+    BLOB_OPACITY_CENTER = 200           # Opacity at blob center (0-255)
+    BLOB_OPACITY_MID = 120              # Opacity at blob mid-point (0-255)
+    BLOB_OPACITY_EDGE = 0               # Opacity at blob edge (0-255)
+    
+    # Ellipse orbit
+    ELLIPSE_SCALE_X = 0.5               # Horizontal ellipse size (0.0-1.0, fraction of overlay width)
+    ELLIPSE_SCALE_Y = 0.5               # Vertical ellipse size (0.0-1.0, fraction of overlay height)
+    
+    # Pulsation
+    PULSE_OPACITY_MIN = 0.8             # Minimum opacity during pulse (0.0-1.0)
+    PULSE_OPACITY_MAX = 1.0             # Maximum opacity during pulse (0.0-1.0)
+    
+    # Color shifting
+    HUE_SHIFT_DEGREES = 30              # Maximum hue shift in degrees (0-360)
+    HUE_SHIFT_PHASE_START = 0.25        # Phase where shift starts fading (0.0-1.0)
+    HUE_SHIFT_PHASE_END = 0.75          # Phase where shift starts rising (0.0-1.0)
+    
+    # Base colors (RGB tuples)
+    COLOR_BLUE = (30, 144, 255)         # Dodger Blue
+    COLOR_GREEN = (16, 185, 129)        # Emerald Green
+    COLOR_ORANGE = (255, 165, 0)        # Orange
+    
+    # Blob positioning (phase offsets, 0.0-1.0)
+    BLOB_PHASE_BLUE = 0.0               # Blue blob starting position
+    BLOB_PHASE_GREEN = 0.333            # Green blob starting position (120° ahead)
+    BLOB_PHASE_ORANGE = 0.667           # Orange blob starting position (240° ahead)
+    
+    # Noise Grain
+    NOISE_OPACITY = 35                  # Opacity of the noise grain (0-255)
+    NOISE_TILE_SIZE = 128               # Size of the noise texture tile
+    
+    # ===============================================
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self._pulse_phase = 0.0  # 0.0 to 1.0 for pulse cycle
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        
+        # Generate static noise texture for efficient grain effect
+        self._noise_pixmap = self._generate_noise_texture()
+        
+    def _generate_noise_texture(self):
+        """Generate a static noise texture to prevent banding"""
+        from PyQt6.QtGui import QImage, QPixmap
+        import random
+        
+        size = self.NOISE_TILE_SIZE
+        image = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(Qt.GlobalColor.transparent)
+        
+        # Generate random noise
+        for y in range(size):
+            for x in range(size):
+                # Random alpha for white pixel (0-255)
+                # Using only white noise for additive grain
+                alpha = random.randint(0, 50)
+                image.setPixelColor(x, y, QColor(255, 255, 255, alpha))
+        
+        return QPixmap.fromImage(image)
         
     def set_pulse_phase(self, phase):
         """Set the current pulse phase (0.0-1.0)"""
@@ -3582,7 +3642,7 @@ class SiriGlowOverlay(QWidget):
         self.update()
         
     def paintEvent(self, event):
-        from PyQt6.QtGui import QLinearGradient
+        from PyQt6.QtGui import QRadialGradient
         import math
         import colorsys
         
@@ -3591,57 +3651,78 @@ class SiriGlowOverlay(QWidget):
         
         w = self.width()
         h = self.height()
-        radius = h / 2  # Capsule shape
         
         phase = self._pulse_phase  # 0.0 to 1.0
         
         # Calculate shift strength based on pulse phase
-        # Strongest at 0.0 and 1.0, zero in the middle (0.25 to 0.75)
-        if phase < 0.25:
-            # Rising from start: fit(0.0, 0.25, 1.0, 0.0)
-            shift_strength = 1.0 - (phase / 0.25)
-        elif phase > 0.75:
-            # Rising toward end: fit(0.75, 1.0, 0.0, 1.0)
-            shift_strength = (phase - 0.75) / 0.25
+        if phase < self.HUE_SHIFT_PHASE_START:
+            shift_strength = 1.0 - (phase / self.HUE_SHIFT_PHASE_START)
+        elif phase > self.HUE_SHIFT_PHASE_END:
+            shift_strength = (phase - self.HUE_SHIFT_PHASE_END) / (1.0 - self.HUE_SHIFT_PHASE_END)
         else:
-            # Middle section: no shift
             shift_strength = 0.0
         
-        # Hue shift amount in degrees (0 to 30 based on strength)
-        hue_shift_deg = 30 * shift_strength
-        hue_shift = hue_shift_deg / 360.0  # Convert to 0-1 range for colorsys
-        
-        # Base colors (blue, green, orange) in RGB
-        base_blue = (30, 144, 255)      # Dodger Blue
-        base_green = (16, 185, 129)     # Emerald Green
-        base_orange = (255, 165, 0)     # Orange
+        # Hue shift amount
+        hue_shift_deg = self.HUE_SHIFT_DEGREES * shift_strength
+        hue_shift = hue_shift_deg / 360.0
         
         def shift_hue(rgb, shift):
-            """Shift the hue of an RGB color by 'shift' amount (0-1 = 0-360°)"""
             r, g, b = rgb[0]/255.0, rgb[1]/255.0, rgb[2]/255.0
             h, s, v = colorsys.rgb_to_hsv(r, g, b)
-            h = (h + shift) % 1.0  # Wrap around color wheel
+            h = (h + shift) % 1.0
             r, g, b = colorsys.hsv_to_rgb(h, s, v)
             return (int(r * 255), int(g * 255), int(b * 255))
         
-        # Apply hue shift to each color
-        blue = shift_hue(base_blue, hue_shift)
-        green = shift_hue(base_green, hue_shift)
-        orange = shift_hue(base_orange, hue_shift)
+        # Apply hue shift
+        blue = shift_hue(self.COLOR_BLUE, hue_shift)
+        green = shift_hue(self.COLOR_GREEN, hue_shift)
+        orange = shift_hue(self.COLOR_ORANGE, hue_shift)
         
-        # Opacity pulsation: gentle breathing (0.6 to 1.0)
-        pulse_opacity = 0.6 + 0.4 * (0.5 + 0.5 * math.sin(phase * 2 * math.pi))
+        # Opacity pulsation
+        pulse_range = self.PULSE_OPACITY_MAX - self.PULSE_OPACITY_MIN
+        pulse_opacity = self.PULSE_OPACITY_MIN + pulse_range * (0.5 + 0.5 * math.sin(phase * 2 * math.pi))
         painter.setOpacity(pulse_opacity)
         
-        # Create gradient with shifted colors
-        gradient = QLinearGradient(0, 0, w, h)
-        gradient.setColorAt(0.0, QColor(blue[0], blue[1], blue[2], 255))
-        gradient.setColorAt(0.5, QColor(green[0], green[1], green[2], 255))
-        gradient.setColorAt(1.0, QColor(orange[0], orange[1], orange[2], 255))
+        # Ellipse parameters (centered in the widget)
+        center_x = w / 2
+        center_y = h / 2
+        ellipse_rx = (w / 2) * self.ELLIPSE_SCALE_X
+        ellipse_ry = (h / 2) * self.ELLIPSE_SCALE_Y
+        
+        # Three blobs at different positions on the ellipse
+        blobs = [
+            {'color': blue, 'phase_offset': self.BLOB_PHASE_BLUE},
+            {'color': green, 'phase_offset': self.BLOB_PHASE_GREEN},
+            {'color': orange, 'phase_offset': self.BLOB_PHASE_ORANGE},
+        ]
         
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(gradient))
-        painter.drawRoundedRect(0, 0, w, h, radius, radius)
+        
+        for blob in blobs:
+            # Calculate position on ellipse
+            angle = (phase + blob['phase_offset']) * 2 * math.pi
+            blob_x = center_x + ellipse_rx * math.cos(angle)
+            blob_y = center_y + ellipse_ry * math.sin(angle)
+            
+            # Create radial gradient for soft blob
+            gradient = QRadialGradient(blob_x, blob_y, self.BLOB_RADIUS)
+            color = blob['color']
+            gradient.setColorAt(0.0, QColor(color[0], color[1], color[2], self.BLOB_OPACITY_CENTER))
+            gradient.setColorAt(0.5, QColor(color[0], color[1], color[2], self.BLOB_OPACITY_MID))
+            gradient.setColorAt(1.0, QColor(color[0], color[1], color[2], self.BLOB_OPACITY_EDGE))
+            
+            painter.setBrush(QBrush(gradient))
+            painter.drawEllipse(
+                int(blob_x - self.BLOB_RADIUS),
+                int(blob_y - self.BLOB_RADIUS),
+                self.BLOB_RADIUS * 2,
+                self.BLOB_RADIUS * 2
+            )
+            
+        # Draw noise overlay to prevent banding
+        # We tile the small noise texture across the widget
+        painter.setOpacity(self.NOISE_OPACITY / 255.0)
+        painter.drawTiledPixmap(self.rect(), self._noise_pixmap)
 
 
 class PresetStatusButton(QWidget):
@@ -3653,11 +3734,11 @@ class PresetStatusButton(QWidget):
     clicked = pyqtSignal()
     
     # Constants
-    MIN_WIDTH = 130  # Minimum to fit "PRESETS" text
-    MAX_WIDTH = 280  # Max for longer preset names
-    PADDING = 60  # 30px left + 30px right for wider look
-    GLOW_RADIUS = 40  # Blur radius for glow effect
-    GLOW_PADDING = 20  # Extra padding around button for glow spread
+    MIN_WIDTH = 150  # Minimum to fit "PRESETS" text
+    MAX_WIDTH = 250  # Max for longer preset names
+    PADDING = 30  # 30px left + 30px right for wider look
+    GLOW_RADIUS = 80  # Blur radius for glow effect
+    GLOW_PADDING = 10  # Extra padding around button for glow spread
     PULSE_DURATION_MS = 4000  # 4 second pulse cycle
     
     def __init__(self, parent=None):
