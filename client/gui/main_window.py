@@ -407,15 +407,30 @@ class MainWindow(QMainWindow):
             self.lab_btn.set_main_icon(icons[item_id])
             self.lab_btn.set_style_solid(True)
         
+        # Reset Preset button to default state (Lab mode = not in preset mode)
+        if hasattr(self, 'preset_status_btn'):
+            self.preset_status_btn.set_active(False)  # Reverts to "PRESETS" with ghost styling
+        
         # Notify CommandPanel that Lab mode is active
         if hasattr(self, 'command_panel'):
             self.command_panel.set_lab_mode_active(True)
+            self.command_panel.set_top_bar_preset_mode(False)  # Exiting preset mode
+        
         
         # Forward to command panel for tab switching
         if hasattr(self, 'command_panel'):
             self.command_panel._on_tab_btn_clicked(item_id)
+        
+        # Only hide side buttons if panel is not already visible
+        # If panel is already open (switching tabs), keep buttons visible
+        panel_already_visible = self.right_frame.isVisible()
+        
+        if not panel_already_visible:
+            # CRITICAL: Hide side buttons BEFORE panel animation starts
+            # This ensures the stagger animation in toggle_command_panel controls visibility
+            self._trigger_side_buttons_animation(hide=True)
             
-        # Show Command Panel with animation
+        # Show Command Panel with animation (stagger will reveal buttons at threshold)
         self.toggle_command_panel(True)
         
     def create_title_bar(self, parent_layout):
@@ -615,57 +630,344 @@ class MainWindow(QMainWindow):
         
         parent_layout.addWidget(splitter)
 
+    # =========================================================================
+    # COMMAND PANEL SLIDE ANIMATION
+    # =========================================================================
+    # All animation logic for the right-side command panel is contained here.
+    # The panel slides in from the right edge when Lab mode is activated,
+    # and slides out when switching to Preset mode.
+    #
+    # Design Spec Reference (styles_instruction.md):
+    #   - Animations should feel premium with weighted motion
+    #   - OutQuad or OutBack for smooth deceleration
+    #   - Spring effects add premium feel (OutBack with overshoot)
+    # =========================================================================
+    
+    # -------------------------------------------------------------------------
+    # ANIMATION CONFIGURATION - Edit these values to tune the animation feel
+    # -------------------------------------------------------------------------
+    
+    # Panel Size
+    PANEL_TARGET_RATIO = 0.4  # Right panel takes 40% of total splitter width
+    
+    # Panel Timing (milliseconds)
+    PANEL_SHOW_DURATION_MS = 450   # Slide-in duration (snappy entrance)
+    PANEL_HIDE_DURATION_MS = 500   # Slide-out duration (snappy exit with weight)
+    
+    # Panel Easing Curve Options:
+    #   "Linear"     - Constant speed (basic)
+    #   "OutQuad"    - Smooth deceleration (design spec recommended)
+    #   "OutCubic"   - Smoother deceleration
+    #   "OutExpo"    - Sharp start, smooth end
+    #   "OutBack"    - Overshoot with spring (premium weighted feel)
+    #   "OutElastic" - Bouncy spring (use sparingly)
+    PANEL_SHOW_EASING = "OutBack"   # Premium weighted entrance
+    PANEL_HIDE_EASING = "OutBack"   # Weighted exit with subtle overshoot
+    
+    # Panel Spring Parameters (only applies to OutBack easing)
+    PANEL_SPRING_OVERSHOOT = 0.7   # 0.0 = no spring, 1.7 = default, 0.5-0.8 = subtle
+    PANEL_HIDE_OVERSHOOT = 0.5     # Overshoot for hide animation (more subtle than show)
+    
+    # -------------------------------------------------------------------------
+    # SIDE BUTTONS STAGGERED ANIMATION
+    # -------------------------------------------------------------------------
+    # Side buttons (transform controls) appear in a staggered sequence during
+    # the panel slide animation. They start revealing when the panel reaches
+    # a certain progress threshold and fade in one after another.
+    #
+    # On HIDE: Buttons hide simultaneously first, then panel slides out.
+    # -------------------------------------------------------------------------
+    
+    # ---- SHOW Animation ----
+    # When to start showing buttons (0.0 - 1.0 of panel animation progress)
+    BUTTONS_REVEAL_THRESHOLD = 0.9
+    
+    # Stagger delay between each button appearing (milliseconds)
+    BUTTONS_SHOW_STAGGER_MS = 60
+    
+    # Button show animation duration (milliseconds)  
+    BUTTONS_SHOW_DURATION_MS = 200
+    
+    # Button show easing
+    BUTTONS_SHOW_EASING = "OutCubic"
+    
+    # ---- HIDE Animation ----
+    # All buttons hide simultaneously (no stagger on hide)
+    BUTTONS_HIDE_DURATION_MS = 100   # Visible hide animation for better feedback
+    
+    # Button hide easing (InQuad = accelerate into hide)
+    BUTTONS_HIDE_EASING = "InQuad"
+    
+    # Delay AFTER buttons start hiding before panel slides out (milliseconds)
+    # This is the time for buttons to reach the panel edge
+    BUTTONS_HIDE_HEAD_START_MS = 200   # Let buttons hide before panel slides out
+    
+    # -------------------------------------------------------------------------
+    
     def toggle_command_panel(self, show):
-        """Animate Command Panel sliding in/out (Linear, 750ms)"""
+        """
+        Animate Command Panel sliding in/out from the RIGHT edge.
+        
+        Premium Animation Features:
+        - Weighted motion with spring overshoot (OutBack easing)
+        - Separate timing/easing for show vs hide 
+        - MaximumWidth constraint prevents layout "pop" artifact
+        - Staggered side button reveal at configurable threshold
+        - Sequential hide: buttons first, then panel
+        
+        Args:
+            show: True to slide panel in, False to slide it out
+        """
+        # Early exit if already in the requested state
         if show == self.right_frame.isVisible():
             return
             
-        # Import moved here to keep global namespace clean or if not imported top-level
+        from PyQt6.QtCore import QVariantAnimation, QEasingCurve, QTimer
+        
+        # --- Stop any running animation ---
+        if hasattr(self, '_panel_anim') and self._panel_anim.state() == QVariantAnimation.State.Running:
+            self._panel_anim.stop()
+        
+        # --- Calculate dimensions ---
+        current_sizes = self.splitter.sizes()
+        total_width = sum(current_sizes)
+        target_right_width = int(total_width * self.PANEL_TARGET_RATIO)
+        
+        # Track whether we've triggered side buttons (to avoid re-triggering)
+        self._buttons_triggered = False
+        
+        # --- Prepare start/end values based on direction ---
+        if show:
+            # SHOWING: Panel slides in from right edge (0 → target width)
+            # CRITICAL: Set maximumWidth to 0 BEFORE setVisible(True)
+            # This prevents Qt from assigning any width during the initial layout pass
+            self.right_frame.setMaximumWidth(0)
+            self.right_frame.setVisible(True)
+            self.splitter.setSizes([total_width, 0])
+            
+            start_width = 0
+            end_width = target_right_width
+            duration = self.PANEL_SHOW_DURATION_MS
+            easing_name = self.PANEL_SHOW_EASING
+            
+            # Start panel animation immediately for show
+            self._start_panel_animation(show, start_width, end_width, duration, easing_name, total_width, target_right_width)
+        else:
+            # HIDING: Sequential animation - buttons first, then panel
+            # 1. Hide all buttons simultaneously
+            self._trigger_side_buttons_animation(hide=True)
+            
+            # 2. Schedule panel to slide out AFTER buttons reach panel edge
+            start_width = current_sizes[1]
+            end_width = 0
+            duration = self.PANEL_HIDE_DURATION_MS
+            easing_name = self.PANEL_HIDE_EASING
+            
+            # Delay panel hide to let buttons hide first
+            QTimer.singleShot(
+                self.BUTTONS_HIDE_HEAD_START_MS,
+                lambda: self._start_panel_animation(show, start_width, end_width, duration, easing_name, total_width, target_right_width)
+            )
+    
+    def _start_panel_animation(self, show, start_width, end_width, duration, easing_name, total_width, target_right_width):
+        """
+        Internal helper to start the panel slide animation.
+        
+        Args:
+            show: True if showing panel, False if hiding
+            start_width: Starting width of the right panel
+            end_width: Target width of the right panel
+            duration: Animation duration in ms
+            easing_name: Name of the easing curve
+            total_width: Total width of the splitter
+            target_right_width: Target width when fully open
+        """
         from PyQt6.QtCore import QVariantAnimation, QEasingCurve
         
         # Stop any running animation
-        if hasattr(self, 'anim') and self.anim.state() == QVariantAnimation.State.Running:
-            self.anim.stop()
+        if hasattr(self, '_panel_anim') and self._panel_anim.state() == QVariantAnimation.State.Running:
+            self._panel_anim.stop()
         
-        # Get dimensions
-        start_sizes = self.splitter.sizes()
-        total_width = sum(start_sizes)
+        # Create and configure animation
+        self._panel_anim = QVariantAnimation()
+        self._panel_anim.setDuration(duration)
         
-        if show:
-            # Prepare to show: Set Visible and Force 0 width to prevent jump
-            self.right_frame.setVisible(True)
-            current_left = total_width
-            self.splitter.setSizes([total_width, 0])
+        # Build easing curve with optional spring parameters
+        easing_map = {
+            "Linear": QEasingCurve.Type.Linear,
+            "OutQuad": QEasingCurve.Type.OutQuad,
+            "OutCubic": QEasingCurve.Type.OutCubic,
+            "OutExpo": QEasingCurve.Type.OutExpo,
+            "OutBack": QEasingCurve.Type.OutBack,
+            "OutElastic": QEasingCurve.Type.OutElastic,
+            "InOutCubic": QEasingCurve.Type.InOutCubic,
+            "InQuad": QEasingCurve.Type.InQuad,
+        }
+        
+        easing_type = easing_map.get(easing_name, QEasingCurve.Type.OutQuad)
+        easing_curve = QEasingCurve(easing_type)
+        
+        # Apply spring overshoot for OutBack easing
+        if easing_name == "OutBack":
+            # Use different overshoot values for show vs hide
+            overshoot = self.PANEL_SPRING_OVERSHOOT if show else self.PANEL_HIDE_OVERSHOOT
+            easing_curve.setOvershoot(overshoot)
+        
+        self._panel_anim.setEasingCurve(easing_curve)
+        self._panel_anim.setStartValue(start_width)
+        self._panel_anim.setEndValue(end_width)
+        
+        # Animation update callback
+        def on_value_changed(right_width):
+            # Update the maximum width constraint to match animated value
+            self.right_frame.setMaximumWidth(max(0, right_width))
             
-            # Calculate Target (Left shrinks to make room for Right)
-            target_right = int(total_width * 0.4)
-            target_left = total_width - target_right
+            # Update splitter proportions
+            left_width = total_width - right_width
+            self.splitter.setSizes([left_width, right_width])
             
-            start_val = 0
-            end_val = target_left
+            # Staggered side buttons reveal (only during show)
+            if show and not self._buttons_triggered:
+                progress = right_width / target_right_width if target_right_width > 0 else 0
+                if progress >= self.BUTTONS_REVEAL_THRESHOLD:
+                    self._buttons_triggered = True
+                    self._trigger_side_buttons_animation(hide=False)
+        
+        self._panel_anim.valueChanged.connect(on_value_changed)
+        
+        # Animation finished callback
+        def on_animation_finished():
+            if show:
+                # Remove the maximum width constraint
+                self.right_frame.setMaximumWidth(16777215)  # QWIDGETSIZE_MAX
+                # Ensure buttons are visible if animation finished before threshold
+                if not self._buttons_triggered:
+                    self._trigger_side_buttons_animation(hide=False)
+            else:
+                # Hide the panel completely
+                self.right_frame.setVisible(False)
+        
+        self._panel_anim.finished.connect(on_animation_finished)
+        
+        # Start the animation
+        self._panel_anim.start()
+    
+    def _trigger_side_buttons_animation(self, hide=False):
+        """
+        Trigger staggered animation for ALL Command Panel Side Buttons.
+        
+        Button Groups (animated top to bottom):
+        1. Command Panel Main Folder Buttons: Max Size, Lab Presets, Manual
+        2. Command Panel Transform Folder Buttons: Resize, Rotate, Time (tab-dependent)
+        
+        SHOW: Buttons reveal with stagger delay (one after another)
+        HIDE: All buttons hide simultaneously (no stagger)
+        
+        Args:
+            hide: True to hide buttons, False to reveal them
+        """
+        from PyQt6.QtCore import QTimer
+        
+        if not hasattr(self, 'command_panel'):
+            return
+        
+        # Collect ALL buttons in ORDER (top to bottom)
+        all_buttons = []
+        
+        # --- 1. Main Folder Buttons (ModeButtonsWidget) ---
+        # These are at the TOP of the side button area
+        if hasattr(self.command_panel, 'mode_buttons'):
+            mode_btns = self.command_panel.mode_buttons
+            # ModeButtonsWidget has individual button attributes (not a dict)
+            if hasattr(mode_btns, 'max_size_btn'):
+                all_buttons.append(mode_btns.max_size_btn)
+            if hasattr(mode_btns, 'presets_btn'):
+                all_buttons.append(mode_btns.presets_btn)
+            if hasattr(mode_btns, 'manual_btn'):
+                all_buttons.append(mode_btns.manual_btn)
+        
+        # --- 2. Transform Folder Buttons (SideButtonGroup) ---
+        # Only add buttons for the currently active tab
+        current_tab = self.command_panel.tabs.currentIndex() if hasattr(self.command_panel, 'tabs') else 0
+        
+        transform_group = None
+        if current_tab == 0 and hasattr(self.command_panel, 'image_side_buttons'):
+            transform_group = self.command_panel.image_side_buttons
+        elif current_tab == 1 and hasattr(self.command_panel, 'video_side_buttons'):
+            transform_group = self.command_panel.video_side_buttons
+        elif current_tab == 2 and hasattr(self.command_panel, 'loop_side_buttons'):
+            transform_group = self.command_panel.loop_side_buttons
+        
+        if transform_group and hasattr(transform_group, 'buttons'):
+            # SideButtonGroup has a buttons dict
+            # Get buttons in order based on their config order
+            if hasattr(transform_group, 'buttons_config'):
+                for config in transform_group.buttons_config:
+                    btn_id = config.get('id', '')
+                    if btn_id in transform_group.buttons:
+                        all_buttons.append(transform_group.buttons[btn_id])
+            else:
+                # Fallback: just add all buttons
+                all_buttons.extend(transform_group.buttons.values())
+        
+        # --- Trigger animation ---
+        if hide:
+            # HIDE: All buttons hide simultaneously (no stagger for snappy exit)
+            for btn in all_buttons:
+                self._hide_button(btn)
         else:
-            # Prepare to hide: Left grows to take full width
-            start_val = start_sizes[0]
-            end_val = total_width
+            # SHOW: Staggered reveal (top to bottom)
+            for i, btn in enumerate(all_buttons):
+                delay = i * self.BUTTONS_SHOW_STAGGER_MS
+                QTimer.singleShot(delay, lambda b=btn: self._reveal_button(b))
+    
+    def _reveal_button(self, btn):
+        """
+        Reveal a single side button with animation.
+        Uses the BUTTONS_SHOW_EASING and BUTTONS_SHOW_DURATION_MS settings.
+        """
+        if hasattr(btn, 'set_force_hidden'):
+            # Configure the button's internal animation
+            if hasattr(btn, 'animation'):
+                from PyQt6.QtCore import QEasingCurve
+                
+                easing_map = {
+                    "Linear": QEasingCurve.Type.Linear,
+                    "OutQuad": QEasingCurve.Type.OutQuad,
+                    "OutCubic": QEasingCurve.Type.OutCubic,
+                    "OutExpo": QEasingCurve.Type.OutExpo,
+                    "OutBack": QEasingCurve.Type.OutBack,
+                }
+                easing = easing_map.get(self.BUTTONS_SHOW_EASING, QEasingCurve.Type.OutCubic)
+                btn.animation.setDuration(self.BUTTONS_SHOW_DURATION_MS)
+                btn.animation.setEasingCurve(easing)
             
-        # Setup Animation
-        self.anim = QVariantAnimation()
-        self.anim.setDuration(750)
-        self.anim.setEasingCurve(QEasingCurve.Type.Linear) # Requested: Simple Linear
-        
-        self.anim.setStartValue(start_val)
-        self.anim.setEndValue(end_val)
-        
-        def update_splitter(left_w):
-            right_w = total_width - left_w
-            self.splitter.setSizes([left_w, right_w])
+            # Trigger the reveal
+            btn.set_force_hidden(False)
+    
+    def _hide_button(self, btn):
+        """
+        Hide a single side button with animation.
+        Uses the BUTTONS_HIDE_EASING and BUTTONS_HIDE_DURATION_MS settings.
+        """
+        if hasattr(btn, 'set_force_hidden'):
+            # Configure the button's internal animation for hide
+            if hasattr(btn, 'animation'):
+                from PyQt6.QtCore import QEasingCurve
+                
+                easing_map = {
+                    "Linear": QEasingCurve.Type.Linear,
+                    "InQuad": QEasingCurve.Type.InQuad,
+                    "InCubic": QEasingCurve.Type.InCubic,
+                    "OutQuad": QEasingCurve.Type.OutQuad,
+                    "OutCubic": QEasingCurve.Type.OutCubic,
+                }
+                easing = easing_map.get(self.BUTTONS_HIDE_EASING, QEasingCurve.Type.InQuad)
+                btn.animation.setDuration(self.BUTTONS_HIDE_DURATION_MS)
+                btn.animation.setEasingCurve(easing)
             
-        self.anim.valueChanged.connect(update_splitter)
-        
-        if not show:
-            self.anim.finished.connect(lambda: self.right_frame.setVisible(False))
-            
-        self.anim.start()
+            # Trigger the hide
+            btn.set_force_hidden(True)
         
     def create_bottom_section(self, parent_layout):
         """Create the bottom section with status and progress"""

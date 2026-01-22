@@ -1076,19 +1076,48 @@ class CommandPanel(QWidget):
         """Set whether Lab mode is active (Lab button items selected)"""
         if self._lab_mode_active != active:
             self._lab_mode_active = active
-            # Trigger visibility update
+            # Trigger visibility update WITHOUT emitting global_mode_changed
             current_tab = self.tabs.currentIndex()
             mode = self.tab_modes.get(current_tab, "Max Size")
-            self._on_global_mode_changed(mode)
+            self._update_side_buttons_visibility(mode)
     
     def set_top_bar_preset_mode(self, active):
         """Set whether the top bar preset mode is active (controls side button visibility)"""
         if self._top_bar_preset_active != active:
             self._top_bar_preset_active = active
-            # Trigger visibility update
+            # Trigger visibility update WITHOUT emitting global_mode_changed
             current_tab = self.tabs.currentIndex()
             mode = self.tab_modes.get(current_tab, "Max Size")
-            self._on_global_mode_changed(mode)
+            self._update_side_buttons_visibility(mode)
+    
+    def _update_side_buttons_visibility(self, mode):
+        """
+        Update side buttons visibility based on lab mode and preset mode.
+        This does NOT emit global_mode_changed to prevent signal collisions.
+        """
+        # Side Buttons visibility:
+        # User Rule: Show ONLY when Lab Mode is ON (Lab button active) AND Top Bar Preset Mode is OFF
+        should_hide_side = (not self._lab_mode_active) or self._top_bar_preset_active
+        
+        # User Rule: Colored ONLY in Lab Mode (Manual). Uncolored in Max Size.
+        should_be_colored = (mode == "Manual")
+        
+        if hasattr(self, 'side_buttons_stack'):
+            self.side_buttons_stack.setVisible(True)
+            
+            # Apply hidden mode and color mode to side buttons
+            groups = []
+            if hasattr(self, 'image_side_buttons'): groups.append(self.image_side_buttons)
+            if hasattr(self, 'video_side_buttons'): groups.append(self.video_side_buttons)
+            if hasattr(self, 'loop_side_buttons'): groups.append(self.loop_side_buttons)
+            
+            for group in groups:
+                 if hasattr(group, 'set_hidden_mode'):
+                     group.set_hidden_mode(should_hide_side, colored=should_be_colored)
+                     
+        # Update Main Mode Buttons (Max Size, Presets, Manual)
+        if hasattr(self, 'mode_buttons'):
+            self.mode_buttons.set_hidden_mode(should_hide_side)
 
     def _on_tab_changed(self, index):
         """Sync global mode buttons when tab changes"""

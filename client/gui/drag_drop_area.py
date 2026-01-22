@@ -403,10 +403,8 @@ class DragDropArea(QWidget):
             if widget and hasattr(widget, 'set_completed'):
                 widget.set_completed()
 
-    def set_preset_active(self, active, text="PRESETS"):
-        """Update the state of the integrated preset button"""
-        if hasattr(self, 'preset_status_btn'):
-            self.preset_status_btn.set_active(active, text)
+    # NOTE: set_preset_active removed - preset_status_btn is now in MainWindow's control bar
+    # State updates go through the preset_applied signal handled by MainWindow.on_preset_applied
     
     def clear_all_progress(self):
         """Clear progress indicators from all files"""

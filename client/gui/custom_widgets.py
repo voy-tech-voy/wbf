@@ -3,7 +3,7 @@ Custom PyQt6 Widgets with Dark Mode Support
 Provides TimeRangeSlider, ResizeFolder, and Rotation classes
 """
 
-from PyQt6.QtCore import Qt, pyqtSignal, QRect, QRectF, QPoint, QPointF, QSize, QPropertyAnimation, QEasingCurve, pyqtProperty, QTimer, QObject
+from PyQt6.QtCore import Qt, pyqtSignal, QRect, QRectF, QPoint, QPointF, QSize, QPropertyAnimation, QVariantAnimation, QEasingCurve, pyqtProperty, QTimer, QObject
 from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QPalette, QIcon, QPixmap, QFont, QFontMetrics
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, 
@@ -3597,13 +3597,34 @@ class PresetStatusButton(QWidget):
         self._width_anim.setDuration(400)
         self._width_anim.setEasingCurve(QEasingCurve.Type.OutElastic) # Spring effect
         
-        # Glow Effect (Premium "Turbo" Spec)
+        # Premium Glow Effect (Outer glow with breathing animation)
+        # Matches glow_effect.md specification
         self._glow = QGraphicsDropShadowEffect(self)
-        self._glow.setBlurRadius(20) # Spec-compliant blur
-        self._glow.setColor(QColor(0, 224, 255, 100)) # Cyan/Turbo (Spec)
-        self._glow.setOffset(0, 0)
-        self._glow.setEnabled(False)
+        self._glow.setBlurRadius(15)  # Mid-range blur
+        self._glow.setColor(QColor(0, 224, 255, 100))  # Cyan with alpha
+        self._glow.setOffset(0, 0)  # Centered glow (no offset)
+        self._glow.setEnabled(False)  # Only enabled on hover
         self.setGraphicsEffect(self._glow)
+        
+        # Breathing animation for glow (3-second cycle)
+        self._glow_anim = QPropertyAnimation(self._glow, b"blurRadius")
+        self._glow_anim.setDuration(3000)  # 3-second full cycle
+        self._glow_anim.setStartValue(10)   # Inhale: smaller blur
+        self._glow_anim.setEndValue(25)     # Exhale: larger blur
+        self._glow_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)  # Organic breathing
+        self._glow_anim.setLoopCount(-1)  # Infinite loop
+        
+        # Color animation for breathing (opacity changes)
+        self._glow_color_anim = QVariantAnimation(self)
+        self._glow_color_anim.setDuration(3000)
+        self._glow_color_anim.setStartValue(QColor(0, 224, 255, 80))   # Dim
+        self._glow_color_anim.setEndValue(QColor(0, 224, 255, 150))    # Bright
+        self._glow_color_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        self._glow_color_anim.setLoopCount(-1)
+        
+        def update_glow_color(color):
+            self._glow.setColor(color)
+        self._glow_color_anim.valueChanged.connect(update_glow_color)
         
         # Calculate proper initial width based on text
         self._calculate_and_set_initial_width()
@@ -3743,10 +3764,15 @@ class PresetStatusButton(QWidget):
     def enterEvent(self, event):
         self._is_hovered = True
         self._glow.setEnabled(True)
+        # Start breathing animation
+        self._glow_anim.start()
+        self._glow_color_anim.start()
         self.update()
             
     def leaveEvent(self, event):
         self._is_hovered = False
         self._glow.setEnabled(False)
+        # Stop breathing animation
+        self._glow_anim.stop()
+        self._glow_color_anim.stop()
         self.update()
-
