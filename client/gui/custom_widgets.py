@@ -3284,7 +3284,7 @@ class MorphingButton(QPushButton):
         radius = curr_height / 2
         
         # Background color
-        bg_color = QColor("#00AA00") if self._is_solid_style else QColor(255, 255, 255, 12)
+        bg_color = QColor("#2196F3") if self._is_solid_style else QColor(255, 255, 255, 12)
         
         # Border
         border_color = QColor(255, 255, 255, 25)
@@ -3564,11 +3564,91 @@ class MorphingButton(QPushButton):
 
 
 
+class SiriGlowOverlay(QWidget):
+    """
+    Capsule-shaped glow widget with Siri-style gradient colors.
+    Parented to top-level window to avoid clipping.
+    """
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._pulse_phase = 0.0  # 0.0 to 1.0 for pulse cycle
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        
+    def set_pulse_phase(self, phase):
+        """Set the current pulse phase (0.0-1.0)"""
+        self._pulse_phase = phase
+        self.update()
+        
+    def paintEvent(self, event):
+        from PyQt6.QtGui import QLinearGradient
+        import math
+        import colorsys
+        
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        w = self.width()
+        h = self.height()
+        radius = h / 2  # Capsule shape
+        
+        phase = self._pulse_phase  # 0.0 to 1.0
+        
+        # Calculate shift strength based on pulse phase
+        # Strongest at 0.0 and 1.0, zero in the middle (0.25 to 0.75)
+        if phase < 0.25:
+            # Rising from start: fit(0.0, 0.25, 1.0, 0.0)
+            shift_strength = 1.0 - (phase / 0.25)
+        elif phase > 0.75:
+            # Rising toward end: fit(0.75, 1.0, 0.0, 1.0)
+            shift_strength = (phase - 0.75) / 0.25
+        else:
+            # Middle section: no shift
+            shift_strength = 0.0
+        
+        # Hue shift amount in degrees (0 to 30 based on strength)
+        hue_shift_deg = 30 * shift_strength
+        hue_shift = hue_shift_deg / 360.0  # Convert to 0-1 range for colorsys
+        
+        # Base colors (blue, green, orange) in RGB
+        base_blue = (30, 144, 255)      # Dodger Blue
+        base_green = (16, 185, 129)     # Emerald Green
+        base_orange = (255, 165, 0)     # Orange
+        
+        def shift_hue(rgb, shift):
+            """Shift the hue of an RGB color by 'shift' amount (0-1 = 0-360°)"""
+            r, g, b = rgb[0]/255.0, rgb[1]/255.0, rgb[2]/255.0
+            h, s, v = colorsys.rgb_to_hsv(r, g, b)
+            h = (h + shift) % 1.0  # Wrap around color wheel
+            r, g, b = colorsys.hsv_to_rgb(h, s, v)
+            return (int(r * 255), int(g * 255), int(b * 255))
+        
+        # Apply hue shift to each color
+        blue = shift_hue(base_blue, hue_shift)
+        green = shift_hue(base_green, hue_shift)
+        orange = shift_hue(base_orange, hue_shift)
+        
+        # Opacity pulsation: gentle breathing (0.6 to 1.0)
+        pulse_opacity = 0.6 + 0.4 * (0.5 + 0.5 * math.sin(phase * 2 * math.pi))
+        painter.setOpacity(pulse_opacity)
+        
+        # Create gradient with shifted colors
+        gradient = QLinearGradient(0, 0, w, h)
+        gradient.setColorAt(0.0, QColor(blue[0], blue[1], blue[2], 255))
+        gradient.setColorAt(0.5, QColor(green[0], green[1], green[2], 255))
+        gradient.setColorAt(1.0, QColor(orange[0], orange[1], orange[2], 255))
+        
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(gradient))
+        painter.drawRoundedRect(0, 0, w, h, radius, radius)
+
+
 class PresetStatusButton(QWidget):
     """
     Advanced Preset Button component.
-    Handles dynamic width transitions, conditional marquee scrolling, 
-    and styling states (Ghost vs Solid).
+    Handles dynamic width transitions and styling states (Ghost vs Solid).
+    Features a Siri-style pulsating glow effect.
     """
     clicked = pyqtSignal()
     
@@ -3576,6 +3656,9 @@ class PresetStatusButton(QWidget):
     MIN_WIDTH = 130  # Minimum to fit "PRESETS" text
     MAX_WIDTH = 280  # Max for longer preset names
     PADDING = 60  # 30px left + 30px right for wider look
+    GLOW_RADIUS = 40  # Blur radius for glow effect
+    GLOW_PADDING = 20  # Extra padding around button for glow spread
+    PULSE_DURATION_MS = 4000  # 4 second pulse cycle
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -3585,122 +3668,165 @@ class PresetStatusButton(QWidget):
         
         # State
         self._text = "PRESETS"
-        self._is_active = False # False = Manual/Ghost, True = Preset/Solid
+        self._is_active = False  # False = Ghost, True = Solid
         self._is_hovered = False
-        self._bg_color = QColor(255, 255, 255, 12) # Ghost default
-        self._text_color = QColor(255, 255, 255, 150) # Inactive text
+        self._bg_color = QColor(255, 255, 255, 12)  # Ghost default
+        self._text_color = QColor(255, 255, 255, 150)  # Inactive text
         self._current_width = self.MIN_WIDTH
-        self._temp_shrink = False # Flag to temporarily shrink button (e.g. when Lab button expands)
+        self._temp_shrink = False
         
-        # Animations
+        # Glow overlay (will be created in showEvent when window is available)
+        self._glow_overlay = None
+        self._pulse_timer = None
+        self._pulse_start_time = 0
+        
+        # Width animation
         self._width_anim = QPropertyAnimation(self, b"animWidth", self)
         self._width_anim.setDuration(400)
-        self._width_anim.setEasingCurve(QEasingCurve.Type.OutElastic) # Spring effect
+        self._width_anim.setEasingCurve(QEasingCurve.Type.OutElastic)
         
-        # Premium Glow Effect (Outer glow with breathing animation)
-        # Matches glow_effect.md specification
-        self._glow = QGraphicsDropShadowEffect(self)
-        self._glow.setBlurRadius(15)  # Mid-range blur
-        self._glow.setColor(QColor(0, 224, 255, 100))  # Cyan with alpha
-        self._glow.setOffset(0, 0)  # Centered glow (no offset)
-        self._glow.setEnabled(False)  # Only enabled on hover
-        self.setGraphicsEffect(self._glow)
-        
-        # Breathing animation for glow (3-second cycle)
-        self._glow_anim = QPropertyAnimation(self._glow, b"blurRadius")
-        self._glow_anim.setDuration(3000)  # 3-second full cycle
-        self._glow_anim.setStartValue(10)   # Inhale: smaller blur
-        self._glow_anim.setEndValue(25)     # Exhale: larger blur
-        self._glow_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)  # Organic breathing
-        self._glow_anim.setLoopCount(-1)  # Infinite loop
-        
-        # Color animation for breathing (opacity changes)
-        self._glow_color_anim = QVariantAnimation(self)
-        self._glow_color_anim.setDuration(3000)
-        self._glow_color_anim.setStartValue(QColor(0, 224, 255, 80))   # Dim
-        self._glow_color_anim.setEndValue(QColor(0, 224, 255, 150))    # Bright
-        self._glow_color_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
-        self._glow_color_anim.setLoopCount(-1)
-        
-        def update_glow_color(color):
-            self._glow.setColor(color)
-        self._glow_color_anim.valueChanged.connect(update_glow_color)
-        
-        # Calculate proper initial width based on text
+        # Calculate initial width
         self._calculate_and_set_initial_width()
-
+    
+    def showEvent(self, event):
+        """Create glow overlay when button becomes visible"""
+        super().showEvent(event)
+        self._setup_glow()
+    
+    def _setup_glow(self):
+        """Create the glow overlay parented to the top-level window"""
+        if self._glow_overlay is not None:
+            return
+            
+        top_window = self.window()
+        if top_window is None or top_window == self:
+            return
+        
+        from PyQt6.QtWidgets import QGraphicsBlurEffect
+        
+        # Create glow overlay parented to window (avoids clipping)
+        self._glow_overlay = SiriGlowOverlay(top_window)
+        
+        # Apply blur effect for soft glow
+        blur = QGraphicsBlurEffect()
+        blur.setBlurRadius(self.GLOW_RADIUS)
+        self._glow_overlay.setGraphicsEffect(blur)
+        
+        # Position and show the glow
+        self._update_glow_position()
+        self._glow_overlay.show()
+        self._glow_overlay.raise_()  # In front (mouse-transparent so clicks pass through)
+        
+        print(f"[GLOW DEBUG] Glow created at: {self._glow_overlay.geometry()}")
+        
+        # Start pulsation timer
+        import time
+        self._pulse_start_time = time.time()
+        self._pulse_timer = QTimer(self)
+        self._pulse_timer.timeout.connect(self._update_pulse)
+        self._pulse_timer.start(16)  # ~60 FPS
+    
+    def _update_pulse(self):
+        """Update the glow pulsation"""
+        if self._glow_overlay is None:
+            return
+        
+        import time
+        elapsed = time.time() - self._pulse_start_time
+        phase = (elapsed * 1000 / self.PULSE_DURATION_MS) % 1.0
+        self._glow_overlay.set_pulse_phase(phase)
+    
+    def _update_glow_position(self):
+        """Update glow overlay position to match button"""
+        if self._glow_overlay is None:
+            return
+            
+        top_window = self.window()
+        if top_window is None:
+            return
+            
+        btn_pos = self.mapTo(top_window, QPoint(0, 0))
+        self._glow_overlay.setGeometry(
+            btn_pos.x() - self.GLOW_PADDING,
+            btn_pos.y() - self.GLOW_PADDING,
+            self.width() + (self.GLOW_PADDING * 2),
+            self.height() + (self.GLOW_PADDING * 2)
+        )
+    
+    def moveEvent(self, event):
+        """Update glow position when button moves"""
+        super().moveEvent(event)
+        self._update_glow_position()
+    
+    def resizeEvent(self, event):
+        """Update glow position when button resizes"""
+        super().resizeEvent(event)
+        self._update_glow_position()
+    
     @pyqtProperty(int)
     def animWidth(self):
         return self._current_width
-
+    
     @animWidth.setter
     def animWidth(self, w):
         self._current_width = w
         self.setFixedWidth(w)
+        self._update_glow_position()
         self.update()
     
     def _calculate_and_set_initial_width(self):
         """Calculate and set initial width using the exact drawing font"""
-        # Use the same font configuration as paintEvent
         font = QFont()
         font.setFamily(FONT_FAMILY)
         font.setPixelSize(16)
-        font.setWeight(QFont.Weight.DemiBold)  # Use bold weight for measurement
+        font.setWeight(QFont.Weight.DemiBold)
         fm = QFontMetrics(font)
         text_width = fm.horizontalAdvance(self._text)
         initial_width = max(self.MIN_WIDTH, min(self.MAX_WIDTH, text_width + self.PADDING))
         self._current_width = initial_width
         self.setFixedWidth(initial_width)
-        
+    
     def shrink_for_overlap(self, shrink):
         """Temporarily shrink button to make room for other widgets"""
         if self._temp_shrink == shrink:
             return
-            
         self._temp_shrink = shrink
-        
-        # Recalculate width target
         self._update_width()
-
+    
     def set_active(self, is_active, text="PRESETS"):
+        """Set active state and text"""
         self._is_active = is_active
         self._text = text.upper()
         
-        
-        # Update colors/style
         if self._is_active:
-            # Active: Solid Green
-            self._bg_color = QColor("#00AA00") 
+            self._bg_color = QColor("#00AA00")
             self._text_color = QColor(255, 255, 255, 255)
         else:
-            # Manual: Ghost
             self._bg_color = QColor(255, 255, 255, 12)
-            self._text_color = QColor(255, 255, 255, 100) # Faded
+            self._text_color = QColor(255, 255, 255, 100)
             
         self._update_width()
         self.update()
-            
+    
     def _update_width(self):
-        """Update width based on text content (always fits text)"""
+        """Update width based on text content"""
         if self._temp_shrink:
             target = self.MIN_WIDTH
         else:
-            # Always calculate width to fit text using exact UI font
             font = QFont()
             font.setFamily(FONT_FAMILY)
             font.setPixelSize(16)
-            font.setWeight(QFont.Weight.DemiBold) # Use bold for safe measurement
+            font.setWeight(QFont.Weight.DemiBold)
             fm = QFontMetrics(font)
             text_width = fm.horizontalAdvance(self._text)
             target = max(self.MIN_WIDTH, min(self.MAX_WIDTH, text_width + self.PADDING))
             
-        # Animate Width
         if self.width() != target:
             self._width_anim.stop()
             self._width_anim.setStartValue(self.width())
             self._width_anim.setEndValue(target)
             self._width_anim.start()
-
+    
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -3709,28 +3835,27 @@ class PresetStatusButton(QWidget):
         h = self.height()
         radius = h / 2
         
-        # Draw Background
-        # Hover effect on background
+        # Background with hover effect
         bg = self._bg_color
         if self._is_hovered and not self._is_active:
             bg = QColor(255, 255, 255, 25)
         elif self._is_hovered and self._is_active:
-             bg = self._bg_color.lighter(110)
+            bg = self._bg_color.lighter(110)
 
         painter.setBrush(QBrush(bg))
         
-        # Draw Border (Ghost only)
+        # Border (Ghost only)
         if not self._is_active:
             border_color = QColor(255, 255, 255, 50)
-            if self._is_hovered: border_color = QColor(255, 255, 255, 100)
+            if self._is_hovered:
+                border_color = QColor(255, 255, 255, 100)
             painter.setPen(QPen(border_color, 1))
         else:
             painter.setPen(Qt.PenStyle.NoPen)
             
-        # Fix clipping: inset by 1px so border stroke is inside bounds
         painter.drawRoundedRect(1, 1, w-2, h-2, int(radius), int(radius))
         
-        # Draw Text
+        # Text
         painter.setPen(self._text_color)
         font = self.font()
         font.setFamily(FONT_FAMILY)
@@ -3738,41 +3863,40 @@ class PresetStatusButton(QWidget):
         font.setPixelSize(16)
         painter.setFont(font)
         
-        # Calculate text bounds
         fm = QFontMetrics(font)
         text_width = fm.horizontalAdvance(self._text)
         avail_width = w - self.PADDING
         
-        # Clipping region for text
         painter.setClipRect(16, 0, w - 32, h)
         
-        # Standard drawing (with ellipsis if needed)
         if text_width > avail_width:
-             # Elide
-             elided = fm.elidedText(self._text, Qt.TextElideMode.ElideRight, avail_width)
-             painter.drawText(QRect(16, 0, w - 32, h), Qt.AlignmentFlag.AlignCenter, elided)
+            elided = fm.elidedText(self._text, Qt.TextElideMode.ElideRight, avail_width)
+            painter.drawText(QRect(16, 0, w - 32, h), Qt.AlignmentFlag.AlignCenter, elided)
         else:
-             # Center
-             painter.drawText(QRect(0, 0, w, h), Qt.AlignmentFlag.AlignCenter, self._text)
-
+            painter.drawText(QRect(0, 0, w, h), Qt.AlignmentFlag.AlignCenter, self._text)
+    
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            # Click Animation (Scale down/up logic is complex in pure QWidget without transform, 
-            # simpler to just update visual state or invoke action)
             self.clicked.emit()
-            
+    
     def enterEvent(self, event):
         self._is_hovered = True
-        self._glow.setEnabled(True)
-        # Start breathing animation
-        self._glow_anim.start()
-        self._glow_color_anim.start()
         self.update()
-            
+    
     def leaveEvent(self, event):
         self._is_hovered = False
-        self._glow.setEnabled(False)
-        # Stop breathing animation
-        self._glow_anim.stop()
-        self._glow_color_anim.stop()
         self.update()
+    
+    def hideEvent(self, event):
+        """Hide glow when button is hidden"""
+        super().hideEvent(event)
+        if self._glow_overlay:
+            self._glow_overlay.hide()
+    
+    def deleteLater(self):
+        """Clean up glow overlay"""
+        if self._pulse_timer:
+            self._pulse_timer.stop()
+        if self._glow_overlay:
+            self._glow_overlay.deleteLater()
+        super().deleteLater()
