@@ -4,11 +4,11 @@ Presets Plugin - Orchestrator
 Entry point that connects the logic layer with the UI layer.
 Receives ToolRegistryProtocol via Dependency Injection.
 """
-from typing import Optional, List, TYPE_CHECKING
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from PyQt6.QtWidgets import QWidget
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from client.plugins.presets.logic import PresetManager, CommandBuilder, PresetDefinition
+from client.plugins.presets.logic import PresetManager, CommandBuilder, PresetDefinition, MediaAnalyzer
 from client.plugins.presets.ui import PresetGallery
 
 if TYPE_CHECKING:
@@ -23,6 +23,7 @@ class PresetOrchestrator(QObject):
     - Loading presets via PresetManager
     - Displaying gallery via PresetGallery
     - Building commands via CommandBuilder when preset is selected
+    - Analyzing media via MediaAnalyzer for smart presets
     
     Signals:
         preset_selected: Emitted when user selects a preset (PresetDefinition)
@@ -48,6 +49,7 @@ class PresetOrchestrator(QObject):
         # Initialize logic components
         self._manager = PresetManager(registry)
         self._builder = CommandBuilder(registry)
+        self._analyzer = MediaAnalyzer(registry)
         
         # Initialize UI
         self._gallery = PresetGallery(parent_widget)
@@ -105,6 +107,18 @@ class PresetOrchestrator(QObject):
         """
         return self._builder.build_pipeline(preset, context)
     
+    def analyze_file(self, file_path: str) -> Dict[str, Any]:
+        """
+        Analyze a media file and return metadata.
+        
+        Args:
+            file_path: Path to media file
+            
+        Returns:
+            Dict with meta fields (fps, is_landscape, etc.)
+        """
+        return self._analyzer.analyze(file_path)
+    
     @property
     def presets(self) -> List[PresetDefinition]:
         """Get all loaded presets."""
@@ -119,3 +133,8 @@ class PresetOrchestrator(QObject):
     def gallery(self) -> PresetGallery:
         """Get the gallery widget."""
         return self._gallery
+    
+    @property
+    def analyzer(self) -> MediaAnalyzer:
+        """Get the media analyzer."""
+        return self._analyzer

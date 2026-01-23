@@ -1275,17 +1275,28 @@ class MainWindow(QMainWindow):
                 
                 output_path = output_dir / f"{input_p.stem}_preset{input_p.suffix}"
                 
+                # Analyze media for meta context (Tier 3 - Smart Presets)
+                orchestrator = self.drag_drop_area._preset_orchestrator
+                meta = orchestrator.analyze_file(str(input_path))
+                print(f"[Preset Conversion] Meta: fps={meta.get('fps')}, landscape={meta.get('is_landscape')}")
+                
+                # Get default parameter values from preset
+                param_defaults = {}
+                for param in preset.parameters:
+                    param_defaults[param.id] = param.default
+                
                 # Build context for Jinja2 template
                 context = {
                     'input_path': str(input_path),
                     'output_path': str(output_path),
-                    'quality': 23,  # Default, will be overridden by preset params in Tier 2
+                    'meta': meta,  # Inject meta for smart logic
+                    **param_defaults,  # Inject default parameter values
                 }
                 
                 # Build command from preset template
                 if preset.pipeline:
                     cmd = builder.build_command(preset.pipeline[0], context)
-                    print(f"[Preset Conversion] Command: {cmd[:150]}...")
+                    print(f"[Preset Conversion] Command: {cmd[:200]}...")
                     
                     # Execute command
                     result = subprocess.run(
