@@ -252,7 +252,7 @@ class MainWindow(QMainWindow):
         
         # Create output footer
         self.output_footer = OutputFooter()
-        self.output_footer.start_conversion.connect(self.start_conversion)
+        self.output_footer.start_conversion.connect(self._on_footer_start)
         self.output_footer.stop_conversion.connect(self.stop_conversion)
         content_layout.addWidget(self.output_footer)
         

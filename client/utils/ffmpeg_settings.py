@@ -1,6 +1,10 @@
 """
-FFmpeg Settings Manager
-Handles persistent storage and validation of FFmpeg configuration
+FFmpeg Settings Manager - FACADE
+
+This module is maintained for backward compatibility.
+It delegates to the new ToolRegistry system.
+
+For new code, use: from client.core.tool_registry import get_registry
 """
 
 import os
@@ -11,11 +15,25 @@ from pathlib import Path
 
 
 class FFmpegSettings:
-    """Manage FFmpeg settings with persistent storage"""
+    """
+    Facade over ToolRegistry for backward compatibility.
+    
+    Delegates all operations to the central ToolRegistry while
+    maintaining the existing public API.
+    """
     
     def __init__(self):
+        # Legacy settings file path (for reading old settings)
         self.settings_file = self._get_settings_path()
         self.settings = self._load_settings()
+        self._registry = None
+    
+    def _get_registry(self):
+        """Lazy load registry to avoid circular imports."""
+        if self._registry is None:
+            from client.core.tool_registry import get_registry
+            self._registry = get_registry()
+        return self._registry
         
     def _get_settings_path(self):
         """Get the path to the settings file"""
@@ -59,22 +77,41 @@ class FFmpegSettings:
     
     def get_mode(self):
         """Get current FFmpeg mode"""
-        return self.settings.get('mode', 'bundled')
+        # Try registry first, fall back to local settings
+        try:
+            return self._get_registry().get_tool_mode('ffmpeg')
+        except Exception:
+            return self.settings.get('mode', 'bundled')
     
     def get_custom_path(self):
         """Get custom FFmpeg path"""
-        return self.settings.get('custom_path', '')
+        try:
+            return self._get_registry().get_custom_path('ffmpeg')
+        except Exception:
+            return self.settings.get('custom_path', '')
     
     def set_mode(self, mode):
         """Set FFmpeg mode ('bundled', 'custom', 'system')"""
         if mode in ['bundled', 'custom', 'system']:
             self.settings['mode'] = mode
             self._save_settings()
+            # Also update registry
+            try:
+                custom_path = self.settings.get('custom_path', '') if mode == 'custom' else ''
+                self._get_registry().set_tool_mode('ffmpeg', mode, custom_path)
+            except Exception:
+                pass
     
     def set_custom_path(self, path):
         """Set custom FFmpeg path"""
         self.settings['custom_path'] = path
         self._save_settings()
+        # Also update registry if in custom mode
+        try:
+            if self.get_mode() == 'custom':
+                self._get_registry().set_tool_mode('ffmpeg', 'custom', path)
+        except Exception:
+            pass
     
     def validate_ffmpeg(self, ffmpeg_path):
         """Validate if the file is a valid ffmpeg executable"""
@@ -127,22 +164,33 @@ class FFmpegSettings:
     
     def apply_settings(self):
         """Apply current settings to environment variables"""
-        from client.core.conversion_engine_validation import validate_and_apply_ffmpeg
-        
-        mode = self.get_mode()
-        custom_path = self.get_custom_path() if mode == 'custom' else ''
-        
-        # Use the validation module to apply settings
-        success, error_msg, applied_path = validate_and_apply_ffmpeg(mode, custom_path)
-        
-        if not success:
-            # Fallback to bundled if validation fails
-            print(f"Warning: FFmpeg validation failed ({error_msg}), falling back to bundled")
-            self.set_mode('bundled')
-            success, error_msg, applied_path = validate_and_apply_ffmpeg('bundled', '')
+        # Delegate to ToolRegistry
+        try:
+            registry = self._get_registry()
+            mode = self.get_mode()
+            custom_path = self.get_custom_path() if mode == 'custom' else ''
+            registry.set_tool_mode('ffmpeg', mode, custom_path)
+            
+            if not registry.is_tool_available('ffmpeg'):
+                # Fallback to bundled if validation fails
+                print("Warning: FFmpeg validation failed, falling back to bundled")
+                registry.set_tool_mode('ffmpeg', 'bundled', '')
+                self.settings['mode'] = 'bundled'
+                self._save_settings()
+        except Exception as e:
+            # Fall back to legacy behavior
+            print(f"Warning: ToolRegistry not available, using legacy apply: {e}")
+            from client.core.conversion_engine_validation import validate_and_apply_ffmpeg
+            
+            mode = self.get_mode()
+            custom_path = self.get_custom_path() if mode == 'custom' else ''
+            
+            success, error_msg, applied_path = validate_and_apply_ffmpeg(mode, custom_path)
             
             if not success:
-                print(f"Error: Even bundled FFmpeg failed: {error_msg}")
+                print(f"Warning: FFmpeg validation failed ({error_msg}), falling back to bundled")
+                self.set_mode('bundled')
+                validate_and_apply_ffmpeg('bundled', '')
     
     def validate_on_startup(self):
         """Validate FFmpeg configuration on app startup"""

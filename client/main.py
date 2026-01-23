@@ -223,31 +223,34 @@ class StartupWorker(QThread):
         
     def run(self):
         try:
-            # Initialize and validate FFmpeg settings
-            from client.utils.ffmpeg_settings import get_ffmpeg_settings
-            ffmpeg_settings = get_ffmpeg_settings()
+            # Initialize ToolRegistry (handles all tool resolution)
+            from client.core.tool_registry import get_registry
+            registry = get_registry()
+            registry.resolve_all()
             
-            # Validate FFmpeg on startup and apply settings
-            # This is the heavy blocking part
-            if not ffmpeg_settings.validate_on_startup():
-                print("Warning: FFmpeg validation failed, using bundled FFmpeg")
+            # Log which FFmpeg is being used
+            ffmpeg_path = registry.get_tool_path('ffmpeg')
+            if ffmpeg_path:
+                print(f"DEBUG: Using FFmpeg: {ffmpeg_path}")
+                if CRASH_REPORTING_AVAILABLE:
+                    log_info(f"FFmpeg resolved: {ffmpeg_path}", "startup")
+            else:
+                print("Warning: No valid FFmpeg found")
             
-            # Apply the saved FFmpeg settings
-            ffmpeg_settings.apply_settings()
-            
-            # Check for FFmpeg (Critical for Lite versions)
+            # Fallback: if registry didn't set FFMPEG_BINARY, try system
             if not os.environ.get('FFMPEG_BINARY'):
-                # Fallback to system FFmpeg
                 system_ffmpeg = shutil.which('ffmpeg')
                 if system_ffmpeg:
                     os.environ['FFMPEG_BINARY'] = system_ffmpeg
                     if CRASH_REPORTING_AVAILABLE:
-                        log_info(f"Using system FFmpeg: {system_ffmpeg}", "startup")
+                        log_info(f"Using system FFmpeg fallback: {system_ffmpeg}", "startup")
             
             self.success = True
             
         except Exception as e:
             print(f"Startup validation error: {e}")
+            import traceback
+            traceback.print_exc()
             self.success = False
 
 # ----------------------------------------------------------------------------
