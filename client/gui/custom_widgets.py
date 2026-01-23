@@ -4,7 +4,7 @@ Provides TimeRangeSlider, ResizeFolder, and Rotation classes
 """
 
 from PyQt6.QtCore import Qt, pyqtSignal, QRect, QRectF, QPoint, QPointF, QSize, QPropertyAnimation, QVariantAnimation, QEasingCurve, pyqtProperty, QTimer, QObject
-from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QPalette, QIcon, QPixmap, QFont, QFontMetrics
+from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QPalette, QIcon, QPixmap, QFont, QFontMetrics, QPainterPath
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, 
     QSpinBox, QLineEdit, QGroupBox, QFormLayout, QCheckBox, QSizePolicy, 
@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
 from client.utils.font_manager import AppFonts, FONT_FAMILY
 from client.utils.resource_path import get_resource_path
 from client.gui.theme_variables import get_theme, get_color
+from client.gui.effects.glow_effect import GlowEffectManager, GlowState
 import os
 import math
 
@@ -3182,10 +3183,10 @@ class MorphingButton(QPushButton):
     
     # Constants
     COLLAPSED_SIZE = 48
-    EXPAND_DELAY_MS = 200
+    EXPAND_DELAY_MS = 60
     ANIMATION_DURATION = 400  # Luxurious weighted motion: 650ms
     EXPANDED_WIDTH = 200
-    STAGGER_DELAY = 50 # ms between items
+    STAGGER_DELAY = 120 # ms between items
     
     # Debug flag for alignment visualization
     DEBUG_ALIGNMENT = False
@@ -3198,6 +3199,7 @@ class MorphingButton(QPushButton):
         
         # State
         self._is_expanded = False
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus) # Allow key events for debug toggles
         self._is_hovered = False
         self._is_solid_style = False # False = Ghost, True = Solid
         self._active_item_id = None
@@ -3254,6 +3256,105 @@ class MorphingButton(QPushButton):
     def animWidth(self, w):
         self.setFixedWidth(w)
         self.update()
+
+    @pyqtProperty(str)
+    def animationEasing(self):
+        return getattr(self, '_easing_style_name', 'OutBack')
+        
+    @animationEasing.setter
+    def animationEasing(self, name):
+        self._easing_style_name = name
+        self._update_easing()
+
+    @pyqtProperty(float)
+    def easingAmplitude(self):
+        return getattr(self, '_easing_amp', 0.8) # Default for Back overshoot
+
+    @easingAmplitude.setter
+    def easingAmplitude(self, val):
+        self._easing_amp = val
+        self._update_easing()
+
+    @pyqtProperty(float)
+    def easingPeriod(self):
+        return getattr(self, '_easing_period', 0.3)
+
+    @easingPeriod.setter
+    def easingPeriod(self, val):
+        self._easing_period = val
+        self._update_easing()
+
+    def _update_easing(self):
+        name = getattr(self, '_easing_style_name', 'OutBack')
+        amp = getattr(self, '_easing_amp', 0.8)
+        period = getattr(self, '_easing_period', 0.3)
+        
+        try:
+            curve_type = getattr(QEasingCurve.Type, name)
+            easing = QEasingCurve(curve_type)
+            
+            # Apply generic params (Qt uses what's relevant for the curve type)
+            easing.setOvershoot(amp)    # For Back curves
+            easing.setAmplitude(amp)    # For Elastic/Bounce
+            easing.setPeriod(period)    # For Elastic
+            
+            self._width_anim.setEasingCurve(easing)
+        except:
+            pass
+            
+    def toggle_dev_panel(self):
+        if not hasattr(self, '_param_panel'):
+            from client.gui.effects.dev_panel import DevPanel
+            
+            easing_styles = [
+                'OutBack', 'OutElastic', 'OutBounce', 
+                'InOutQuad', 'OutCubic', 'Linear', 
+                'OutExpo', 'InOutElastic'
+            ]
+            
+            params_layout = {
+                'COLLAPSED_SIZE': (20, 100, 2),
+                'EXPANDED_WIDTH': (100, 400, 10),
+                'EXPAND_DELAY_MS': (0, 1000, 50),
+                'STAGGER_DELAY': (0, 200, 10),
+            }
+
+            params_anim = {
+                'animationEasing': (easing_styles,), 
+                'easingAmplitude': (0.0, 5.0, 0.1), # Controls Overshoot/Elasticity
+                'easingPeriod': (0.0, 2.0, 0.05),   # Controls Elastic Period
+                'ANIMATION_DURATION': (100, 2000, 50),
+            }
+            
+            # Helper to update dependent timers/state
+            def on_change():
+                self.setFixedHeight(self.COLLAPSED_SIZE)
+                self.setMinimumWidth(self.COLLAPSED_SIZE)
+                self._hover_timer.setInterval(self.EXPAND_DELAY_MS)
+                self._width_anim.setDuration(self.ANIMATION_DURATION)
+                self.update()
+            
+            source_file = r"v:\_MY_APPS\ImgApp_1\client\gui\custom_widgets.py"
+            
+            self._param_panel = DevPanel(title="Inspector - Morphing Button")
+            self._param_panel.add_section(
+                self, params_layout, "Layout & Timing", source_file, on_change
+            )
+            self._param_panel.add_section(
+                self, params_anim, "Animation Control", source_file, on_change
+            )
+            
+        if self._param_panel.isVisible():
+            self._param_panel.hide()
+        else:
+            self._param_panel.show()
+            self._param_panel.raise_()
+            
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_F12:
+            self.toggle_dev_panel()
+            return
+        super().keyPressEvent(event)
         
     def _setup_ui(self):
         # Menu Container
@@ -3564,165 +3665,10 @@ class MorphingButton(QPushButton):
 
 
 
-class SiriGlowOverlay(QWidget):
-    """
-    Capsule-shaped glow widget with Siri-style gradient colors.
-    Parented to top-level window to avoid clipping.
-    """
-    
-    # ========== GLOW EFFECT CONFIGURATION ==========
-    # Adjust these parameters to tune the glow appearance
-    
-    # Blob appearance
-    BLOB_RADIUS = 55                    # Size of each color blob
-    BLOB_OPACITY_CENTER = 200           # Opacity at blob center (0-255)
-    BLOB_OPACITY_MID = 120              # Opacity at blob mid-point (0-255)
-    BLOB_OPACITY_EDGE = 0               # Opacity at blob edge (0-255)
-    
-    # Ellipse orbit
-    ELLIPSE_SCALE_X = 0.5               # Horizontal ellipse size (0.0-1.0, fraction of overlay width)
-    ELLIPSE_SCALE_Y = 0.5               # Vertical ellipse size (0.0-1.0, fraction of overlay height)
-    
-    # Pulsation
-    PULSE_OPACITY_MIN = 0.8             # Minimum opacity during pulse (0.0-1.0)
-    PULSE_OPACITY_MAX = 1.0             # Maximum opacity during pulse (0.0-1.0)
-    
-    # Color shifting
-    HUE_SHIFT_DEGREES = 30              # Maximum hue shift in degrees (0-360)
-    HUE_SHIFT_PHASE_START = 0.25        # Phase where shift starts fading (0.0-1.0)
-    HUE_SHIFT_PHASE_END = 0.75          # Phase where shift starts rising (0.0-1.0)
-    
-    # Base colors (RGB tuples)
-    COLOR_BLUE = (30, 144, 255)         # Dodger Blue
-    COLOR_GREEN = (16, 185, 129)        # Emerald Green
-    COLOR_ORANGE = (255, 165, 0)        # Orange
-    
-    # Blob positioning (phase offsets, 0.0-1.0)
-    BLOB_PHASE_BLUE = 0.0               # Blue blob starting position
-    BLOB_PHASE_GREEN = 0.333            # Green blob starting position (120° ahead)
-    BLOB_PHASE_ORANGE = 0.667           # Orange blob starting position (240° ahead)
-    
-    # Noise Grain
-    NOISE_OPACITY = 35                  # Opacity of the noise grain (0-255)
-    NOISE_TILE_SIZE = 128               # Size of the noise texture tile
-    
-    # ===============================================
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._pulse_phase = 0.0  # 0.0 to 1.0 for pulse cycle
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        
-        # Generate static noise texture for efficient grain effect
-        self._noise_pixmap = self._generate_noise_texture()
-        
-    def _generate_noise_texture(self):
-        """Generate a static noise texture to prevent banding"""
-        from PyQt6.QtGui import QImage, QPixmap
-        import random
-        
-        size = self.NOISE_TILE_SIZE
-        image = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
-        image.fill(Qt.GlobalColor.transparent)
-        
-        # Generate random noise
-        for y in range(size):
-            for x in range(size):
-                # Random alpha for white pixel (0-255)
-                # Using only white noise for additive grain
-                alpha = random.randint(0, 50)
-                image.setPixelColor(x, y, QColor(255, 255, 255, alpha))
-        
-        return QPixmap.fromImage(image)
-        
-    def set_pulse_phase(self, phase):
-        """Set the current pulse phase (0.0-1.0)"""
-        self._pulse_phase = phase
-        self.update()
-        
-    def paintEvent(self, event):
-        from PyQt6.QtGui import QRadialGradient
-        import math
-        import colorsys
-        
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        w = self.width()
-        h = self.height()
-        
-        phase = self._pulse_phase  # 0.0 to 1.0
-        
-        # Calculate shift strength based on pulse phase
-        if phase < self.HUE_SHIFT_PHASE_START:
-            shift_strength = 1.0 - (phase / self.HUE_SHIFT_PHASE_START)
-        elif phase > self.HUE_SHIFT_PHASE_END:
-            shift_strength = (phase - self.HUE_SHIFT_PHASE_END) / (1.0 - self.HUE_SHIFT_PHASE_END)
-        else:
-            shift_strength = 0.0
-        
-        # Hue shift amount
-        hue_shift_deg = self.HUE_SHIFT_DEGREES * shift_strength
-        hue_shift = hue_shift_deg / 360.0
-        
-        def shift_hue(rgb, shift):
-            r, g, b = rgb[0]/255.0, rgb[1]/255.0, rgb[2]/255.0
-            h, s, v = colorsys.rgb_to_hsv(r, g, b)
-            h = (h + shift) % 1.0
-            r, g, b = colorsys.hsv_to_rgb(h, s, v)
-            return (int(r * 255), int(g * 255), int(b * 255))
-        
-        # Apply hue shift
-        blue = shift_hue(self.COLOR_BLUE, hue_shift)
-        green = shift_hue(self.COLOR_GREEN, hue_shift)
-        orange = shift_hue(self.COLOR_ORANGE, hue_shift)
-        
-        # Opacity pulsation
-        pulse_range = self.PULSE_OPACITY_MAX - self.PULSE_OPACITY_MIN
-        pulse_opacity = self.PULSE_OPACITY_MIN + pulse_range * (0.5 + 0.5 * math.sin(phase * 2 * math.pi))
-        painter.setOpacity(pulse_opacity)
-        
-        # Ellipse parameters (centered in the widget)
-        center_x = w / 2
-        center_y = h / 2
-        ellipse_rx = (w / 2) * self.ELLIPSE_SCALE_X
-        ellipse_ry = (h / 2) * self.ELLIPSE_SCALE_Y
-        
-        # Three blobs at different positions on the ellipse
-        blobs = [
-            {'color': blue, 'phase_offset': self.BLOB_PHASE_BLUE},
-            {'color': green, 'phase_offset': self.BLOB_PHASE_GREEN},
-            {'color': orange, 'phase_offset': self.BLOB_PHASE_ORANGE},
-        ]
-        
-        painter.setPen(Qt.PenStyle.NoPen)
-        
-        for blob in blobs:
-            # Calculate position on ellipse
-            angle = (phase + blob['phase_offset']) * 2 * math.pi
-            blob_x = center_x + ellipse_rx * math.cos(angle)
-            blob_y = center_y + ellipse_ry * math.sin(angle)
-            
-            # Create radial gradient for soft blob
-            gradient = QRadialGradient(blob_x, blob_y, self.BLOB_RADIUS)
-            color = blob['color']
-            gradient.setColorAt(0.0, QColor(color[0], color[1], color[2], self.BLOB_OPACITY_CENTER))
-            gradient.setColorAt(0.5, QColor(color[0], color[1], color[2], self.BLOB_OPACITY_MID))
-            gradient.setColorAt(1.0, QColor(color[0], color[1], color[2], self.BLOB_OPACITY_EDGE))
-            
-            painter.setBrush(QBrush(gradient))
-            painter.drawEllipse(
-                int(blob_x - self.BLOB_RADIUS),
-                int(blob_y - self.BLOB_RADIUS),
-                self.BLOB_RADIUS * 2,
-                self.BLOB_RADIUS * 2
-            )
-            
-        # Draw noise overlay to prevent banding
-        # We tile the small noise texture across the widget
-        painter.setOpacity(self.NOISE_OPACITY / 255.0)
-        painter.drawTiledPixmap(self.rect(), self._noise_pixmap)
+
+
+
+
 
 
 class PresetStatusButton(QWidget):
@@ -3737,14 +3683,28 @@ class PresetStatusButton(QWidget):
     MIN_WIDTH = 150  # Minimum to fit "PRESETS" text
     MAX_WIDTH = 250  # Max for longer preset names
     PADDING = 30  # 30px left + 30px right for wider look
-    GLOW_RADIUS = 80  # Blur radius for glow effect
-    GLOW_PADDING = 10  # Extra padding around button for glow spread
-    PULSE_DURATION_MS = 4000  # 4 second pulse cycle
+    ANIM_DURATION = 400 # Width animation duration (ms)
+    
+    # ==================== BUTTON NOISE CONFIGURATION ====================
+    # Anti-banding noise applied to the button's solid background
+    # This is separate from GlowNoiseOverlay which handles the blurred glow area
+    
+    # Opacity of the button's internal noise layer (0-255)
+    # Recommended: 10-20 for subtle effect, higher if button has gradient fill
+    NOISE_OPACITY = 15
+    
+    # Size of noise texture tile for button (pixels)
+    NOISE_TILE_SIZE = 64
+    
+    # Noise intensity for button background
+    NOISE_INTENSITY = 30
+    # ====================================================================
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus) # Allow key events for debug
         self.setFixedHeight(48)
         
         # State
@@ -3756,84 +3716,161 @@ class PresetStatusButton(QWidget):
         self._current_width = self.MIN_WIDTH
         self._temp_shrink = False
         
-        # Glow overlay (will be created in showEvent when window is available)
-        self._glow_overlay = None
-        self._pulse_timer = None
-        self._pulse_start_time = 0
+        # Generate noise texture once for anti-banding
+        self._noise_pixmap = self._generate_noise_texture()
+        
+        # Glow Effect Manager
+        self._glow_manager = None
         
         # Width animation
         self._width_anim = QPropertyAnimation(self, b"animWidth", self)
-        self._width_anim.setDuration(400)
+        self._width_anim.setDuration(self.ANIM_DURATION)
         self._width_anim.setEasingCurve(QEasingCurve.Type.OutElastic)
         
         # Calculate initial width
         self._calculate_and_set_initial_width()
+        
+    def mousePressEvent(self, event):
+        self.setFocus()
+        if hasattr(super(), 'mousePressEvent'):
+             super().mousePressEvent(event)
+             
+    def mouseReleaseEvent(self, event):
+        # Implement basic click behavior if missing
+        if self.rect().contains(event.position().toPoint()):
+            self.clicked.emit()
+        if hasattr(super(), 'mouseReleaseEvent'):
+             super().mouseReleaseEvent(event)
     
-    def showEvent(self, event):
-        """Create glow overlay when button becomes visible"""
-        super().showEvent(event)
-        self._setup_glow()
+
+    
+    def _generate_noise_texture(self):
+        """
+        Generate a static noise texture for the button background.
+        Prevents banding on solid/gradient button fills.
+        """
+        from PyQt6.QtGui import QImage, QPixmap
+        import random
+        
+        size = self.NOISE_TILE_SIZE
+        intensity = self.NOISE_INTENSITY
+        image = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(Qt.GlobalColor.transparent)
+        
+        # Bidirectional noise for natural film-grain effect
+        for y in range(size):
+            for x in range(size):
+                noise_val = random.randint(-intensity, intensity)
+                if noise_val > 0:
+                    image.setPixelColor(x, y, QColor(255, 255, 255, noise_val))
+                elif noise_val < 0:
+                    image.setPixelColor(x, y, QColor(0, 0, 0, abs(noise_val)))
+        
+        return QPixmap.fromImage(image)
     
     def _setup_glow(self):
-        """Create the glow overlay parented to the top-level window"""
-        if self._glow_overlay is not None:
+        """Create the glow effect manager"""
+        if self._glow_manager is not None:
             return
             
         top_window = self.window()
         if top_window is None or top_window == self:
             return
-        
-        from PyQt6.QtWidgets import QGraphicsBlurEffect
-        
-        # Create glow overlay parented to window (avoids clipping)
-        self._glow_overlay = SiriGlowOverlay(top_window)
-        
-        # Apply blur effect for soft glow
-        blur = QGraphicsBlurEffect()
-        blur.setBlurRadius(self.GLOW_RADIUS)
-        self._glow_overlay.setGraphicsEffect(blur)
-        
-        # Position and show the glow
-        self._update_glow_position()
-        self._glow_overlay.show()
-        self._glow_overlay.raise_()  # In front (mouse-transparent so clicks pass through)
-        
-        print(f"[GLOW DEBUG] Glow created at: {self._glow_overlay.geometry()}")
-        
-        # Start pulsation timer
-        import time
-        self._pulse_start_time = time.time()
-        self._pulse_timer = QTimer(self)
-        self._pulse_timer.timeout.connect(self._update_pulse)
-        self._pulse_timer.start(16)  # ~60 FPS
-    
-    def _update_pulse(self):
-        """Update the glow pulsation"""
-        if self._glow_overlay is None:
-            return
-        
-        import time
-        elapsed = time.time() - self._pulse_start_time
-        phase = (elapsed * 1000 / self.PULSE_DURATION_MS) % 1.0
-        self._glow_overlay.set_pulse_phase(phase)
+            
+        # Initialize the manager
+        self._glow_manager = GlowEffectManager(self, top_window)
     
     def _update_glow_position(self):
-        """Update glow overlay position to match button"""
-        if self._glow_overlay is None:
-            return
+        """Delegated to manager"""
+        if self._glow_manager:
+            self._glow_manager.update_position()
             
-        top_window = self.window()
-        if top_window is None:
-            return
+    def toggle_dev_panel(self):
+        if not hasattr(self, '_param_panel'):
+            from client.gui.effects.dev_panel import DevPanel
             
-        btn_pos = self.mapTo(top_window, QPoint(0, 0))
-        self._glow_overlay.setGeometry(
-            btn_pos.x() - self.GLOW_PADDING,
-            btn_pos.y() - self.GLOW_PADDING,
-            self.width() + (self.GLOW_PADDING * 2),
-            self.height() + (self.GLOW_PADDING * 2)
-        )
-    
+            # Create consolidated panel
+            self._param_panel = DevPanel(title="Inspector - Preset Button")
+            
+            # --- Section 1: Button Properties ---
+            btn_params = {
+                'ANIM_DURATION': (100, 2000, 50),
+                'MIN_WIDTH': (50, 200, 5),
+                'MAX_WIDTH': (150, 400, 5),
+                'PADDING': (0, 100, 2),
+                'NOISE_OPACITY': (0, 255, 5),
+                'NOISE_INTENSITY': (0, 100, 2),
+            }
+            def btn_change():
+                self._width_anim.setDuration(self.ANIM_DURATION)
+                self._update_width()
+                self.update()
+            
+            self._param_panel.add_section(
+                target=self, 
+                params=btn_params, 
+                title="Button Logic", 
+                source_file=r"v:\_MY_APPS\ImgApp_1\client\gui\custom_widgets.py",
+                on_change=btn_change
+            )
+            
+            # --- Section 2: Glow Effect ---
+            if self._glow_manager and self._glow_manager._glow_overlay:
+                glow = self._glow_manager._glow_overlay
+                glow_params = {
+                    'BLOB_RADIUS': (10, 150, 5),
+                    'BLOB_OPACITY_CENTER': (0, 255, 5),
+                    'BLOB_OPACITY_MID': (0, 255, 5),
+                    'ELLIPSE_SCALE_X': (0.1, 1.5, 0.05, True),
+                    'ELLIPSE_SCALE_Y': (0.1, 1.5, 0.05, True),
+                    'PULSE_OPACITY_MIN': (0.0, 1.0, 0.05, True),
+                    'PULSE_OPACITY_MAX': (0.0, 1.0, 0.05, True),
+                    'MASK_PADDING': (0, 50, 1),
+                    'MASK_CORNER_RADIUS': (0, 50, 1),
+                    'MASK_FEATHER': (0, 50, 1),
+                    'HOVER_MAX_OPACITY': (0.0, 1.0, 0.05, True),
+                    'HOVER_FADE_IN_MS': (50, 1000, 50),
+                    'HOVER_FADE_OUT_MS': (50, 1000, 50),
+                }
+                def glow_change(): 
+                    glow.update()
+                    
+                self._param_panel.add_section(
+                    target=glow,
+                    params=glow_params,
+                    title="Glow Overlay",
+                    source_file=r"v:\_MY_APPS\ImgApp_1\client\gui\effects\glow_effect.py",
+                    on_change=glow_change
+                )
+                
+                # --- Section 3: Glow Animation ---
+                anim_params = {
+                    'animationEasing': (['OutBack', 'OutElastic', 'OutBounce', 'InOutQuad', 'OutCubic', 'Linear', 'OutExpo', 'InOutElastic'],),
+                    'easingAmplitude': (0.0, 5.0, 0.1),
+                    'easingPeriod': (0.0, 2.0, 0.05),
+                }
+                
+                self._param_panel.add_section(
+                    target=self._glow_manager,
+                    params=anim_params,
+                    title="Glow Animation",
+                    source_file=r"v:\_MY_APPS\ImgApp_1\client\gui\effects\glow_effect.py",
+                    on_change=lambda: None
+                )
+            
+        if self._param_panel.isVisible():
+            self._param_panel.hide()
+        else:
+            self._param_panel.show()
+            self._param_panel.raise_()
+
+    def keyPressEvent(self, event):
+        """Debug hook for effect tuning"""
+        if event.key() == Qt.Key.Key_F12:
+            self.toggle_dev_panel()
+            return
+        super().keyPressEvent(event)
+            
     def moveEvent(self, event):
         """Update glow position when button moves"""
         super().moveEvent(event)
@@ -3843,7 +3880,21 @@ class PresetStatusButton(QWidget):
         """Update glow position when button resizes"""
         super().resizeEvent(event)
         self._update_glow_position()
-    
+        
+    def hideEvent(self, event):
+        """Hide glow when button is hidden"""
+        super().hideEvent(event)
+        if self._glow_manager:
+            self._glow_manager.hide()
+            
+    def showEvent(self, event):
+        """Show/create glow when button is shown"""
+        super().showEvent(event)
+        if self._glow_manager is None:
+            self._setup_glow()
+        elif self._glow_manager:
+            self._glow_manager.show()
+
     @pyqtProperty(int)
     def animWidth(self):
         return self._current_width
@@ -3936,6 +3987,17 @@ class PresetStatusButton(QWidget):
             
         painter.drawRoundedRect(1, 1, w-2, h-2, int(radius), int(radius))
         
+        # Apply noise grain to prevent gradient banding
+        # Clip to rounded rect shape, draw tiled noise, then restore
+        if self._noise_pixmap and self.NOISE_OPACITY > 0:
+            path = QPainterPath()
+            path.addRoundedRect(1.0, 1.0, float(w-2), float(h-2), radius, radius)
+            painter.setClipPath(path)
+            painter.setOpacity(self.NOISE_OPACITY / 255.0)
+            painter.drawTiledPixmap(self.rect(), self._noise_pixmap)
+            painter.setOpacity(1.0)
+            painter.setClipping(False)
+        
         # Text
         painter.setPen(self._text_color)
         font = self.font()
@@ -3958,26 +4020,24 @@ class PresetStatusButton(QWidget):
     
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            if self._glow_manager:
+                self._glow_manager.set_state(GlowState.CLICKED)
             self.clicked.emit()
     
     def enterEvent(self, event):
         self._is_hovered = True
+        if self._glow_manager:
+            self._glow_manager.set_state(GlowState.HOVER)
         self.update()
     
     def leaveEvent(self, event):
         self._is_hovered = False
+        if self._glow_manager:
+            self._glow_manager.set_state(GlowState.IDLE)
         self.update()
     
-    def hideEvent(self, event):
-        """Hide glow when button is hidden"""
-        super().hideEvent(event)
-        if self._glow_overlay:
-            self._glow_overlay.hide()
-    
     def deleteLater(self):
-        """Clean up glow overlay"""
-        if self._pulse_timer:
-            self._pulse_timer.stop()
-        if self._glow_overlay:
-            self._glow_overlay.deleteLater()
+        """Clean up glow manager"""
+        if self._glow_manager:
+            self._glow_manager.cleanup()
         super().deleteLater()
