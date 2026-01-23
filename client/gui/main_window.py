@@ -1280,17 +1280,16 @@ class MainWindow(QMainWindow):
                 meta = orchestrator.analyze_file(str(input_path))
                 print(f"[Preset Conversion] Meta: fps={meta.get('fps')}, landscape={meta.get('is_landscape')}")
                 
-                # Get default parameter values from preset
-                param_defaults = {}
-                for param in preset.parameters:
-                    param_defaults[param.id] = param.default
+                # Get parameter values from orchestrator (form or defaults)
+                param_values = orchestrator.get_parameter_values()
+                print(f"[Preset Conversion] Params: {param_values}")
                 
                 # Build context for Jinja2 template
                 context = {
                     'input_path': str(input_path),
                     'output_path': str(output_path),
                     'meta': meta,  # Inject meta for smart logic
-                    **param_defaults,  # Inject default parameter values
+                    **param_values,  # Inject parameter values (from form or defaults)
                 }
                 
                 # Build command from preset template

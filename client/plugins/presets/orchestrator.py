@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import QWidget
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from client.plugins.presets.logic import PresetManager, CommandBuilder, PresetDefinition, MediaAnalyzer
-from client.plugins.presets.ui import PresetGallery
+from client.plugins.presets.ui import PresetGallery, ParameterForm
 
 if TYPE_CHECKING:
     from client.core.tool_registry.protocol import ToolRegistryProtocol
@@ -56,6 +56,10 @@ class PresetOrchestrator(QObject):
         self._gallery.preset_selected.connect(self._on_preset_selected)
         self._gallery.dismissed.connect(self._on_gallery_dismissed)
         
+        # Parameter form (created lazily per preset)
+        self._parameter_form: Optional[ParameterForm] = None
+        self._selected_preset: Optional[PresetDefinition] = None
+        
         # Load presets
         self._presets: List[PresetDefinition] = []
         self.reload_presets()
@@ -86,6 +90,7 @@ class PresetOrchestrator(QObject):
     def _on_preset_selected(self, preset: PresetDefinition):
         """Handle preset selection from gallery."""
         print(f"[PresetOrchestrator] Preset selected: {preset.name}")
+        self._selected_preset = preset  # Track selected preset
         self._gallery.hide_animated()
         self.preset_selected.emit(preset)
     
@@ -119,6 +124,42 @@ class PresetOrchestrator(QObject):
         """
         return self._analyzer.analyze(file_path)
     
+    def setup_parameter_form(self, preset: PresetDefinition, meta: Dict[str, Any] = None):
+        """
+        Setup or update the parameter form for a preset.
+        
+        Args:
+            preset: The selected preset
+            meta: Media metadata for visibility rules
+        """
+        self._selected_preset = preset
+        
+        if self._parameter_form is None:
+            self._parameter_form = ParameterForm()
+        
+        self._parameter_form.set_parameters(preset.parameters, meta or {})
+    
+    def get_parameter_values(self) -> Dict[str, Any]:
+        """
+        Get current parameter values from the form.
+        
+        Returns:
+            Dict of parameter id -> value
+        """
+        if self._parameter_form:
+            return self._parameter_form.get_values()
+        
+        # Fall back to defaults if no form
+        if self._selected_preset:
+            return {p.id: p.default for p in self._selected_preset.parameters}
+        
+        return {}
+    
+    @property
+    def selected_preset(self) -> Optional[PresetDefinition]:
+        """Get the currently selected preset."""
+        return self._selected_preset
+    
     @property
     def presets(self) -> List[PresetDefinition]:
         """Get all loaded presets."""
@@ -138,3 +179,8 @@ class PresetOrchestrator(QObject):
     def analyzer(self) -> MediaAnalyzer:
         """Get the media analyzer."""
         return self._analyzer
+    
+    @property
+    def parameter_form(self) -> Optional[ParameterForm]:
+        """Get the parameter form widget."""
+        return self._parameter_form
