@@ -508,7 +508,7 @@ class DragDropArea(QWidget):
         event.accept()
         
     def dropEvent(self, event: QDropEvent):
-        """Store files as pending and wait for user action"""
+        """Handle dropped files - add them to the list immediately"""
         if event.mimeData().hasUrls():
             files = []
             folders = []
@@ -526,8 +526,9 @@ class DragDropArea(QWidget):
                 folder_files = self.get_supported_files_from_folder(folder, True)
                 all_files.extend(folder_files)
             
-            # Store as pending - overlay stays visible
-            self._pending_files = all_files
+            # Add files directly to the list
+            if all_files:
+                self.add_files(all_files)
             
             event.acceptProposedAction()
         else:
