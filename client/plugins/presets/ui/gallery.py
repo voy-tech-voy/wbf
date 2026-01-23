@@ -73,6 +73,32 @@ class PresetGallery(QWidget):
         
         scroll.setWidget(self._card_container)
         main_layout.addWidget(scroll, 1)
+        
+        # Parameter panel (shown after preset selection)
+        from client.plugins.presets.ui.parameter_form import ParameterForm
+        self._param_panel = QFrame()
+        self._param_panel.setObjectName("ParamPanel")
+        self._param_panel.setStyleSheet("""
+            QFrame#ParamPanel {
+                background-color: rgba(30, 30, 30, 0.95);
+                border-radius: 8px;
+                padding: 12px;
+            }
+        """)
+        
+        param_layout = QVBoxLayout(self._param_panel)
+        param_layout.setContentsMargins(12, 12, 12, 12)
+        
+        self._selected_preset_label = QLabel("")
+        self._selected_preset_label.setObjectName("SelectedPresetLabel")
+        self._selected_preset_label.setStyleSheet("color: #00E0FF; font-size: 14px; font-weight: bold;")
+        param_layout.addWidget(self._selected_preset_label)
+        
+        self._parameter_form = ParameterForm()
+        param_layout.addWidget(self._parameter_form)
+        
+        self._param_panel.hide()  # Hidden until preset selected
+        main_layout.addWidget(self._param_panel)
     
     def _apply_styles(self):
         """Apply gallery styling."""
@@ -120,7 +146,16 @@ class PresetGallery(QWidget):
                 row += 1
     
     def _on_card_clicked(self, preset: PresetDefinition):
-        """Handle card click."""
+        """Handle card click - show parameters and emit selection."""
+        # Show parameter panel for this preset
+        if preset.parameters:
+            self._selected_preset_label.setText(f"⚙ {preset.name} Settings")
+            self._parameter_form.set_parameters(preset.parameters, {})
+            self._param_panel.show()
+        else:
+            self._param_panel.hide()
+        
+        # Emit selection signal
         self.preset_selected.emit(preset)
     
     def mousePressEvent(self, event):

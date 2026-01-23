@@ -1,0 +1,152 @@
+# ============================================================================
+# PRESET TEMPLATE - Copy and modify this file to create new presets
+# ============================================================================
+# Location: client/plugins/presets/assets/presets/
+# Filename: Use snake_case, e.g., youtube_shorts.yaml, twitter_video.yaml
+# ============================================================================
+
+# ============================================================================
+# SECTION 1: METADATA (Required)
+# ============================================================================
+meta:
+  id: "unique_preset_id"         # Unique identifier (snake_case, no spaces)
+  name: "Display Name"            # Name shown on the preset card
+  category: "social"              # Category for grouping: social, format, optimize, custom
+  description: "Brief description of what this preset does"
+  version: "1.0"
+
+# ============================================================================
+# SECTION 2: STYLE (Optional - affects preset card appearance)
+# ============================================================================
+style:
+  accent_color: "#00E0FF"         # Hex color for card glow/accent
+  icon: "default"                 # Icon filename (without .svg) from client/assets/icons/
+  glow_strength: "normal"         # Options: weak, normal, strong
+
+# ============================================================================
+# SECTION 3: CONSTRAINTS (Optional - file validation)
+# ============================================================================
+constraints:
+  accepted_types: ["video"]       # Options: video, image, audio
+  accepted_extensions: [".mp4", ".mov", ".mkv", ".avi", ".webm"]
+  min_duration: 1.0               # Minimum duration in seconds (optional)
+  max_duration: 180.0             # Maximum duration in seconds (optional)
+
+# ============================================================================
+# SECTION 4: PARAMETERS (Optional - user-adjustable settings)
+# ============================================================================
+# Each parameter creates a UI widget. Supported types:
+#   - toggle: Checkbox (boolean)
+#   - slider: Slider with min/max (number)
+#   - segmented_pill: Button group (string from options)
+#   - dropdown: Dropdown select (string from options)
+# ============================================================================
+parameters:
+  # --- TOGGLE EXAMPLE ---
+  - id: "enable_feature"          # Variable name in template (snake_case)
+    type: "toggle"
+    label: "Enable Feature"       # UI label
+    default: true                 # Default value
+    tooltip: "Tooltip shown on hover"
+
+  # --- SLIDER EXAMPLE ---
+  - id: "quality"
+    type: "slider"
+    label: "Quality (CRF)"
+    default: 23
+    min_value: 18                 # Lower = better quality, larger file
+    max_value: 28                 # Higher = worse quality, smaller file
+    tooltip: "Video quality (18=best, 28=smallest)"
+
+  # --- SEGMENTED PILL EXAMPLE ---
+  - id: "fill_method"
+    type: "segmented_pill"
+    label: "Fill Method"
+    options: ["Blur", "Crop", "Fit"]  # Options shown as buttons
+    default: "Blur"
+    # VISIBILITY RULE: Only show this widget when condition is true
+    # Available variables: other param IDs + meta.* (fps, is_landscape, etc.)
+    visibility_rule: "not enable_feature"
+
+  # --- DROPDOWN EXAMPLE ---
+  - id: "preset_speed"
+    type: "dropdown"
+    label: "Encoding Speed"
+    options: ["ultrafast", "fast", "medium", "slow", "veryslow"]
+    default: "medium"
+
+# ============================================================================
+# SECTION 5: PIPELINE (Required - the actual conversion commands)
+# ============================================================================
+# Each step runs a tool (usually ffmpeg). The command_template uses Jinja2.
+# 
+# AVAILABLE VARIABLES:
+#   {{ tool_exe }}        - Full path to the tool executable
+#   {{ input_path }}      - Input file path
+#   {{ output_path }}     - Output file path
+#   {{ meta.fps }}        - Source video FPS (float)
+#   {{ meta.width }}      - Source video width (int)
+#   {{ meta.height }}     - Source video height (int)
+#   {{ meta.is_landscape }} - True if width > height
+#   {{ meta.has_audio }}  - True if audio stream present
+#   {{ meta.duration }}   - Duration in seconds
+#   {{ param_id }}        - Value of any parameter defined above
+#
+# JINJA2 FEATURES:
+#   {% if condition %}...{% endif %}        - Conditional
+#   {% set var %}...{% endset %}            - Variable assignment
+#   {{ value | default(fallback) }}         - Default filter
+#   {{ (value * 2) | int }}                 - Math + conversion
+# ============================================================================
+pipeline:
+  - tool: "ffmpeg"
+    description: "Main conversion pass"
+    
+    # OPTIONAL: Dynamic output filename suffix (Jinja2 template)
+    filename_suffix: "_{{ 'hq' if quality < 20 else 'standard' }}"
+    
+    # THE COMMAND TEMPLATE
+    command_template: |
+      {{ tool_exe }} -y -i "{{ input_path }}"
+      
+      {# --- EXAMPLE: Conditional video filter --- #}
+      {% if enable_feature %}
+        -vf "scale=1920:1080"
+      {% else %}
+        -vf "scale={{ meta.width }}:{{ meta.height }}"
+      {% endif %}
+      
+      {# --- EXAMPLE: Quality from slider --- #}
+      -c:v libx264 -crf {{ quality | default(23) }}
+      
+      {# --- EXAMPLE: Encoding speed from dropdown --- #}
+      -preset {{ preset_speed | default('medium') }}
+      
+      {# --- EXAMPLE: Audio handling --- #}
+      {% if meta.has_audio %}
+        -c:a aac -b:a 192k
+      {% else %}
+        -an
+      {% endif %}
+      
+      -movflags +faststart
+      "{{ output_path }}"
+
+# ============================================================================
+# MULTI-STEP PIPELINE EXAMPLE (optional - for complex workflows)
+# ============================================================================
+# pipeline:
+#   - tool: "ffmpeg"
+#     description: "Step 1: Extract frames"
+#     command_template: |
+#       {{ tool_exe }} -i "{{ input_path }}" -vf fps=1 "frames_%04d.png"
+#
+#   - tool: "imagemagick"
+#     description: "Step 2: Process frames"
+#     command_template: |
+#       {{ tool_exe }} mogrify -resize 50% frames_*.png
+#
+#   - tool: "ffmpeg"
+#     description: "Step 3: Reassemble video"
+#     command_template: |
+#       {{ tool_exe }} -framerate 1 -i "frames_%04d.png" "{{ output_path }}"
