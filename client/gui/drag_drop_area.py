@@ -454,26 +454,48 @@ class DragDropArea(QWidget):
         
     def _setup_preset_plugin(self):
         """
-        PLACEHOLDER: Setup the preset plugin inside the drop area.
+        Setup the preset plugin inside the drop area.
         
-        This method will be implemented when the new preset gallery plugin is created.
-        The plugin will:
-        - Display preset cards as an overlay on the file list
-        - Accept the ToolRegistry via dependency injection
-        - Validate preset requirements against available tools
+        Initializes PresetOrchestrator with the ToolRegistry,
+        connecting logic and UI layers.
         """
-        pass
+        try:
+            from client.core.tool_registry import get_registry
+            from client.plugins.presets import PresetOrchestrator
+            
+            registry = get_registry()
+            self._preset_orchestrator = PresetOrchestrator(registry, self.file_list_widget)
+            self._preset_orchestrator.preset_selected.connect(self._on_preset_selected)
+            self._preset_orchestrator.gallery_dismissed.connect(self._on_preset_dismissed)
+            print(f"[DragDropArea] Preset plugin initialized with {len(self._preset_orchestrator.presets)} presets")
+        except Exception as e:
+            print(f"[DragDropArea] Failed to initialize preset plugin: {e}")
+            self._preset_orchestrator = None
+    
+    def _on_preset_selected(self, preset):
+        """Handle preset selection from the gallery."""
+        print(f"[DragDropArea] Preset selected: {preset.name}")
+        # Emit signal for parent to handle
+        self.preset_applied.emit(preset, self.file_list)
+    
+    def _on_preset_dismissed(self):
+        """Handle gallery dismissal."""
+        print("[DragDropArea] Preset gallery dismissed")
     
     def show_preset_view(self):
-        """Show the preset gallery. PLACEHOLDER for new plugin."""
-        # TODO: Implement new preset plugin display
-        print("[DEBUG] show_preset_view called - awaiting new preset plugin implementation")
-        pass
+        """Show the preset gallery overlay."""
+        if hasattr(self, '_preset_orchestrator') and self._preset_orchestrator:
+            self._preset_orchestrator.show_gallery()
+        else:
+            print("[DEBUG] Preset plugin not initialized - initializing now")
+            self._setup_preset_plugin()
+            if self._preset_orchestrator:
+                self._preset_orchestrator.show_gallery()
     
     def hide_preset_view(self):
-        """Hide the preset gallery. PLACEHOLDER for new plugin."""
-        # TODO: Implement new preset plugin hide
-        pass
+        """Hide the preset gallery overlay."""
+        if hasattr(self, '_preset_orchestrator') and self._preset_orchestrator:
+            self._preset_orchestrator.hide_gallery()
     
     def resizeEvent(self, event):
         """Update placeholder size and overlay geometry"""

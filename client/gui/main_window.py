@@ -1192,7 +1192,12 @@ class MainWindow(QMainWindow):
     
     def _on_footer_start(self):
         """Handle start button click from output footer"""
-        # Build params from command panel and footer
+        # Check if preset mode is active
+        if hasattr(self, '_active_preset') and self._active_preset is not None:
+            self._start_preset_conversion()
+            return
+        
+        # Normal conversion path - Build params from command panel and footer
         params = self.command_panel.get_conversion_params()
         
         # Override output settings from footer
@@ -1213,6 +1218,106 @@ class MainWindow(QMainWindow):
             params['output_dir'] = self.output_footer.get_custom_path()
         
         self.start_conversion(params)
+    
+    def _start_preset_conversion(self):
+        """Execute conversion using the active preset's command template."""
+        import subprocess
+        import os
+        from pathlib import Path
+        
+        files = self.drag_drop_area.get_files()
+        if not files:
+            from PyQt6.QtWidgets import QMessageBox
+            msg_box = QMessageBox(QMessageBox.Icon.Warning, "No Files", "Please add files for conversion first.", parent=self)
+            msg_box.exec()
+            return
+        
+        preset = self._active_preset
+        print(f"[Preset Conversion] Starting with preset: {preset.name}")
+        print(f"[Preset Conversion] Processing {len(files)} file(s)")
+        
+        # Get output settings from footer  
+        output_mode = self.output_footer.get_output_mode()
+        
+        # Get the CommandBuilder from the orchestrator
+        if hasattr(self.drag_drop_area, '_preset_orchestrator'):
+            builder = self.drag_drop_area._preset_orchestrator._builder
+        else:
+            print("[Preset Conversion] ERROR: Preset orchestrator not available")
+            return
+        
+        # Update UI
+        if hasattr(self, 'output_footer'):
+            self.output_footer.set_converting(True)
+        self.show_progress(True)
+        self.update_status(f"Converting with preset: {preset.name}")
+        
+        # Process each file
+        total_files = len(files)
+        success_count = 0
+        
+        for i, input_path in enumerate(files):
+            try:
+                # Determine output path
+                input_p = Path(input_path)
+                
+                if output_mode == "source":
+                    output_dir = input_p.parent
+                elif output_mode == "organized":
+                    folder_name = self.output_footer.get_organized_name() or "output"
+                    output_dir = input_p.parent / folder_name
+                    output_dir.mkdir(exist_ok=True)
+                elif output_mode == "custom":
+                    output_dir = Path(self.output_footer.get_custom_path() or input_p.parent)
+                    output_dir.mkdir(exist_ok=True)
+                else:
+                    output_dir = input_p.parent
+                
+                output_path = output_dir / f"{input_p.stem}_preset{input_p.suffix}"
+                
+                # Build context for Jinja2 template
+                context = {
+                    'input_path': str(input_path),
+                    'output_path': str(output_path),
+                    'quality': 23,  # Default, will be overridden by preset params in Tier 2
+                }
+                
+                # Build command from preset template
+                if preset.pipeline:
+                    cmd = builder.build_command(preset.pipeline[0], context)
+                    print(f"[Preset Conversion] Command: {cmd[:150]}...")
+                    
+                    # Execute command
+                    result = subprocess.run(
+                        cmd,
+                        shell=True,
+                        capture_output=True,
+                        text=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                    )
+                    
+                    if result.returncode == 0:
+                        success_count += 1
+                        print(f"[Preset Conversion] ✓ Success: {input_p.name}")
+                    else:
+                        print(f"[Preset Conversion] ✗ Failed: {input_p.name}")
+                        print(f"[Preset Conversion] stderr: {result.stderr[:200]}")
+                
+                # Update progress
+                progress = int((i + 1) / total_files * 100)
+                self.set_progress(progress)
+                
+            except Exception as e:
+                print(f"[Preset Conversion] Error processing {input_path}: {e}")
+        
+        # Done
+        self.update_status(f"Preset conversion complete: {success_count}/{total_files} files")
+        self.set_progress(100)
+        if hasattr(self, 'output_footer'):
+            self.output_footer.set_converting(False)
+        self.show_progress(False)
+
+
         
 
     def start_conversion(self, params):
@@ -1963,18 +2068,18 @@ class MainWindow(QMainWindow):
     def on_preset_applied(self, preset, files):
         """Handle preset applied from DragDropArea overlay"""
         file_count = len(files) if files else 0
-        print(f"[Smart Drop] Applying preset: {preset.title} to {file_count} files")
+        print(f"[Smart Drop] Applying preset: {preset.name} to {file_count} files")
+        
+        # Store active preset for conversion
+        self._active_preset = preset
         
         # 1. Add files to the DragDropArea if any
         if files:
             self.drag_drop_area.add_files(files)
         
-        # 2. Configure CommandPanel with preset params
-        # TODO: Implement full parameter mapping
-        
-        # 3. Update UI to reflect Active Preset State
+        # 2. Update UI to reflect Active Preset State
         if hasattr(self, 'preset_status_btn'):
-            self.preset_status_btn.set_active(True, preset.title)
+            self.preset_status_btn.set_active(True, preset.name)
             
         if hasattr(self, 'lab_btn'):
             # Set Lab button to ghost (inactive) since Preset is active
@@ -1982,21 +2087,23 @@ class MainWindow(QMainWindow):
             # Reset icon to default Lab icon to indicate "Preset Mode" / Neutral state
             self.lab_btn.set_main_icon("client/assets/icons/lab_icon.svg")
         
-        # 4. Notify CommandPanel that Lab mode is inactive and top bar preset mode is active
+        # 3. Notify CommandPanel that Lab mode is inactive and top bar preset mode is active
         if hasattr(self, 'command_panel'):
             self.command_panel.set_lab_mode_active(False)
             self.command_panel.set_top_bar_preset_mode(True)
             
-        self.update_status(f"Applied Preset: {preset.title}")
+        self.update_status(f"Applied Preset: {preset.name}")
         
         # Hide Command Panel with animation (Preset mode is simple drag & drop)
         self.toggle_command_panel(False)
 
     def on_mode_changed(self, mode):
         """Handle global mode change (e.g. switching to Manual)"""
-        # If switching away from Presets (e.g. to Manual or Max Size), reset the preset button
-        if mode != "Presets" and hasattr(self, 'preset_status_btn'):
-            self.preset_status_btn.set_active(False)
+        # If switching away from Presets (e.g. to Manual or Max Size), reset the preset
+        if mode != "Presets":
+            self._active_preset = None  # Clear active preset
+            if hasattr(self, 'preset_status_btn'):
+                self.preset_status_btn.set_active(False)
             
         # Notify CommandPanel that top bar preset mode is inactive
         if mode != "Presets" and hasattr(self, 'command_panel'):
