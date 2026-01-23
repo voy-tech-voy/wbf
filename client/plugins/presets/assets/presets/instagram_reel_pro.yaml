@@ -1,0 +1,46 @@
+# Instagram Reel Pro Preset
+# Example preset demonstrating full YAML schema
+
+meta:
+  id: "instagram_reel_pro"
+  name: "Instagram Reel Pro"
+  category: "social"
+  description: "Smart conversion with blur fill for Instagram Reels."
+  version: "2.0"
+
+style:
+  accent_color: "#E1306C"
+  icon: "instagram"
+  glow_strength: "strong"
+
+constraints:
+  accepted_types: ["video"]
+  accepted_extensions: [".mp4", ".mov", ".mkv", ".avi"]
+  min_duration: 1.0
+
+# Tier 2 - Parameters (loaded but not rendered in Phase 1)
+parameters:
+  - id: "fill_method"
+    type: "segmented_pill"
+    label: "Fill Method"
+    options: ["Blur", "Crop", "Fit"]
+    default: "Blur"
+    tooltip: "How to fill the 9:16 frame"
+
+  - id: "quality"
+    type: "slider"
+    label: "Quality"
+    default: 23
+    min_value: 18
+    max_value: 28
+
+pipeline:
+  - tool: "ffmpeg"
+    description: "Convert to Instagram Reel format (9:16)"
+    command_template: |
+      {{ tool_exe }} -y -i "{{ input_path }}"
+      -vf "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black"
+      -c:v libx264 -preset medium -crf {{ quality | default(23) }}
+      -c:a aac -b:a 128k
+      -movflags +faststart
+      "{{ output_path }}"
