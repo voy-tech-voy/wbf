@@ -88,10 +88,11 @@ class PresetOrchestrator(QObject):
         return self._gallery.isVisible()
     
     def _on_preset_selected(self, preset: PresetDefinition):
-        """Handle preset selection from gallery."""
+        """Handle preset selection from gallery - gallery stays open to show parameters."""
         print(f"[PresetOrchestrator] Preset selected: {preset.name}")
         self._selected_preset = preset  # Track selected preset
-        self._gallery.hide_animated()
+        # Gallery stays open - user can adjust parameters
+        # Gallery closes only on: background click, presets button, or lab button
         self.preset_selected.emit(preset)
     
     def _on_gallery_dismissed(self):

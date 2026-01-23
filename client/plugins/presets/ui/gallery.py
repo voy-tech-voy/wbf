@@ -47,10 +47,10 @@ class PresetGallery(QWidget):
     
     def _setup_ui(self):
         """Setup the gallery layout."""
-        # Main layout
+        # Main layout - minimal margins for full coverage overlay
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(self.PADDING, self.PADDING, self.PADDING, self.PADDING)
-        main_layout.setSpacing(16)
+        main_layout.setContentsMargins(16, 16, 16, 16)
+        main_layout.setSpacing(12)
         
         # Header
         header = QLabel("SELECT PRESET")
@@ -104,14 +104,14 @@ class PresetGallery(QWidget):
         """Apply gallery styling."""
         self.setStyleSheet("""
             QWidget#PresetGallery {
-                background-color: rgba(18, 18, 18, 0.95);
-                border-radius: 12px;
+                background-color: rgba(30, 30, 30, 0.9);
+                border-radius: 0px;
             }
             QLabel#GalleryHeader {
                 color: #F5F5F7;
-                font-size: 14px;
+                font-size: 16px;
                 font-weight: bold;
-                padding: 8px;
+                padding: 12px;
                 background: transparent;
             }
             QScrollArea {
