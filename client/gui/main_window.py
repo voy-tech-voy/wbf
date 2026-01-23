@@ -1771,10 +1771,9 @@ class MainWindow(QMainWindow):
             self.bottom_frame.setVisible(checked)
             
     def resizeEvent(self, event):
-        """Handle resize to update overlay geometry"""
+        """Handle resize event"""
         super().resizeEvent(event)
-        if hasattr(self, 'preset_overlay'):
-            self.preset_overlay.setGeometry(0, 0, self.width(), self.height())
+        # NOTE: Preset overlay removed - resize handled by future plugin
 
     def showEvent(self, event):
         """Override showEvent"""
@@ -1915,16 +1914,9 @@ class MainWindow(QMainWindow):
     # --- Drag & Drop - Forward to DragDropArea ---
     
     def dragEnterEvent(self, event):
-        """Accept drag anywhere on window, forward to DragDropArea"""
+        """Accept drag anywhere on window"""
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
-            # Show overlay in DragDropArea
-            if hasattr(self, 'drag_drop_area') and hasattr(self.drag_drop_area, 'preset_overlay'):
-                list_widget = self.drag_drop_area.file_list_widget
-                self.drag_drop_area.preset_overlay.setGeometry(
-                    0, 0, list_widget.width(), list_widget.height()
-                )
-                self.drag_drop_area.preset_overlay.show_animated()
         else:
             event.ignore()
     
@@ -1936,9 +1928,7 @@ class MainWindow(QMainWindow):
             event.ignore()
     
     def dragLeaveEvent(self, event):
-        """Hide overlay when drag leaves window"""
-        if hasattr(self, 'drag_drop_area') and hasattr(self.drag_drop_area, 'preset_overlay'):
-            self.drag_drop_area.preset_overlay.hide_animated()
+        """Handle drag leave"""
         super().dragLeaveEvent(event)
     
     def dropEvent(self, event):

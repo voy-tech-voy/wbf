@@ -384,7 +384,7 @@ class DragDropArea(QWidget):
         self._current_processing_index = -1  # Track which file is being processed
         self._pending_files = None  # Files waiting for preset selection
         self.setup_ui()
-        self._setup_overlay()
+        # NOTE: Preset overlay removed - new preset plugin will be implemented separately
     
     def set_file_progress(self, file_index, progress):
         """Set progress for a specific file in the list (0.0 to 1.0) - No-op now"""
@@ -452,57 +452,34 @@ class DragDropArea(QWidget):
         # Initialize with cleared state
         self.file_list_widget.clear()
         
-    def _setup_overlay(self):
-        """Setup the preset overlay inside the drop area"""
-        from client.gui.preset_overlay import PresetOverlay
+    def _setup_preset_plugin(self):
+        """
+        PLACEHOLDER: Setup the preset plugin inside the drop area.
         
-        # Parent to file_list_widget to stay inside the list styling
-        # self.file_list_widget is defined in setup_ui
-        self.preset_overlay = PresetOverlay(self.file_list_widget)
-        self.preset_overlay.hide()
-        self.preset_overlay.preset_selected.connect(self._on_preset_selected)
-        self.preset_overlay.dismissed.connect(self._on_overlay_dismissed)
-        
-        # Match border radius of the container
-        current_style = self.preset_overlay.styleSheet()
-        self.preset_overlay.setStyleSheet(current_style + "\nQWidget#PresetOverlay { border-radius: 12px; }")
+        This method will be implemented when the new preset gallery plugin is created.
+        The plugin will:
+        - Display preset cards as an overlay on the file list
+        - Accept the ToolRegistry via dependency injection
+        - Validate preset requirements against available tools
+        """
+        pass
     
     def show_preset_view(self):
-        """Manually show the preset overlay (e.g. from Presets button)"""
-        if hasattr(self, 'preset_overlay') and hasattr(self, 'file_list_widget'):
-            self.preset_overlay.setGeometry(0, 0, self.file_list_widget.width(), self.file_list_widget.height())
-            self.preset_overlay.show_animated()
-
-    def _on_preset_selected(self, preset_obj):
-        """Handle preset card click"""
-        self.preset_overlay.hide_animated()
-        
-        # Note: Preset button is now in MainWindow, state update handled via preset_applied signal
-        
-        if self._pending_files:
-            # Emit signal with preset and files
-            self.preset_applied.emit(preset_obj, self._pending_files)
-            self._pending_files = None
-        else:
-            # No files pending - Emit for global preset change
-            self.preset_applied.emit(preset_obj, [])
+        """Show the preset gallery. PLACEHOLDER for new plugin."""
+        # TODO: Implement new preset plugin display
+        print("[DEBUG] show_preset_view called - awaiting new preset plugin implementation")
+        pass
     
-    def _on_overlay_dismissed(self):
-        """Handle click on overlay background"""
-        self.preset_overlay.hide_animated()
-        
-        if self._pending_files:
-            # Add files without preset
-            self.add_files(self._pending_files)
-            self._pending_files = None
+    def hide_preset_view(self):
+        """Hide the preset gallery. PLACEHOLDER for new plugin."""
+        # TODO: Implement new preset plugin hide
+        pass
     
     def resizeEvent(self, event):
         """Update placeholder size and overlay geometry"""
         super().resizeEvent(event)
         
-        # Update overlay geometry to cover the file list widget
-        if hasattr(self, 'preset_overlay') and hasattr(self, 'file_list_widget'):
-            self.preset_overlay.setGeometry(0, 0, self.file_list_widget.width(), self.file_list_widget.height())
+        # NOTE: Preset overlay removed - resize handled by future plugin
         
         if hasattr(self, 'file_list_widget') and self.file_list_widget.count() == 1:
             item = self.file_list_widget.item(0)
@@ -520,20 +497,14 @@ class DragDropArea(QWidget):
                     item.setSizeHint(viewport_size)
 
     def dragEnterEvent(self, event: QDragEnterEvent):
-        """Show overlay when files are dragged over"""
+        """Handle drag enter - accept files for processing"""
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
-            # Show overlay
-            if hasattr(self, 'preset_overlay') and hasattr(self, 'file_list_widget'):
-                self.preset_overlay.setGeometry(0, 0, self.file_list_widget.width(), self.file_list_widget.height())
-                self.preset_overlay.show_animated()
         else:
             event.ignore()
             
     def dragLeaveEvent(self, event):
-        """Hide overlay when drag leaves"""
-        if hasattr(self, 'preset_overlay'):
-            self.preset_overlay.hide_animated()
+        """Handle drag leave"""
         event.accept()
         
     def dropEvent(self, event: QDropEvent):
