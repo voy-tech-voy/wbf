@@ -317,37 +317,54 @@ class PresetGallery(QWidget):
     
     def _capture_blur_background(self):
         """
-        Capture parent window content and apply blur effect.
-        Simulates acrylic/frosted glass for child widgets.
+        Capture parent window content and apply optimized blur effect.
+        
+        Optimization:
+        1. Capture screenshot
+        2. Downscale significantly (creates 'free' blur + drastically reduces pixel count)
+        3. Apply blur to small image
+        4. Store small image (upscaled during paint)
         """
         if not self.parent():
             return
             
         # Hide self temporarily to capture what's behind
-        self.setVisible(False)
-        
+        was_visible = self.isVisible()
+        if was_visible:
+            self.setVisible(False)
+            
         # Grab parent pixmap
-        parent_pixmap = self.parent().grab(self.parent().rect())
+        parent_rect = self.parent().rect()
+        parent_pixmap = self.parent().grab(parent_rect)
         
-        # Restore visibility (will be fully shown by show_animated)
-        # We don't call show() here to avoid flicker, let show_animated handle it
+        if was_visible:
+            self.setVisible(True)
         
-        # Create a blurred version
-        from PyQt6.QtWidgets import QGraphicsScene, QGraphicsPixmapItem, QGraphicsBlurEffect, QGraphicsScene
+        # OPTIMIZATION: Downscale to ~10% size (e.g. 100-200px width)
+        # This makes the blur O(1) mostly and acts as a pre-blur filter
+        target_width = max(1, parent_rect.width() // 3)
+        small_pixmap = parent_pixmap.scaledToWidth(target_width, Qt.TransformationMode.SmoothTransformation)
+        
+        # Apply blur to the small pixmap
+        from PyQt6.QtWidgets import QGraphicsScene, QGraphicsPixmapItem, QGraphicsBlurEffect
         from PyQt6.QtGui import QPainter, QPixmap
         
-        blur_radius = 20
+        # Radius can be smaller since we are working on a small image
+        # Effective blur radius = radius * scale_factor
+        blur_radius = 12
+
         
-        # Create scene to apply blur
         scene = QGraphicsScene()
-        item = QGraphicsPixmapItem(parent_pixmap)
+        item = QGraphicsPixmapItem(small_pixmap)
         blur = QGraphicsBlurEffect()
         blur.setBlurRadius(blur_radius)
+        # Performance hint for animation
+        blur.setBlurHints(QGraphicsBlurEffect.BlurHint.PerformanceHint)
         item.setGraphicsEffect(blur)
         scene.addItem(item)
         
-        # Render scene to new pixmap
-        output_pixmap = QPixmap(parent_pixmap.size())
+        # Render scene to new small pixmap
+        output_pixmap = QPixmap(small_pixmap.size())
         output_pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(output_pixmap)
         scene.render(painter)
@@ -383,12 +400,13 @@ class PresetGallery(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
-        # 1. Draw blurred background if available
+        # 1. Draw blurred background if available (Upscale smoothly)
         if hasattr(self, '_blurred_background') and self._blurred_background:
-            painter.drawPixmap(0, 0, self._blurred_background)
+            # Scale the small blurry pixmap to fill the rect
+            painter.drawPixmap(self.rect(), self._blurred_background)
         
         # 2. Draw dark tint overlay
-        # Dark grey with 70% opacity (alpha = 180 out of 255) - reduced from 230 to show blur
+        # Dark grey with 70% opacity (alpha = 180 out of 255)
         painter.fillRect(self.rect(), QColor(20, 20, 20, 180))
         
         super().paintEvent(event)
