@@ -127,8 +127,8 @@ QRangeSlider = TimeRangeSlider
 # Set to True to use new extracted tab components, False for legacy code
 # =============================================================================
 USE_NEW_IMAGE_TAB = True  # Phase A: ImageTab integration - TESTING
-USE_NEW_VIDEO_TAB = False  # Phase B: VideoTab integration  
-USE_NEW_LOOP_TAB = False   # Phase C: LoopTab integration
+USE_NEW_VIDEO_TAB = True  # Phase B: VideoTab integration - TESTING  
+USE_NEW_LOOP_TAB = False   # Phase C: LoopTab - needs more aliases, disabled for now
 
 
 class CommandPanel(QWidget):
@@ -1271,6 +1271,72 @@ class CommandPanel(QWidget):
         
     def create_video_tab(self):
         """Create video conversion options tab"""
+        # Feature flag: Use new extracted VideoTab component
+        if USE_NEW_VIDEO_TAB:
+            return self._create_video_tab_new()
+        return self._create_video_tab_legacy()
+    
+    def _create_video_tab_new(self):
+        """Create video tab using new extracted VideoTab component"""
+        from client.gui.tabs import VideoTab
+        
+        # Create new VideoTab instance
+        self._video_tab_component = VideoTab(
+            parent=self,
+            focus_callback=self._focus_active_tab,
+            is_dark_mode=self.is_dark_mode
+        )
+        
+        # Sync references for compatibility with existing code
+        # These aliases allow existing code to access controls without modification
+        self.video_codec = self._video_tab_component.codec
+        self.video_codec_group = self._video_tab_component.codec_group
+        self.video_max_size_spinbox = self._video_tab_component.max_size_spinbox
+        self.video_max_size_label = self._video_tab_component.max_size_label
+        self.video_auto_resize_checkbox = self._video_tab_component.auto_resize_checkbox
+        self.multiple_video_qualities = self._video_tab_component.multiple_qualities
+        self.video_quality = self._video_tab_component.quality
+        self.video_quality_label = self._video_tab_component.quality_label
+        self.video_quality_value = self._video_tab_component.quality_value
+        self.video_quality_variants = self._video_tab_component.quality_variants
+        self.video_quality_variants_label = self._video_tab_component.quality_variants_label
+        self.video_resize_mode = self._video_tab_component.resize_mode
+        self.multiple_video_variants = self._video_tab_component.multiple_variants
+        self.video_resize_value = self._video_tab_component.resize_value
+        self.video_resize_value_label = self._video_tab_component.resize_value_label
+        self.video_size_variants = self._video_tab_component.size_variants
+        self.video_size_variants_label = self._video_tab_component.size_variants_label
+        self.video_rotation_angle = self._video_tab_component.rotation_angle
+        self.video_resize_container = self._video_tab_component.resize_container
+        self.video_rotate_container = self._video_tab_component.rotate_container
+        self.video_time_container = self._video_tab_component.time_container
+        self.video_transform_group = self._video_tab_component.transform_group
+        self.enable_time_cutting = self._video_tab_component.enable_time_cutting
+        self.time_range_slider = self._video_tab_component.time_range_slider
+        self.enable_retime = self._video_tab_component.enable_retime
+        self.retime_slider = self._video_tab_component.retime_slider
+        self.retime_value_label = self._video_tab_component.retime_value_label
+        
+        # Create side buttons (still managed by CommandPanel)
+        self.video_side_buttons = self._create_transform_side_buttons('video')
+        self.video_side_buttons.selectionChanged.connect(
+            lambda mode: self._video_tab_component.set_transform_mode(mode)
+        )
+        
+        # Create presets section (managed by CommandPanel, added to codec group)
+        self.video_presets_section = self._create_presets_section("video")
+        self._video_tab_component.codec_group.add_row(self.video_presets_section)
+        
+        # Store mode value for compatibility
+        self.video_size_mode_value = "max_size"
+        
+        # Connect codec change handler for GPU indicator
+        self.video_codec.codecChanged.connect(self.on_video_codec_changed)
+        
+        return self._video_tab_component
+    
+    def _create_video_tab_legacy(self):
+        """Create video tab using legacy inline code (original implementation)"""
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1492,6 +1558,122 @@ class CommandPanel(QWidget):
         
     def create_loop_tab(self):
         """Create Loop conversion options tab (GIF and WebM loop)"""
+        # Feature flag: Use new extracted LoopTab component
+        if USE_NEW_LOOP_TAB:
+            return self._create_loop_tab_new()
+        return self._create_loop_tab_legacy()
+    
+    def _create_loop_tab_new(self):
+        """Create loop tab using new extracted LoopTab component"""
+        from client.gui.tabs import LoopTab
+        
+        # Create new LoopTab instance
+        self._loop_tab_component = LoopTab(
+            parent=self,
+            focus_callback=self._focus_active_tab,
+            is_dark_mode=self.is_dark_mode
+        )
+        
+        # Sync references for compatibility with existing code
+        self.loop_format_selector = self._loop_tab_component.format_selector
+        self.loop_format = self._loop_tab_component.format_selector  # Legacy alias
+        self.ffmpeg_group = self._loop_tab_component.settings_group
+        self.loop_max_size_spinbox = self._loop_tab_component.max_size_spinbox
+        self.loop_max_size_label = self._loop_tab_component.max_size_label
+        self.loop_auto_resize_checkbox = self._loop_tab_component.auto_resize_checkbox
+        # Legacy aliases with gif_ prefix
+        self.gif_max_size_spinbox = self._loop_tab_component.max_size_spinbox
+        self.gif_max_size_label = self._loop_tab_component.max_size_label
+        self.gif_auto_resize_checkbox = self._loop_tab_component.auto_resize_checkbox
+        
+        # GIF-specific
+        self.gif_variants = self._loop_tab_component.gif_variants_checkbox
+        self.gif_ffmpeg_variants = self._loop_tab_component.gif_variants_checkbox  # Legacy alias
+        self.gif_fps = self._loop_tab_component.gif_fps
+        self.gif_fps_label = self._loop_tab_component.gif_fps_label
+        self.ffmpeg_gif_fps = self._loop_tab_component.gif_fps  # Legacy alias
+        self.ffmpeg_gif_fps_label = self._loop_tab_component.gif_fps_label
+        self.gif_fps_variants = self._loop_tab_component.gif_fps_variants
+        self.gif_fps_variants_label = self._loop_tab_component.gif_fps_variants_label
+        self.ffmpeg_gif_fps_variants = self._loop_tab_component.gif_fps_variants
+        self.ffmpeg_gif_fps_variants_label = self._loop_tab_component.gif_fps_variants_label
+        self.gif_colors = self._loop_tab_component.gif_colors
+        self.gif_colors_label = self._loop_tab_component.gif_colors_label
+        self.ffmpeg_gif_colors = self._loop_tab_component.gif_colors
+        self.ffmpeg_gif_colors_label = self._loop_tab_component.gif_colors_label
+        self.gif_colors_variants = self._loop_tab_component.gif_colors_variants
+        self.gif_colors_variants_label = self._loop_tab_component.gif_colors_variants_label
+        self.ffmpeg_gif_colors_variants = self._loop_tab_component.gif_colors_variants
+        self.ffmpeg_gif_colors_variants_label = self._loop_tab_component.gif_colors_variants_label
+        self.gif_dither_slider = self._loop_tab_component.gif_dither_slider
+        self.gif_dither_value = self._loop_tab_component.gif_dither_value
+        self.gif_dither_label = self._loop_tab_component.gif_dither_label
+        self.ffmpeg_gif_dither = self._loop_tab_component.gif_dither_slider
+        self.ffmpeg_gif_dither_value = self._loop_tab_component.gif_dither_value
+        self.ffmpeg_gif_dither_label = self._loop_tab_component.gif_dither_label
+        self.gif_dither_variants = self._loop_tab_component.gif_dither_variants
+        self.gif_dither_variants_label = self._loop_tab_component.gif_dither_variants_label
+        self.ffmpeg_gif_dither_variants = self._loop_tab_component.gif_dither_variants
+        self.ffmpeg_gif_dither_variants_label = self._loop_tab_component.gif_dither_variants_label
+        self.gif_blur = self._loop_tab_component.gif_blur
+        self.ffmpeg_gif_blur = self._loop_tab_component.gif_blur
+        
+        # WebM-specific
+        self.webm_variants = self._loop_tab_component.webm_variants_checkbox
+        self.loop_webm_variants = self._loop_tab_component.webm_variants_checkbox  # Legacy alias
+        self.webm_quality = self._loop_tab_component.webm_quality
+        self.loop_webm_quality = self._loop_tab_component.webm_quality
+        self.webm_quality_label = self._loop_tab_component.webm_quality_label
+        self.loop_webm_quality_label = self._loop_tab_component.webm_quality_label
+        self.webm_quality_value = self._loop_tab_component.webm_quality_value
+        self.loop_webm_quality_value = self._loop_tab_component.webm_quality_value
+        self.webm_quality_variants = self._loop_tab_component.webm_quality_variants
+        self.loop_webm_quality_variants = self._loop_tab_component.webm_quality_variants
+        self.webm_quality_variants_label = self._loop_tab_component.webm_quality_variants_label
+        self.loop_webm_quality_variants_label = self._loop_tab_component.webm_quality_variants_label
+        
+        # Transform section
+        self.loop_resize_container = self._loop_tab_component.resize_container
+        self.loop_rotate_container = self._loop_tab_component.rotate_container
+        self.loop_time_container = self._loop_tab_component.time_container
+        self.loop_transform_group = self._loop_tab_component.transform_group
+        self.loop_resize_mode = self._loop_tab_component.resize_mode
+        self.loop_resize_value = self._loop_tab_component.resize_value
+        self.loop_resize_value_label = self._loop_tab_component.resize_value_label
+        self.loop_multiple_resize = self._loop_tab_component.multiple_resize
+        self.loop_resize_variants = self._loop_tab_component.resize_variants
+        self.loop_resize_variants_label = self._loop_tab_component.resize_variants_label
+        self.loop_rotation_angle = self._loop_tab_component.rotation_angle
+        self.loop_enable_time_cutting = self._loop_tab_component.enable_time_cutting
+        self.loop_time_range_slider = self._loop_tab_component.time_range_slider
+        self.loop_enable_retime = self._loop_tab_component.enable_retime
+        self.loop_retime_slider = self._loop_tab_component.retime_slider
+        self.loop_retime_value_label = self._loop_tab_component.retime_value_label
+        
+        # Create side buttons (still managed by CommandPanel)
+        self.loop_side_buttons = self._create_transform_side_buttons('loop')
+        self.loop_side_buttons.selectionChanged.connect(
+            lambda mode: self._loop_tab_component.set_transform_mode(mode)
+        )
+        
+        # Create presets section (managed by CommandPanel, added to settings group)
+        self.loop_presets_section = self._create_presets_section("loop")
+        self._loop_tab_component.settings_group.add_row(self.loop_presets_section)
+        
+        # Create loop-specific presets (Hero, Alpha)
+        self._create_loop_presets_section()
+        
+        # Store mode value for compatibility
+        self.loop_size_mode_value = "max_size"
+        self.current_loop_preset = None
+        
+        # Connect format change handler
+        self.loop_format_selector.formatChanged.connect(self.on_loop_format_changed)
+        
+        return self._loop_tab_component
+    
+    def _create_loop_tab_legacy(self):
+        """Create loop tab using legacy inline code (original implementation)"""
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(0, 0, 0, 0)
