@@ -889,6 +889,10 @@ class MainWindow(QMainWindow):
                 else:
                     self.title_bar_window.show()
                     self.title_bar_window._sync_position()
+        # When main window is activated, also raise the title bar
+        elif event.type() == event.Type.ActivationChange:
+            if self.isActiveWindow() and hasattr(self, 'title_bar_window'):
+                self.title_bar_window.raise_()
     
     # --- Drag & Drop - Forward to DragDropArea ---
     
