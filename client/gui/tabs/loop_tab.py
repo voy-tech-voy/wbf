@@ -317,7 +317,7 @@ class LoopTab(BaseTab):
             'resize_value': self.resize_value.value(),
             'multiple_resize': self.multiple_resize.isChecked(),
             'resize_variants': self._parse_variants(self.resize_variants.text()),
-            'rotation_angle': self.rotation_angle.currentAngle(),
+            'rotation_angle': self.rotation_angle.currentText(),
             'enable_time_cutting': self.enable_time_cutting.isChecked(),
             'time_start': self.time_range_slider.startValue() if self.enable_time_cutting.isChecked() else 0.0,
             'time_end': self.time_range_slider.endValue() if self.enable_time_cutting.isChecked() else 1.0,

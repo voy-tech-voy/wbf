@@ -265,7 +265,7 @@ class VideoTab(BaseTab):
             'resize_value': self.resize_value.value(),
             'multiple_variants': self.multiple_variants.isChecked(),
             'size_variants': self._parse_variants(self.size_variants.text()),
-            'rotation_angle': self.rotation_angle.currentAngle(),
+            'rotation_angle': self.rotation_angle.currentText(),
             'enable_time_cutting': self.enable_time_cutting.isChecked(),
             'time_start': self.time_range_slider.startValue() if self.enable_time_cutting.isChecked() else 0.0,
             'time_end': self.time_range_slider.endValue() if self.enable_time_cutting.isChecked() else 1.0,

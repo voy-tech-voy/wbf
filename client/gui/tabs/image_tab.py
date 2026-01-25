@@ -215,7 +215,7 @@ class ImageTab(BaseTab):
             'resize_value': self.resize_value.value(),
             'multiple_resize': self.multiple_resize.isChecked(),
             'resize_variants': self._parse_variants(self.resize_variants.text()),
-            'rotation_angle': self.rotation_angle.currentAngle(),
+            'rotation_angle': self.rotation_angle.currentText(),
         }
         return params
     
