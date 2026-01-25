@@ -7,21 +7,18 @@ import sys
 import os
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QMenuBar, QToolBar, QStatusBar, QSplitter,
-    QListWidget, QTextEdit, QLabel, QPushButton,
-    QFrame, QGroupBox, QProgressBar, QMessageBox, QDialog, QApplication,
-    QGraphicsDropShadowEffect
+    QLabel, QPushButton, QFrame, QDialog, QApplication,
+    QGraphicsDropShadowEffect, QSplitter, QTextEdit, QProgressBar,
+    QStatusBar
 )
-from PyQt6.QtGui import QIcon, QDragEnterEvent, QDropEvent, QFont, QMouseEvent, QAction, QColor
-from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QSize, pyqtSlot, pyqtProperty, QRect
-import os
-import ctypes
-from ctypes import POINTER, Structure, c_int, byref, windll, sizeof
+from PyQt6.QtGui import QIcon, QFont, QAction, QColor
+from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QSize, pyqtSlot, QTimer
 
 from .drag_drop_area import DragDropArea
 from .command_panel import CommandPanel
 from .output_footer import OutputFooter
 from .theme_manager import ThemeManager
+from .title_bar import TitleBarWindow
 from client.core.conversion_engine import ConversionEngine, ToolChecker
 from client.gui.custom_widgets import PresetStatusButton
 from client.utils.trial_manager import TrialManager
@@ -29,112 +26,24 @@ from client.utils.font_manager import AppFonts, FONT_FAMILY_APP_NAME
 from client.utils.resource_path import get_app_icon_path, get_resource_path
 from client.version import APP_NAME, AUTHOR
 
-from PyQt6.QtCore import QObject, QEvent, QTimer
 
-DEBUG_INTERACTIVITY = True
+# Mediator-Shell Architecture Components
+from client.gui.animators.side_panel_animator import SidePanelAnimator
+from client.gui.components.control_bar import ControlBar
+from client.gui.components.status_panel import StatusPanel
+from client.gui.utils.window_behavior import FramelessWindowBehavior
+from client.gui.utils.dev_tools import EventDebugFilter, DEBUG_INTERACTIVITY
+from client.gui.utils.dialog_manager import DialogManager
+from client.gui.drag_drop_area import ViewMode
+from client.utils.session_manager import SessionManager
+from enum import Enum
 
-class EventDebugFilter(QObject):
-    def eventFilter(self, obj, event):
-        if event.type() == QEvent.Type.MouseButtonPress:
-            # Only care about left click press for triggering actions
-            if hasattr(event, 'button') and event.button() != Qt.MouseButton.LeftButton:
-                return False
-                
-            # Helper to get hierarchy
-            def get_hierarchy(w):
-                chain = []
-                curr = w
-                while curr:
-                    name = curr.objectName() or curr.__class__.__name__
-                    chain.append(name)
-                    curr = curr.parent()
-                return " -> ".join(chain)
-            
-            hierarchy = get_hierarchy(obj)
-            
-            # --- 1. PRESETS STATUS ---
-            top_level = None
-            if hasattr(obj, 'window'):
-                top_level = obj.window()
-            
-            preset_mode = "OFF"
-            if top_level and hasattr(top_level, 'preset_status_btn'):
-                if top_level.preset_status_btn._is_active:
-                    preset_mode = "ON"
-            
-            # --- 2. DETECT LAB CLICK ---
-            lab_action = None
-            
-            # Check hierarchy for MorphingButton
-            curr = obj
-            while curr:
-                if "MorphingButton" in curr.__class__.__name__:
-                    # Found Lab Button
-                    mb = curr
-                    # Check if obj is one of the sub-items
-                    if hasattr(mb, '_items') and obj in mb._items:
-                        idx = mb._items.index(obj)
-                        type_map = {0: "IMAGE", 1: "VIDEO", 2: "LOOP"}
-                        lab_action = type_map.get(idx, "UNKNOWN")
-                    break
-                curr = curr.parent()
-            
-            if lab_action:
-                print(f"\n>>> DEBUG EVENT: Click inside Lab Button")
-                print(f"    Preset Mode: {preset_mode}")
-                print(f"    Target: {lab_action}")
-            elif "PresetStatusButton" in hierarchy:
-                print(f"\n>>> DEBUG EVENT: Click on Preset Button")
-                print(f"    Current Mode: {preset_mode}")
-                
-            return False
-                         
-            return False 
-            
-        return super().eventFilter(obj, event)
 
-class DraggableTitleBar(QFrame):
-    """Custom title bar that allows dragging the window"""
-    def __init__(self, parent_window):
-        super().__init__()
-        self.parent_window = parent_window
-        self.drag_position = None
-        
-    def mousePressEvent(self, event: QMouseEvent):
-        """Store the mouse position when pressed"""
-        if event.button() == Qt.MouseButton.LeftButton:
-            # Allow resizing on top edge - propagate to parent if near top
-            if event.position().y() <= 5:
-                event.ignore()
-                return
-                
-            self.drag_position = event.globalPosition().toPoint() - self.parent_window.frameGeometry().topLeft()
-            event.accept()
-        else:
-            super().mousePressEvent(event)
-        
-    def mouseMoveEvent(self, event: QMouseEvent):
-        """Move the window when dragging"""
-        if event.buttons() == Qt.MouseButton.LeftButton and self.drag_position is not None:
-            self.parent_window.move(event.globalPosition().toPoint() - self.drag_position)
-            event.accept()
-        else:
-            super().mouseMoveEvent(event)
-        
-    def mouseReleaseEvent(self, event: QMouseEvent):
-        """Clear drag position when released"""
-        self.drag_position = None
-        super().mouseReleaseEvent(event)
+class Mode(Enum):
+    """Application mode for MainWindow conductor."""
+    PRESET = "preset"  # Preset mode - simple drag & drop with presets
+    LAB = "lab"        # Lab mode - full command panel visible
 
-class ClickableLabel(QLabel):
-    """Custom label that emits a signal when clicked"""
-    clicked = pyqtSignal()
-    
-    def mousePressEvent(self, event: QMouseEvent):
-        """Emit signal when label is clicked"""
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit()
-        super().mousePressEvent(event)
 
 class MainWindow(QMainWindow):
     def __init__(self, is_trial=False):
@@ -193,8 +102,18 @@ class MainWindow(QMainWindow):
         # Theme management
         self.theme_manager = ThemeManager()
         
+        # Dialog management (Mediator-Shell: centralized dialogs)
+        self.dialogs = DialogManager(self, self.theme_manager)
+        
         # Track mouse position for window dragging
         self.drag_position = None
+        
+        # Mediator-Shell: Mode tracking
+        self._current_mode = Mode.PRESET  # Default to preset mode
+        self._active_lab_tab = 0          # Track active lab tab (0=Image, 1=Video, 2=Loop)
+        
+        # Mediator-Shell: Window behavior (resize, blur)
+        self.window_behavior = FramelessWindowBehavior(self, border_width=8)
         
         self.setup_ui()
         self.setup_status_bar()
@@ -230,11 +149,15 @@ class MainWindow(QMainWindow):
         root_layout.setSpacing(0)
         root_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Add custom title bar
-        self.create_title_bar(root_layout)
+        # Create SEPARATE title bar window (with blur)
+        self.title_bar_window = TitleBarWindow(
+            is_trial=self.is_trial,
+            is_dev_mode=self.DEVELOPMENT_MODE
+        )
+        self._connect_title_bar_signals()
         QApplication.processEvents()
         
-        # Content area container (opaque)
+        # Content area container (opaque) - now the only content in root_frame
         self.content_container = QFrame()
         self.content_container.setObjectName("ContentFrame")
         content_layout = QVBoxLayout(self.content_container)
@@ -264,137 +187,88 @@ class MainWindow(QMainWindow):
         # Process events to keep splash screen animated
         QApplication.processEvents()
     
-    def create_control_bar(self, parent_layout):
-        """Create the unified control bar with file buttons, preset, and lab button"""
-        from PyQt6.QtCore import QSize
-        from PyQt6.QtGui import QCursor
-        from client.gui.drag_drop_area import HoverIconButton
-        from client.gui.custom_widgets import PresetStatusButton, MorphingButton
-        
-        control_bar = QWidget()
-        control_bar.setFixedHeight(64)  # Match button heights + padding
-        control_bar.setObjectName("ControlBar")
-        
-        control_layout = QHBoxLayout(control_bar)
-        control_layout.setContentsMargins(16, 8, 16, 8)
-        control_layout.setSpacing(8)
-        
-        # --- Left Section: File Buttons ---
-        icon_size = QSize(28, 28)
-        
-        self.add_files_btn = HoverIconButton("addfile.svg", icon_size)
-        self.add_files_btn.setFixedSize(48, 48)
-        self.add_files_btn.setToolTip("Add Files")
-        self.add_files_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        
-        self.add_folder_btn = HoverIconButton("addfolder.svg", icon_size)
-        self.add_folder_btn.setFixedSize(48, 48)
-        self.add_folder_btn.setToolTip("Add Folder")
-        self.add_folder_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        
-        self.clear_files_btn = HoverIconButton("removefile.svg", icon_size)
-        self.clear_files_btn.setFixedSize(48, 48)
-        self.clear_files_btn.setToolTip("Clear All")
-        self.clear_files_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        
-        # Apply Styles
-        # Standard Action Button Style
-        base_style = """
-            QPushButton {
-                background-color: rgba(255, 255, 255, 5);
-                border: 1px solid rgba(255, 255, 255, 20);
-                border-radius: 8px;
-            }
-            QPushButton:hover {
-                background-color: rgba(255, 255, 255, 10);
-                border: 1px solid rgba(255, 255, 255, 50);
-            }
-            QPushButton:pressed {
-                background-color: rgba(0, 0, 0, 50);
-            }
-        """
-        self.add_files_btn.setStyleSheet(base_style)
-        self.add_folder_btn.setStyleSheet(base_style)
-        
-        # Clear Button Style (Red Outline)
-        # Clear Button Style (Red Outline ONLY on Hover)
-        clear_style = """
-            QPushButton {
-                background-color: rgba(255, 255, 255, 5);
-                border: 1px solid rgba(255, 255, 255, 20);
-                border-radius: 8px;
-            }
-            QPushButton:hover {
-                background-color: rgba(255, 50, 50, 15);
-                border: 1px solid #FF4444;
-            }
-            QPushButton:pressed {
-                background-color: rgba(50, 0, 0, 50);
-            }
-        """
-        self.clear_files_btn.setStyleSheet(clear_style)
-        
-        control_layout.addWidget(self.add_files_btn)
-        control_layout.addWidget(self.add_folder_btn)
-        control_layout.addWidget(self.clear_files_btn)
-        
-        # --- Spacer (Left) ---
-        control_layout.addStretch()
-        
-        # --- Center: Preset Button ---
-        self.preset_status_btn = PresetStatusButton()
-        self.preset_status_btn.clicked.connect(self._on_preset_btn_clicked)
-        control_layout.addWidget(self.preset_status_btn)
-        
-        # --- Spacer (Right) ---
-        control_layout.addStretch()
-        
-        # --- Right: Lab Button (in fixed-width container to prevent layout shift) ---
-        lab_container = QWidget()
-        lab_container.setFixedWidth(220)  # Slightly larger than EXPANDED_WIDTH to prevent clipping
-        lab_container_layout = QHBoxLayout(lab_container)
-        lab_container_layout.setContentsMargins(0, 0, 0, 0)
-        lab_container_layout.setSpacing(0)
-        lab_container_layout.addStretch()  # Push lab button to right edge
-        
-        self.lab_btn = MorphingButton(main_icon_path="client/assets/icons/lab_icon.svg")
-        self.lab_btn.add_menu_item(0, "client/assets/icons/pic_icon2.svg", "Image Conversion")
-        self.lab_btn.add_menu_item(1, "client/assets/icons/vid_icon2.svg", "Video Conversion")
-        self.lab_btn.add_menu_item(2, "client/assets/icons/loop_icon3.svg", "Loop Conversion")
-        self.lab_btn.itemClicked.connect(self._on_lab_item_clicked)
-        lab_container_layout.addWidget(self.lab_btn)
-        
-        control_layout.addWidget(lab_container)
-        
-        parent_layout.addWidget(control_bar)
-        
-        # Store reference
-        self.control_bar = control_bar
+    def _connect_title_bar_signals(self):
+        """Wire up TitleBarWindow signals to main window methods"""
+        self.title_bar_window.minimize_requested.connect(self.showMinimized)
+        self.title_bar_window.close_requested.connect(self.close)
+        self.title_bar_window.theme_toggle_requested.connect(self.toggle_theme)
+        self.title_bar_window.show_advanced_requested.connect(self.show_advanced)
+        self.title_bar_window.show_about_requested.connect(self.show_about)
+        self.title_bar_window.toggle_log_requested.connect(lambda: self.toggle_status_bar(not self.bottom_frame.isVisible() if hasattr(self, 'bottom_frame') else True))
+        self.title_bar_window.logout_requested.connect(self.logout)
+
     
-    def _on_preset_btn_clicked(self):
-        """Handle preset button click - show preset overlay"""
+    def create_control_bar(self, parent_layout):
+        """Create the unified control bar using the ControlBar component."""
+        # Create the ControlBar component (Mediator-Shell Pattern)
+        self.control_bar = ControlBar()
+        
+        # Connect signals to MainWindow handlers (Mediator routing)
+        self.control_bar.preset_mode_clicked.connect(self._on_preset_btn_clicked)
+        self.control_bar.lab_mode_clicked.connect(self._on_lab_item_clicked)
+        
+        # Expose child references for backward compatibility
+        self.add_files_btn = self.control_bar.add_files_btn
+        self.add_folder_btn = self.control_bar.add_folder_btn
+        self.clear_files_btn = self.control_bar.clear_files_btn
+        self.preset_status_btn = self.control_bar.preset_status_btn
+        self.lab_btn = self.control_bar.lab_btn
+        
+        parent_layout.addWidget(self.control_bar)
+    
+    # =========================================================================
+    # MEDIATOR-SHELL: MODE CONDUCTOR
+    # =========================================================================
+    # Centralized mode switching logic. All mode changes go through switch_mode()
+    # to ensure consistent state across all components.
+    # =========================================================================
+    
+    @property
+    def current_mode(self) -> Mode:
+        """Get the current application mode."""
+        return self._current_mode
+    
+    def switch_mode(self, mode: Mode, lab_tab: int = None):
+        """
+        Centralized mode switching - the heart of the Mediator pattern.
+        
+        All mode changes should go through this method to ensure:
+        1. Consistent state across all components
+        2. Proper animation sequencing
+        3. UI state synchronization
+        
+        Args:
+            mode: Target mode (Mode.PRESET or Mode.LAB)
+            lab_tab: For LAB mode, which tab to activate (0=Image, 1=Video, 2=Loop)
+        """
+        if mode == Mode.PRESET:
+            self._enter_preset_mode()
+        elif mode == Mode.LAB:
+            self._enter_lab_mode(lab_tab if lab_tab is not None else self._active_lab_tab)
+        
+        self._current_mode = mode
+    
+    def _enter_preset_mode(self):
+        """Internal: Configure UI for Preset mode."""
         # 1. Hide Command Panel
-        self.toggle_command_panel(False)
+        self.panel_animator.close()
         
         # 2. Deactivate Lab Button (Ghost style)
         if hasattr(self, 'lab_btn'):
             self.lab_btn.set_style_solid(False)
             self.lab_btn.set_main_icon("client/assets/icons/lab_icon.svg")
-            
+        
         # 3. Notify CommandPanel state
         if hasattr(self, 'command_panel'):
             self.command_panel.set_lab_mode_active(False)
             self.command_panel.set_top_bar_preset_mode(True)
-            
-        # 4. Show Overlay
-        if hasattr(self, 'drag_drop_area'):
-            self.drag_drop_area.show_preset_view()
-    
-    def _on_lab_item_clicked(self, item_id):
-        """Handle lab button menu item click"""
-        type_map = {0: "IMAGE", 1: "VIDEO", 2: "LOOP"}
-        print(f"[DEBUG_MAIN] Lab item clicked. ID={item_id} ({type_map.get(item_id, 'UNKNOWN')})")
         
+        # 4. Show Preset Overlay
+        if hasattr(self, 'drag_drop_area'):
+            self.drag_drop_area.set_view_mode(ViewMode.PRESETS)
+    
+    def _enter_lab_mode(self, lab_tab: int):
+        """Internal: Configure UI for Lab mode."""
         # Icon paths matching tab order
         icons = [
             "client/assets/icons/pic_icon2.svg",
@@ -402,188 +276,47 @@ class MainWindow(QMainWindow):
             "client/assets/icons/loop_icon3.svg"
         ]
         
-        # Update lab button immediately
-        if 0 <= item_id < len(icons):
-            self.lab_btn.set_main_icon(icons[item_id])
+        # 1. Update lab button appearance
+        if 0 <= lab_tab < len(icons):
+            self.lab_btn.set_main_icon(icons[lab_tab])
             self.lab_btn.set_style_solid(True)
         
-        # Reset Preset button to default state (Lab mode = not in preset mode)
+        # 2. Reset Preset button to default state
         if hasattr(self, 'preset_status_btn'):
-            self.preset_status_btn.set_active(False)  # Reverts to "PRESETS" with ghost styling
+            self.preset_status_btn.set_active(False)
         
-        # Notify CommandPanel that Lab mode is active
+        # 3. Notify CommandPanel
         if hasattr(self, 'command_panel'):
             self.command_panel.set_lab_mode_active(True)
-            self.command_panel.set_top_bar_preset_mode(False)  # Exiting preset mode
+            self.command_panel.set_top_bar_preset_mode(False)
+            self.command_panel._on_tab_btn_clicked(lab_tab)
         
+        # 4. Hide Preset Overlay
+        if hasattr(self, 'drag_drop_area'):
+            self.drag_drop_area.set_view_mode(ViewMode.FILES)
         
-        # Forward to command panel for tab switching
-        if hasattr(self, 'command_panel'):
-            self.command_panel._on_tab_btn_clicked(item_id)
-        
-        # Only hide side buttons if panel is not already visible
-        # If panel is already open (switching tabs), keep buttons visible
+        # 5. Animate panel
         panel_already_visible = self.right_frame.isVisible()
-        
         if not panel_already_visible:
-            # CRITICAL: Hide side buttons BEFORE panel animation starts
-            # This ensures the stagger animation in toggle_command_panel controls visibility
-            self._trigger_side_buttons_animation(hide=True)
-            
-        # Show Command Panel with animation (stagger will reveal buttons at threshold)
-        self.toggle_command_panel(True)
+            self.panel_animator.trigger_side_buttons_animation(hide=True)
+        self.panel_animator.open()
         
-    def create_title_bar(self, parent_layout):
-        """Create custom title bar with logo, theme toggle, menu, and window controls"""
-        # Use a custom frame to handle mouse events for dragging
-        title_bar = DraggableTitleBar(self)
-        title_bar.setMinimumHeight(45)
-        title_bar.setMaximumHeight(45)
-        title_layout = QHBoxLayout(title_bar)
-        title_layout.setContentsMargins(10, 5, 10, 5)
-        title_layout.setSpacing(10)
-        
-        # Logo on the left (clickable)
-        try:
-            from client.utils.resource_path import get_app_icon_path
-            icon_path = get_app_icon_path()
-            if os.path.exists(icon_path):
-                logo_label = ClickableLabel()
-                icon = QIcon(icon_path)
-                logo_label.setPixmap(icon.pixmap(32, 32))
-                logo_label.setMaximumWidth(40)
-                logo_label.setCursor(Qt.CursorShape.PointingHandCursor)
-                logo_label.setStyleSheet("border: none; padding: 0px; margin: 0px; background: transparent;")
-                title_layout.addWidget(logo_label)
-                self.logo_label = logo_label
-        except Exception as e:
-            print(f"Could not load logo: {e}")
-        
-        # Title label (clickable)
-        from client.utils.font_manager import FONT_FAMILY
-        
-        # Explicitly apply App Name font via HTML to ensure it works
-        title_text = f'<span style="font-family: \'{FONT_FAMILY_APP_NAME}\'; font-weight: bold;">{APP_NAME}</span>'
-        
-        if self.is_trial:
-            title_text += f'&nbsp;&nbsp;<span style="font-family: \'{FONT_FAMILY}\'; font-weight: normal; font-size: 10pt;">[ TRIAL ]</span>'
-        if self.DEVELOPMENT_MODE:
-            title_text += f'&nbsp;&nbsp;<span style="font-family: \'{FONT_FAMILY}\'; font-weight: normal; font-size: 10pt;">[ DEV ]</span>'
-            
-        title_label = ClickableLabel(title_text)
-        title_label.setTextFormat(Qt.TextFormat.RichText)
-        # setFont is still useful as fallback or base sizing
-        title_label.setFont(AppFonts.get_app_name_font())
-        title_label.setStyleSheet("color: #ffffff; border: none; padding: 0px; margin: 0px; text-decoration: none;")
-        title_label.setCursor(Qt.CursorShape.PointingHandCursor)
-        title_layout.addWidget(title_label)
-        
-        # Theme toggle button (Moon/Sun SVG)
-        self.theme_toggle_btn = QPushButton()
-        self.theme_toggle_btn.setMinimumWidth(40)
-        self.theme_toggle_btn.setMinimumHeight(35)
-        self.theme_toggle_btn.setMaximumWidth(40)
-        self.theme_toggle_btn.setMaximumHeight(35)
-        self.theme_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        
-        # Load SVG icon for theme toggle
-        try:
-            svg_path = get_resource_path('client/assets/icons/sun-moon.svg')
-            if os.path.exists(svg_path):
-                self.sun_moon_svg_path = svg_path
-                icon = QIcon(svg_path)
-                self.theme_toggle_btn.setIcon(icon)
-                self.theme_toggle_btn.setIconSize(QSize(24, 21))  # 60% of button size (40x35)
-        except Exception as e:
-            print(f"Could not load theme toggle icon: {e}")
-            self.theme_toggle_btn.setText("◐")
-        self.theme_toggle_btn.clicked.connect(self.toggle_theme)
-        self.theme_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        
-        # Create dropdown menu
-        from PyQt6.QtWidgets import QMenu
-        self.title_menu = QMenu()
-        
-        
-        advanced_action = QAction("Advanced", self)
-        advanced_action.triggered.connect(self.show_advanced)
-        self.title_menu.addAction(advanced_action)
-
-        about_action = QAction("About", self)
-        about_action.triggered.connect(self.show_about)
-        self.title_menu.addAction(about_action)
-        
-        show_log_action = QAction("Show Log", self)
-        show_log_action.triggered.connect(self.toggle_status_bar)
-        self.title_menu.addAction(show_log_action)
-        
-        self.title_menu.addSeparator()
-
-        logout_action = QAction("Log Out", self)
-        logout_action.triggered.connect(self.logout)
-        self.title_menu.addAction(logout_action)
-
-        exit_action = QAction("Exit", self)
-        exit_action.triggered.connect(self.close)
-        self.title_menu.addAction(exit_action)
-        
-        # Status Bar Toggle
-        self.status_action = QAction("Show Status Bar", self)
-        self.status_action.setCheckable(True)
-        self.status_action.setChecked(False) 
-        self.status_action.triggered.connect(self.toggle_status_bar)
-        
-        self.title_menu.addSeparator()
-        self.title_menu.addAction(self.status_action)
-        
-        # Connect logo and title clicks to menu
-        if hasattr(self, 'logo_label'):
-            self.logo_label.clicked.connect(self.show_title_menu)
-        title_label.clicked.connect(self.show_title_menu)
-        
-        # Spacer
-        title_layout.addStretch()
-        
-        # Add theme toggle before minimize buttons
-        title_layout.addWidget(self.theme_toggle_btn)
-        
-        # Minimize button
-        minimize_btn = QPushButton("—")
-        minimize_btn.setMinimumWidth(45)
-        minimize_btn.setMinimumHeight(35)
-        minimize_btn.setMaximumWidth(45)
-        minimize_btn.setMaximumHeight(35)
-        minimize_btn.clicked.connect(self.showMinimized)
-        minimize_btn.setFont(AppFonts.get_button_font())
-        minimize_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        
-        # Close button
-        close_btn = QPushButton("✕")
-        close_btn.setMinimumWidth(45)
-        close_btn.setMinimumHeight(35)
-        close_btn.setMaximumWidth(45)
-        close_btn.setMaximumHeight(35)
-        close_btn.clicked.connect(self.close)
-        close_btn.setFont(AppFonts.get_button_font())
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        
-        title_layout.addWidget(minimize_btn)
-        title_layout.addSpacing(10)
-        title_layout.addWidget(close_btn)
-        
-        # Store references for theme updates
-        self.title_bar = title_bar
-        self.title_label = title_label
-        self.minimize_btn = minimize_btn
-        self.close_btn = close_btn
-        
-        parent_layout.addWidget(title_bar)
-        
-    def show_title_menu(self):
-        """Show the title bar menu below the title"""
-        # Show menu at cursor position relative to the window
-        menu_pos = self.mapToGlobal(QPoint(100, 50))
-        self.title_menu.popup(menu_pos)
+        # 6. Track active tab
+        self._active_lab_tab = lab_tab
+    
+    # =========================================================================
+    # BUTTON HANDLERS (Now delegate to switch_mode)
+    # =========================================================================
+    
+    def _on_preset_btn_clicked(self):
+        """Handle preset button click - delegate to switch_mode()."""
+        self.switch_mode(Mode.PRESET)
+    
+    def _on_lab_item_clicked(self, item_id):
+        """Handle lab button menu item click - delegate to switch_mode()."""
+        type_map = {0: "IMAGE", 1: "VIDEO", 2: "LOOP"}
+        print(f"[DEBUG_MAIN] Lab item clicked. ID={item_id} ({type_map.get(item_id, 'UNKNOWN')})")
+        self.switch_mode(Mode.LAB, lab_tab=item_id)
         
     def create_middle_section(self, parent_layout):
         """Create the split middle section with drag-drop and command areas"""
@@ -629,345 +362,28 @@ class MainWindow(QMainWindow):
         splitter.setSizes([1200, 0])
         
         parent_layout.addWidget(splitter)
+        
+        # Initialize SidePanelAnimator (Mediator-Shell Pattern)
+        self.panel_animator = SidePanelAnimator(
+            splitter=self.splitter,
+            command_panel=self.command_panel,
+            right_frame=self.right_frame
+        )
+        # Wire up button animation callbacks - animator now handles these internally
+        self.panel_animator.set_button_callbacks(
+            on_show=lambda: self.panel_animator.trigger_side_buttons_animation(hide=False),
+            on_hide=lambda: self.panel_animator.trigger_side_buttons_animation(hide=True)
+        )
 
     # =========================================================================
-    # COMMAND PANEL SLIDE ANIMATION
+    # COMMAND PANEL SLIDE ANIMATION (Delegated to SidePanelAnimator)
     # =========================================================================
-    # All animation logic for the right-side command panel is contained here.
-    # The panel slides in from the right edge when Lab mode is activated,
-    # and slides out when switching to Preset mode.
-    #
-    # Design Spec Reference (styles_instruction.md):
-    #   - Animations should feel premium with weighted motion
-    #   - OutQuad or OutBack for smooth deceleration
-    #   - Spring effects add premium feel (OutBack with overshoot)
+    # Animation configuration is now managed by:
+    #   client/gui/animators/side_panel_animator.py
+    # 
+    # The SidePanelAnimator is initialized in create_middle_section() and
+    # provides: open(), close(), toggle() methods.
     # =========================================================================
-    
-    # -------------------------------------------------------------------------
-    # ANIMATION CONFIGURATION - Edit these values to tune the animation feel
-    # -------------------------------------------------------------------------
-    
-    # Panel Size
-    PANEL_TARGET_RATIO = 0.4  # Right panel takes 40% of total splitter width
-    
-    # Panel Timing (milliseconds)
-    PANEL_SHOW_DURATION_MS = 450   # Slide-in duration (snappy entrance)
-    PANEL_HIDE_DURATION_MS = 500   # Slide-out duration (snappy exit with weight)
-    
-    # Panel Easing Curve Options:
-    #   "Linear"     - Constant speed (basic)
-    #   "OutQuad"    - Smooth deceleration (design spec recommended)
-    #   "OutCubic"   - Smoother deceleration
-    #   "OutExpo"    - Sharp start, smooth end
-    #   "OutBack"    - Overshoot with spring (premium weighted feel)
-    #   "OutElastic" - Bouncy spring (use sparingly)
-    PANEL_SHOW_EASING = "OutBack"   # Premium weighted entrance
-    PANEL_HIDE_EASING = "OutBack"   # Weighted exit with subtle overshoot
-    
-    # Panel Spring Parameters (only applies to OutBack easing)
-    PANEL_SPRING_OVERSHOOT = 0.7   # 0.0 = no spring, 1.7 = default, 0.5-0.8 = subtle
-    PANEL_HIDE_OVERSHOOT = 0.5     # Overshoot for hide animation (more subtle than show)
-    
-    # -------------------------------------------------------------------------
-    # SIDE BUTTONS STAGGERED ANIMATION
-    # -------------------------------------------------------------------------
-    # Side buttons (transform controls) appear in a staggered sequence during
-    # the panel slide animation. They start revealing when the panel reaches
-    # a certain progress threshold and fade in one after another.
-    #
-    # On HIDE: Buttons hide simultaneously first, then panel slides out.
-    # -------------------------------------------------------------------------
-    
-    # ---- SHOW Animation ----
-    # When to start showing buttons (0.0 - 1.0 of panel animation progress)
-    BUTTONS_REVEAL_THRESHOLD = 0.9
-    
-    # Stagger delay between each button appearing (milliseconds)
-    BUTTONS_SHOW_STAGGER_MS = 60
-    
-    # Button show animation duration (milliseconds)  
-    BUTTONS_SHOW_DURATION_MS = 200
-    
-    # Button show easing
-    BUTTONS_SHOW_EASING = "OutCubic"
-    
-    # ---- HIDE Animation ----
-    # All buttons hide simultaneously (no stagger on hide)
-    BUTTONS_HIDE_DURATION_MS = 100   # Visible hide animation for better feedback
-    
-    # Button hide easing (InQuad = accelerate into hide)
-    BUTTONS_HIDE_EASING = "InQuad"
-    
-    # Delay AFTER buttons start hiding before panel slides out (milliseconds)
-    # This is the time for buttons to reach the panel edge
-    BUTTONS_HIDE_HEAD_START_MS = 200   # Let buttons hide before panel slides out
-    
-    # -------------------------------------------------------------------------
-    
-    def toggle_command_panel(self, show):
-        """
-        Animate Command Panel sliding in/out from the RIGHT edge.
-        
-        Premium Animation Features:
-        - Weighted motion with spring overshoot (OutBack easing)
-        - Separate timing/easing for show vs hide 
-        - MaximumWidth constraint prevents layout "pop" artifact
-        - Staggered side button reveal at configurable threshold
-        - Sequential hide: buttons first, then panel
-        
-        Args:
-            show: True to slide panel in, False to slide it out
-        """
-        # Early exit if already in the requested state
-        if show == self.right_frame.isVisible():
-            return
-            
-        from PyQt6.QtCore import QVariantAnimation, QEasingCurve, QTimer
-        
-        # --- Stop any running animation ---
-        if hasattr(self, '_panel_anim') and self._panel_anim.state() == QVariantAnimation.State.Running:
-            self._panel_anim.stop()
-        
-        # --- Calculate dimensions ---
-        current_sizes = self.splitter.sizes()
-        total_width = sum(current_sizes)
-        target_right_width = int(total_width * self.PANEL_TARGET_RATIO)
-        
-        # Track whether we've triggered side buttons (to avoid re-triggering)
-        self._buttons_triggered = False
-        
-        # --- Prepare start/end values based on direction ---
-        if show:
-            # SHOWING: Panel slides in from right edge (0 → target width)
-            # CRITICAL: Set maximumWidth to 0 BEFORE setVisible(True)
-            # This prevents Qt from assigning any width during the initial layout pass
-            self.right_frame.setMaximumWidth(0)
-            self.right_frame.setVisible(True)
-            self.splitter.setSizes([total_width, 0])
-            
-            start_width = 0
-            end_width = target_right_width
-            duration = self.PANEL_SHOW_DURATION_MS
-            easing_name = self.PANEL_SHOW_EASING
-            
-            # Start panel animation immediately for show
-            self._start_panel_animation(show, start_width, end_width, duration, easing_name, total_width, target_right_width)
-        else:
-            # HIDING: Sequential animation - buttons first, then panel
-            # 1. Hide all buttons simultaneously
-            self._trigger_side_buttons_animation(hide=True)
-            
-            # 2. Schedule panel to slide out AFTER buttons reach panel edge
-            start_width = current_sizes[1]
-            end_width = 0
-            duration = self.PANEL_HIDE_DURATION_MS
-            easing_name = self.PANEL_HIDE_EASING
-            
-            # Delay panel hide to let buttons hide first
-            QTimer.singleShot(
-                self.BUTTONS_HIDE_HEAD_START_MS,
-                lambda: self._start_panel_animation(show, start_width, end_width, duration, easing_name, total_width, target_right_width)
-            )
-    
-    def _start_panel_animation(self, show, start_width, end_width, duration, easing_name, total_width, target_right_width):
-        """
-        Internal helper to start the panel slide animation.
-        
-        Args:
-            show: True if showing panel, False if hiding
-            start_width: Starting width of the right panel
-            end_width: Target width of the right panel
-            duration: Animation duration in ms
-            easing_name: Name of the easing curve
-            total_width: Total width of the splitter
-            target_right_width: Target width when fully open
-        """
-        from PyQt6.QtCore import QVariantAnimation, QEasingCurve
-        
-        # Stop any running animation
-        if hasattr(self, '_panel_anim') and self._panel_anim.state() == QVariantAnimation.State.Running:
-            self._panel_anim.stop()
-        
-        # Create and configure animation
-        self._panel_anim = QVariantAnimation()
-        self._panel_anim.setDuration(duration)
-        
-        # Build easing curve with optional spring parameters
-        easing_map = {
-            "Linear": QEasingCurve.Type.Linear,
-            "OutQuad": QEasingCurve.Type.OutQuad,
-            "OutCubic": QEasingCurve.Type.OutCubic,
-            "OutExpo": QEasingCurve.Type.OutExpo,
-            "OutBack": QEasingCurve.Type.OutBack,
-            "OutElastic": QEasingCurve.Type.OutElastic,
-            "InOutCubic": QEasingCurve.Type.InOutCubic,
-            "InQuad": QEasingCurve.Type.InQuad,
-        }
-        
-        easing_type = easing_map.get(easing_name, QEasingCurve.Type.OutQuad)
-        easing_curve = QEasingCurve(easing_type)
-        
-        # Apply spring overshoot for OutBack easing
-        if easing_name == "OutBack":
-            # Use different overshoot values for show vs hide
-            overshoot = self.PANEL_SPRING_OVERSHOOT if show else self.PANEL_HIDE_OVERSHOOT
-            easing_curve.setOvershoot(overshoot)
-        
-        self._panel_anim.setEasingCurve(easing_curve)
-        self._panel_anim.setStartValue(start_width)
-        self._panel_anim.setEndValue(end_width)
-        
-        # Animation update callback
-        def on_value_changed(right_width):
-            # Update the maximum width constraint to match animated value
-            self.right_frame.setMaximumWidth(max(0, right_width))
-            
-            # Update splitter proportions
-            left_width = total_width - right_width
-            self.splitter.setSizes([left_width, right_width])
-            
-            # Staggered side buttons reveal (only during show)
-            if show and not self._buttons_triggered:
-                progress = right_width / target_right_width if target_right_width > 0 else 0
-                if progress >= self.BUTTONS_REVEAL_THRESHOLD:
-                    self._buttons_triggered = True
-                    self._trigger_side_buttons_animation(hide=False)
-        
-        self._panel_anim.valueChanged.connect(on_value_changed)
-        
-        # Animation finished callback
-        def on_animation_finished():
-            if show:
-                # Remove the maximum width constraint
-                self.right_frame.setMaximumWidth(16777215)  # QWIDGETSIZE_MAX
-                # Ensure buttons are visible if animation finished before threshold
-                if not self._buttons_triggered:
-                    self._trigger_side_buttons_animation(hide=False)
-            else:
-                # Hide the panel completely
-                self.right_frame.setVisible(False)
-        
-        self._panel_anim.finished.connect(on_animation_finished)
-        
-        # Start the animation
-        self._panel_anim.start()
-    
-    def _trigger_side_buttons_animation(self, hide=False):
-        """
-        Trigger staggered animation for ALL Command Panel Side Buttons.
-        
-        Button Groups (animated top to bottom):
-        1. Command Panel Main Folder Buttons: Max Size, Lab Presets, Manual
-        2. Command Panel Transform Folder Buttons: Resize, Rotate, Time (tab-dependent)
-        
-        SHOW: Buttons reveal with stagger delay (one after another)
-        HIDE: All buttons hide simultaneously (no stagger)
-        
-        Args:
-            hide: True to hide buttons, False to reveal them
-        """
-        from PyQt6.QtCore import QTimer
-        
-        if not hasattr(self, 'command_panel'):
-            return
-        
-        # Collect ALL buttons in ORDER (top to bottom)
-        all_buttons = []
-        
-        # --- 1. Main Folder Buttons (ModeButtonsWidget) ---
-        # These are at the TOP of the side button area
-        if hasattr(self.command_panel, 'mode_buttons'):
-            mode_btns = self.command_panel.mode_buttons
-            # ModeButtonsWidget has individual button attributes (not a dict)
-            if hasattr(mode_btns, 'max_size_btn'):
-                all_buttons.append(mode_btns.max_size_btn)
-            if hasattr(mode_btns, 'presets_btn'):
-                all_buttons.append(mode_btns.presets_btn)
-            if hasattr(mode_btns, 'manual_btn'):
-                all_buttons.append(mode_btns.manual_btn)
-        
-        # --- 2. Transform Folder Buttons (SideButtonGroup) ---
-        # Only add buttons for the currently active tab
-        current_tab = self.command_panel.tabs.currentIndex() if hasattr(self.command_panel, 'tabs') else 0
-        
-        transform_group = None
-        if current_tab == 0 and hasattr(self.command_panel, 'image_side_buttons'):
-            transform_group = self.command_panel.image_side_buttons
-        elif current_tab == 1 and hasattr(self.command_panel, 'video_side_buttons'):
-            transform_group = self.command_panel.video_side_buttons
-        elif current_tab == 2 and hasattr(self.command_panel, 'loop_side_buttons'):
-            transform_group = self.command_panel.loop_side_buttons
-        
-        if transform_group and hasattr(transform_group, 'buttons'):
-            # SideButtonGroup has a buttons dict
-            # Get buttons in order based on their config order
-            if hasattr(transform_group, 'buttons_config'):
-                for config in transform_group.buttons_config:
-                    btn_id = config.get('id', '')
-                    if btn_id in transform_group.buttons:
-                        all_buttons.append(transform_group.buttons[btn_id])
-            else:
-                # Fallback: just add all buttons
-                all_buttons.extend(transform_group.buttons.values())
-        
-        # --- Trigger animation ---
-        if hide:
-            # HIDE: All buttons hide simultaneously (no stagger for snappy exit)
-            for btn in all_buttons:
-                self._hide_button(btn)
-        else:
-            # SHOW: Staggered reveal (top to bottom)
-            for i, btn in enumerate(all_buttons):
-                delay = i * self.BUTTONS_SHOW_STAGGER_MS
-                QTimer.singleShot(delay, lambda b=btn: self._reveal_button(b))
-    
-    def _reveal_button(self, btn):
-        """
-        Reveal a single side button with animation.
-        Uses the BUTTONS_SHOW_EASING and BUTTONS_SHOW_DURATION_MS settings.
-        """
-        if hasattr(btn, 'set_force_hidden'):
-            # Configure the button's internal animation
-            if hasattr(btn, 'animation'):
-                from PyQt6.QtCore import QEasingCurve
-                
-                easing_map = {
-                    "Linear": QEasingCurve.Type.Linear,
-                    "OutQuad": QEasingCurve.Type.OutQuad,
-                    "OutCubic": QEasingCurve.Type.OutCubic,
-                    "OutExpo": QEasingCurve.Type.OutExpo,
-                    "OutBack": QEasingCurve.Type.OutBack,
-                }
-                easing = easing_map.get(self.BUTTONS_SHOW_EASING, QEasingCurve.Type.OutCubic)
-                btn.animation.setDuration(self.BUTTONS_SHOW_DURATION_MS)
-                btn.animation.setEasingCurve(easing)
-            
-            # Trigger the reveal
-            btn.set_force_hidden(False)
-    
-    def _hide_button(self, btn):
-        """
-        Hide a single side button with animation.
-        Uses the BUTTONS_HIDE_EASING and BUTTONS_HIDE_DURATION_MS settings.
-        """
-        if hasattr(btn, 'set_force_hidden'):
-            # Configure the button's internal animation for hide
-            if hasattr(btn, 'animation'):
-                from PyQt6.QtCore import QEasingCurve
-                
-                easing_map = {
-                    "Linear": QEasingCurve.Type.Linear,
-                    "InQuad": QEasingCurve.Type.InQuad,
-                    "InCubic": QEasingCurve.Type.InCubic,
-                    "OutQuad": QEasingCurve.Type.OutQuad,
-                    "OutCubic": QEasingCurve.Type.OutCubic,
-                }
-                easing = easing_map.get(self.BUTTONS_HIDE_EASING, QEasingCurve.Type.InQuad)
-                btn.animation.setDuration(self.BUTTONS_HIDE_DURATION_MS)
-                btn.animation.setEasingCurve(easing)
-            
-            # Trigger the hide
-            btn.set_force_hidden(True)
         
     def create_bottom_section(self, parent_layout):
         """Create the bottom section with status and progress"""
@@ -1003,116 +419,27 @@ class MainWindow(QMainWindow):
         menubar.hide()
         
     def setup_status_bar(self):
-        """Setup the bottom status bar with progress bar above it"""
-        # Create custom progress bar with dual-layer rendering
-        from PyQt6.QtWidgets import QWidget
-        from PyQt6.QtGui import QPainter, QLinearGradient, QColor
-        from PyQt6.QtCore import Qt
+        """Setup the bottom status bar using StatusPanel component."""
+        # Create the StatusPanel component (Mediator-Shell Pattern)
+        self.status_panel = StatusPanel()
         
-        class CustomProgressBar(QWidget):
-            def __init__(self, color, height=4):
-                super().__init__()
-                self.setFixedHeight(height)
-                self.progress = 0.0 # 0.0 to 1.0
-                self.color = color
-                self._animation = None
-                
-            def set_progress(self, value, animate=True, min_duration_ms=250):
-                from PyQt6.QtCore import QPropertyAnimation, QEasingCurve, pyqtProperty
-                
-                target_value = max(0.0, min(1.0, value))
-                
-                # If not animating, set immediately
-                if not animate:
-                    if self._animation and self._animation.state() == QPropertyAnimation.State.Running:
-                        self._animation.stop()
-                    self.progress = target_value
-                    self.repaint()
-                    return
-                
-                # If new file started (target < current), reset immediately without animation
-                if target_value < self.progress - 0.1:
-                    if self._animation and self._animation.state() == QPropertyAnimation.State.Running:
-                        self._animation.stop()
-                    self.progress = target_value
-                    self.repaint()
-                    return
-                
-                # Stop current animation if running
-                if self._animation and self._animation.state() == QPropertyAnimation.State.Running:
-                    self._animation.stop()
-                
-                # Calculate animation duration based on progress distance
-                distance = abs(target_value - self.progress)
-                duration = max(min_duration_ms, int(distance * 500))  # At least min_duration_ms
-                
-                # Create smooth animation from current position
-                self._animation = QPropertyAnimation(self, b"progress_value")
-                self._animation.setDuration(duration)
-                self._animation.setStartValue(self.progress)
-                self._animation.setEndValue(target_value)
-                self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-                self._animation.start()
-            
-            @pyqtProperty(float)
-            def progress_value(self):
-                return self.progress
-            
-            @progress_value.setter
-            def progress_value(self, value):
-                self.progress = value
-                self.repaint()
-                
-            def paintEvent(self, event):
-                painter = QPainter(self)
-                painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-                rect = self.rect()
-                
-                # Background (dark)
-                painter.fillRect(rect, QColor(60, 60, 60, 80))
-                
-                width = int(rect.width() * self.progress)
-                # Ensure at least 1px visible if > 0
-                if self.progress > 0 and width == 0:
-                    width = 1
-                    
-                if width > 0:
-                    gradient = QLinearGradient(0, 0, width, 0)
-                    gradient.setColorAt(0, self.color)
-                    gradient.setColorAt(1, self.color.lighter(130))
-                    painter.fillRect(0, 0, width, rect.height(), gradient)
-                
-                painter.end()
-
-        # Progress Bar Container
-        self.progress_container = QWidget()
-        self.progress_container.setFixedHeight(8)  # Fixed 8px height container
-        progress_layout = QVBoxLayout(self.progress_container)
-        progress_layout.setContentsMargins(0, 0, 0, 0)
-        progress_layout.setSpacing(1)
-        
-        # Single File Progress (Blue, Top)
-        self.file_progress_bar = CustomProgressBar(QColor(33, 150, 243), height=3) # Blue, Slim
-        
-        # Total Progress (Green, Bottom)
-        self.total_progress_bar = CustomProgressBar(QColor(76, 175, 80), height=3) # Green
-        
-        progress_layout.addWidget(self.file_progress_bar)
-        progress_layout.addWidget(self.total_progress_bar)
-        
+        # Expose child references for backward compatibility
+        self.progress_container = self.status_panel
+        self.file_progress_bar = self.status_panel.file_progress_bar
+        self.total_progress_bar = self.status_panel.total_progress_bar
         self._completed_files_count = 0
         
-        # Add progress bar to the central widget's layout (above status bar)
+        # Add progress bar to the central widget's layout
         if self.centralWidget():
             central_layout = self.centralWidget().layout()
             if central_layout:
-                central_layout.addWidget(self.progress_container)
+                central_layout.addWidget(self.status_panel)
         
         # Status bar - hidden (no resize grip shown)
         self.status_bar = QStatusBar()
-        self.status_bar.setSizeGripEnabled(False)  # Disable resize grip
+        self.status_bar.setSizeGripEnabled(False)
         self.setStatusBar(self.status_bar)
-        self.status_bar.hide()  # Hide the status bar completely
+        self.status_bar.hide()
         
     def update_status(self, message):
         """Update status in both status bar and status text area"""
@@ -1197,8 +524,8 @@ class MainWindow(QMainWindow):
             self._start_preset_conversion()
             return
         
-        # Normal conversion path - Build params from command panel and footer
-        params = self.command_panel.get_conversion_params()
+        # Normal conversion path - get complete payload from command panel
+        params = self.command_panel.get_execution_payload()
         
         # Override output settings from footer
         output_mode = self.output_footer.get_output_mode()
@@ -1220,175 +547,93 @@ class MainWindow(QMainWindow):
         self.start_conversion(params)
     
     def _start_preset_conversion(self):
-        """Execute conversion using the active preset's command template."""
-        import subprocess
-        import os
-        from pathlib import Path
+        """
+        Execute conversion using the active preset - delegates to PresetOrchestrator.
         
+        MainWindow acts as a Conductor here: it collects parameters from UI components
+        and routes the request to the orchestrator, which handles all business logic.
+        """
         files = self.drag_drop_area.get_files()
         if not files:
-            from PyQt6.QtWidgets import QMessageBox
-            msg_box = QMessageBox(QMessageBox.Icon.Warning, "No Files", "Please add files for conversion first.", parent=self)
-            msg_box.exec()
+            self.dialogs.show_warning("No Files", "Please add files for conversion first.")
             return
         
-        preset = self._active_preset
-        print(f"[Preset Conversion] Starting with preset: {preset.name}")
-        print(f"[Preset Conversion] Processing {len(files)} file(s)")
+        # Get orchestrator (owns the conversion logic)
+        if not hasattr(self.drag_drop_area, '_preset_orchestrator'):
+            self.dialogs.show_error("Error", "Preset orchestrator not available.")
+            return
         
-        # Get output settings from footer  
+        orchestrator = self.drag_drop_area._preset_orchestrator
+        
+        # Collect output settings from footer (UI -> Data)
         output_mode = self.output_footer.get_output_mode()
+        organized_name = self.output_footer.get_organized_name() or "output"
+        custom_path = self.output_footer.get_custom_path()
         
-        # Get the CommandBuilder from the orchestrator
-        if hasattr(self.drag_drop_area, '_preset_orchestrator'):
-            builder = self.drag_drop_area._preset_orchestrator._builder
-        else:
-            print("[Preset Conversion] ERROR: Preset orchestrator not available")
-            return
-        
-        # Update UI
+        # Update UI state (show converting)
         if hasattr(self, 'output_footer'):
             self.output_footer.set_converting(True)
         self.show_progress(True)
-        self.update_status(f"Converting with preset: {preset.name}")
         
-        # Process each file
-        total_files = len(files)
-        success_count = 0
+        preset_name = self._active_preset.name if self._active_preset else "Unknown"
+        self.update_status(f"Converting with preset: {preset_name}")
         
-        for i, input_path in enumerate(files):
-            try:
-                # Determine output path
-                input_p = Path(input_path)
-                
-                if output_mode == "source":
-                    output_dir = input_p.parent
-                elif output_mode == "organized":
-                    folder_name = self.output_footer.get_organized_name() or "output"
-                    output_dir = input_p.parent / folder_name
-                    output_dir.mkdir(exist_ok=True)
-                elif output_mode == "custom":
-                    output_dir = Path(self.output_footer.get_custom_path() or input_p.parent)
-                    output_dir.mkdir(exist_ok=True)
-                else:
-                    output_dir = input_p.parent
-                
-                output_path = output_dir / f"{input_p.stem}_preset{input_p.suffix}"
-                
-                # Analyze media for meta context (Tier 3 - Smart Presets)
-                orchestrator = self.drag_drop_area._preset_orchestrator
-                meta = orchestrator.analyze_file(str(input_path))
-                print(f"[Preset Conversion] Meta: fps={meta.get('fps')}, landscape={meta.get('is_landscape')}")
-                
-                # Get parameter values from orchestrator (form or defaults)
-                param_values = orchestrator.get_parameter_values()
-                print(f"[Preset Conversion] Params: {param_values}")
-                
-                # Build context for Jinja2 template
-                context = {
-                    'input_path': str(input_path),
-                    'output_path': str(output_path),
-                    'meta': meta,  # Inject meta for smart logic
-                    **param_values,  # Inject parameter values (from form or defaults)
-                }
-                
-                # Build command from preset template
-                if preset.pipeline:
-                    cmd = builder.build_command(preset.pipeline[0], context)
-                    print(f"[Preset Conversion] Command: {cmd[:200]}...")
-                    
-                    # Execute command
-                    result = subprocess.run(
-                        cmd,
-                        shell=True,
-                        capture_output=True,
-                        text=True,
-                        creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-                    )
-                    
-                    if result.returncode == 0:
-                        success_count += 1
-                        print(f"[Preset Conversion] ✓ Success: {input_p.name}")
-                    else:
-                        print(f"[Preset Conversion] ✗ Failed: {input_p.name}")
-                        print(f"[Preset Conversion] stderr: {result.stderr[:200]}")
-                
-                # Update progress
-                progress = int((i + 1) / total_files * 100)
-                self.set_progress(progress)
-                
-            except Exception as e:
-                print(f"[Preset Conversion] Error processing {input_path}: {e}")
+        # Wire up progress signals from orchestrator
+        def on_progress(current, total, message):
+            progress = int(current / total * 100) if total > 0 else 0
+            self.set_progress(progress)
+            self.update_status(message)
         
-        # Done
-        self.update_status(f"Preset conversion complete: {success_count}/{total_files} files")
-        self.set_progress(100)
-        if hasattr(self, 'output_footer'):
-            self.output_footer.set_converting(False)
-        self.show_progress(False)
+        def on_finished(success, message):
+            self.set_progress(100)
+            self.update_status(message)
+            if hasattr(self, 'output_footer'):
+                self.output_footer.set_converting(False)
+            self.show_progress(False)
+            self.dialogs.show_completion(success, message)
+        
+        # Connect signals (disconnect after use to prevent stacking)
+        orchestrator.conversion_progress.connect(on_progress)
+        orchestrator.conversion_finished.connect(on_finished)
+        
+        # Delegate execution to orchestrator (Strategy Pattern)
+        orchestrator.run_conversion(
+            files=files,
+            output_mode=output_mode,
+            organized_name=organized_name,
+            custom_path=custom_path
+        )
+        
+        # Disconnect signals after execution
+        try:
+            orchestrator.conversion_progress.disconnect(on_progress)
+            orchestrator.conversion_finished.disconnect(on_finished)
+        except TypeError:
+            pass  # Already disconnected
 
 
         
 
     def start_conversion(self, params):
-        """Start the conversion process"""
+        """
+        Start the conversion process.
+        
+        MainWindow acts as a Conductor: it validates preconditions, then
+        delegates to ConversionEngine. Parameter gathering is done by CommandPanel.
+        """
         files = self.drag_drop_area.get_files()
         
         if not files:
-            msg_box = QMessageBox(QMessageBox.Icon.Warning, "No Files", "Please add files for conversion first.", parent=self)
-            msg_box.setWindowFlags(msg_box.windowFlags() | Qt.WindowType.FramelessWindowHint)
-            msg_box.setStyleSheet(self.theme_manager.get_dialog_styles())
-            ok_button = msg_box.button(QMessageBox.StandardButton.Ok)
-            if ok_button:
-                ok_button.setDefault(True)
-                ok_button.setFocus()
-            msg_box.exec()
+            self.dialogs.show_warning("No Files", "Please add files for conversion first.")
             return
             
         if self.conversion_engine and self.conversion_engine.isRunning():
-            msg_box = QMessageBox(QMessageBox.Icon.Warning, "Conversion Running", "A conversion is already in progress.", parent=self)
-            msg_box.setStyleSheet(self.theme_manager.get_dialog_styles())
-            msg_box.exec()
+            self.dialogs.show_warning("Conversion Running", "A conversion is already in progress.")
             return
         
-        # Initialize variants
-        resize_variants = self.command_panel.get_resize_values()
-        video_variants = self.command_panel.get_video_variant_values()
-        
-        # Set button to stop state (handled by footer)
-        # Update footer state
+        # Update UI state
         if hasattr(self, 'output_footer'):
             self.output_footer.set_converting(True)
-        
-        # Get current tab index to determine which settings to apply
-        current_tab_index = self.command_panel.tabs.currentIndex()
-        
-        # Add resize variants to params (Only if on Image tab)
-        if current_tab_index == 0 and resize_variants:
-            params['resize_variants'] = resize_variants
-        
-        # Add video variants to params (Only if on Video tab)
-        if current_tab_index == 1 and video_variants:
-            params['video_variants'] = video_variants
-            
-        # Add rotation parameters to params based on active tab
-        if current_tab_index == 0: # Images Tab
-            if hasattr(self.command_panel, 'rotation_angle'):
-                rotation_value = self.command_panel.rotation_angle.currentText()
-                if rotation_value != "No rotation":
-                    params['rotation_angle'] = rotation_value
-                    
-        elif current_tab_index == 1: # Videos Tab
-            if hasattr(self.command_panel, 'video_rotation_angle'):
-                rotation_value = self.command_panel.video_rotation_angle.currentText()
-                if rotation_value != "No rotation":
-                    params['rotation_angle'] = rotation_value
-                    
-        elif current_tab_index == 2: # GIFs Tab
-            if hasattr(self.command_panel, 'gif_rotation_angle'):
-                rotation_value = self.command_panel.gif_rotation_angle.currentText()
-                if rotation_value != "No rotation":
-                    params['gif_rotation_angle'] = rotation_value
         
         # Create and start conversion engine
         self.conversion_engine = ConversionEngine(files, params)
@@ -1400,7 +645,7 @@ class MainWindow(QMainWindow):
         self.conversion_engine.file_completed.connect(self.on_file_completed)
         self.conversion_engine.conversion_finished.connect(self.on_conversion_finished)
         
-        # Reset separated progress bars
+        # Reset progress bars
         if hasattr(self, 'file_progress_bar'):
             self.file_progress_bar.set_progress(0)
         if hasattr(self, 'total_progress_bar'):
@@ -1470,19 +715,7 @@ class MainWindow(QMainWindow):
         
         self.update_status(message)
         
-        from PyQt6.QtWidgets import QMessageBox
-        from PyQt6.QtCore import Qt
-        if success:
-            msg_box = QMessageBox(QMessageBox.Icon.Information, "Conversion Complete", message, parent=self)
-        else:
-            msg_box = QMessageBox(QMessageBox.Icon.Critical, "Conversion Error", message, parent=self)
-        
-        # Remove title bar and make frameless
-        msg_box.setWindowFlags(msg_box.windowFlags() | Qt.WindowType.FramelessWindowHint)
-        
-        # Apply dark theme to the dialog
-        msg_box.setStyleSheet(self.theme_manager.get_dialog_styles())
-        msg_box.exec()
+        self.dialogs.show_completion(success, message)
             
     def check_tools(self):
         """Check if required tools are available"""
@@ -1492,8 +725,6 @@ class MainWindow(QMainWindow):
         missing_tools = [tool for tool, available in tools.items() if not available]
         
         if missing_tools:
-            from PyQt6.QtWidgets import QMessageBox
-            
             # Create detailed message
             message_parts = ["Tool Status Check:\n"]
             for tool, status in detailed_status.items():
@@ -1503,9 +734,7 @@ class MainWindow(QMainWindow):
             message = "\n".join(message_parts)
             message += f"\n\nNote: The app will use fallback methods for missing tools."
             
-            msg_box = QMessageBox(QMessageBox.Icon.Information, "Tool Status", message, parent=self)
-            msg_box.setStyleSheet(self.theme_manager.get_dialog_styles())
-            msg_box.exec()
+            self.dialogs.show_tool_status(message)
         
     def apply_theme(self):
         """Apply the current theme to the main window"""
@@ -1539,38 +768,16 @@ class MainWindow(QMainWindow):
         
     def update_title_bar_theme(self, is_dark):
         """Update title bar colors based on theme"""
-        if is_dark:
-            # Dark theme
-            # Frosted Glass: more transparent to show blur
-            bg_color = "rgba(43, 43, 43, 0.5)" 
-            content_bg = "#2b2b2b"
-            text_color = "#ffffff"
-            btn_bg = "#404040"
-            btn_hover = "#4a4a4a"
-            btn_pressed = "#363636"
-            border_color = "#555555"
-        else:
-            # Light theme
-            bg_color = "rgba(232, 232, 232, 0.6)"
-            content_bg = "#ffffff"
-            text_color = "#000000"
-            btn_bg = "#f0f0f0"
-            btn_hover = "#e0e0e0"
-            btn_pressed = "#d0d0d0"
-            border_color = "#d0d0d0"
-        
-        # Title bar styling (Rounded top corners, glass bg)
-        title_bar_style = f"""
-            QFrame {{
-                background-color: {bg_color};
-                border-bottom: 1px solid {border_color};
-                border-top-left-radius: 12px;
-                border-top-right-radius: 12px;
-            }}
-        """
-        self.title_bar.setStyleSheet(title_bar_style)
+        # Delegate to the separate TitleBarWindow
+        if hasattr(self, 'title_bar_window'):
+            self.title_bar_window.apply_theme(is_dark)
         
         # Content frame styling (Opaque, rounded bottom corners)
+        if is_dark:
+            content_bg = "#2b2b2b"
+        else:
+            content_bg = "#ffffff"
+        
         if hasattr(self, 'content_container'):
             self.content_container.setStyleSheet(f"""
                 QFrame#ContentFrame {{
@@ -1579,108 +786,7 @@ class MainWindow(QMainWindow):
                     border-bottom-right-radius: 12px;
                 }}
             """)
-        
-        # Title label (background: transparent)
-        self.title_label.setStyleSheet(f"color: {text_color}; border: none; padding: 0px; margin: 0px; text-decoration: none; outline: none; background: transparent;")
-        
 
-        
-        # Update theme toggle button icon color
-        if hasattr(self, 'sun_moon_svg_path'):
-            try:
-                with open(self.sun_moon_svg_path, 'r', encoding='utf-8') as f:
-                    svg_content = f.read()
-                
-                # Change stroke and fill color based on theme
-                icon_color = "#ffffff" if is_dark else "#000000"
-                svg_content = svg_content.replace('stroke:currentColor', f'stroke:{icon_color}')
-                svg_content = svg_content.replace('stroke:#020202', f'stroke:{icon_color}')
-                svg_content = svg_content.replace('stroke:#000000', f'stroke:{icon_color}')
-                svg_content = svg_content.replace('stroke=#020202', f'stroke={icon_color}')
-                svg_content = svg_content.replace('stroke=#000000', f'stroke={icon_color}')
-                svg_content = svg_content.replace('fill:currentColor', f'fill:{icon_color}')
-                svg_content = svg_content.replace('fill:#020202', f'fill:{icon_color}')
-                svg_content = svg_content.replace('fill=#020202', f'fill={icon_color}')
-                svg_content = svg_content.replace('fill:#000000', f'fill:{icon_color}')
-                svg_content = svg_content.replace('fill:#000', f'fill:{icon_color}')
-                svg_content = svg_content.replace('fill:black', f'fill:{icon_color}')
-                
-                # Create a temporary SVG with the new color
-                import tempfile
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.svg', delete=False, encoding='utf-8') as tmp:
-                    tmp.write(svg_content)
-                    tmp_path = tmp.name
-                
-                # Load the colored icon
-                icon = QIcon(tmp_path)
-                self.theme_toggle_btn.setIcon(icon)
-                self.theme_toggle_btn.setIconSize(QSize(24, 21))
-                
-                # Clean up temp file
-                import atexit
-                atexit.register(lambda: os.unlink(tmp_path) if os.path.exists(tmp_path) else None)
-            except Exception as e:
-                print(f"Could not update icon color: {e}")
-        
-        # Button styling
-        btn_style = f"""
-            QPushButton {{
-                background-color: {btn_bg};
-                color: {text_color};
-                border: none;
-                border-radius: 3px;
-                padding: 2px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {btn_hover};
-            }}
-            QPushButton:pressed {{
-                background-color: {btn_pressed};
-            }}
-        """
-        self.minimize_btn.setStyleSheet(btn_style)
-        self.theme_toggle_btn.setStyleSheet(btn_style)
-        
-        # Menu styling
-        menu_bg = "#2b2b2b" if is_dark else "#f5f5f5"
-        menu_text = "#ffffff" if is_dark else "#000000"
-
-        self.title_menu.setStyleSheet(f"""
-            QMenu {{
-                background-color: {menu_bg};
-                color: {menu_text};
-                border: 1px solid {'#555555' if is_dark else '#d0d0d0'};
-            }}
-            QMenu::item {{
-                padding: 5px 20px;
-            }}
-            QMenu::item:selected {{
-                background-color: {'#3c3c3c' if is_dark else '#e0e0e0'};
-                color: {menu_text};
-            }}
-        """)
-        
-        # Close button with red hover
-        close_btn_style = f"""
-            QPushButton {{
-                background-color: {btn_bg};
-                color: {text_color};
-                border: none;
-                border-radius: 3px;
-                padding: 2px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: #cc0000;
-                color: #ffffff;
-            }}
-            QPushButton:pressed {{
-                background-color: #990000;
-                color: #ffffff;
-            }}
-        """
-        self.close_btn.setStyleSheet(close_btn_style)
         
     def toggle_theme(self):
         """Toggle between dark and light theme"""
@@ -1697,97 +803,9 @@ class MainWindow(QMainWindow):
 
     def show_about(self):
         """Show the About dialog"""
-        # Import version info
-        try:
-            from client.version import get_version_info
-            version_info = get_version_info()
-            version = version_info['version']
-        except ImportError:
-            version = "1.1.0"
-        
-        # Get theme-appropriate colors
-        current_theme = self.theme_manager.get_current_theme()
-        if current_theme == 'dark':
-            bg_color = "#2b2b2b"
-            text_color = "#ffffff" 
-            muted_color = "#aaaaaa"
-            accent_color = "#4a9eff"
-        else:
-            bg_color = "#ffffff"
-            text_color = "#000000"
-            muted_color = "#666666"
-            accent_color = "#0066cc"
-        
-        about_text = f"""
-        <div style="text-align: center; color: {text_color};">
-        <h2 style="font-family: '{FONT_FAMILY_APP_NAME}'; color: {accent_color}; margin-bottom: 10px;">{APP_NAME}</h2>
-        <p><b>Version:</b> {version}</p>
-        <p><b>Author:</b> <span style="color: {text_color};">{AUTHOR}</span></p>
-        </div>
-        <br>
-        <p style="color: {text_color};">Web export simplified.</p>
-        <p style="color: {text_color};">Convert files to WebM, WebP, GIF, MP4, and other formats in just a few clicks.</p>
-        <p style="color: {text_color};">Built for speed, quality, and ease of use.</p>
-        <br>
-        <p style="color: {text_color};">🌐 <a href="" style="color: {accent_color}; text-decoration: none;">Visit our website</a></p>
-        <br>
-        <p style="color: {text_color};">This software uses FFmpeg (© FFmpeg developers) licensed under the LGPL/GPL.</p>
-        <p style="color: {text_color};">© 2025 {AUTHOR}. All rights reserved.</p>
-        """
-        
-        msg = QMessageBox(self)
-        msg.setWindowTitle(f"About {APP_NAME}")
-        msg.setText(about_text)
-        
-        # Set custom icon (app logo) instead of information icon
-        try:
-            from client.utils.resource_path import get_app_icon_path
-            icon_path = get_app_icon_path()
-            if os.path.exists(icon_path):
-                icon = QIcon(icon_path)
-                msg.setIconPixmap(icon.pixmap(64, 64))
-        except Exception as e:
-            print(f"Could not set about dialog icon: {e}")
-            msg.setIcon(QMessageBox.Icon.Information)
-        
-        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
-        
-        # Hide the title bar (frameless window)
-        msg.setWindowFlags(msg.windowFlags() | Qt.WindowType.FramelessWindowHint)
-        
-        # Apply theme styling to the message box
-        dialog_style = f"""
-        QMessageBox {{
-            background-color: {bg_color};
-            color: {text_color};
-            border: 1px solid #555555;
-            border-radius: 8px;
-        }}
-        QMessageBox QLabel {{
-            color: {text_color};
-            background-color: {bg_color};
-        }}
-        QMessageBox QPushButton {{
-            background-color: #0066cc;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            font-weight: bold;
-        }}
-        QMessageBox QPushButton:hover {{
-            background-color: #0052a3;
-        }}
-        QMessageBox QPushButton:pressed {{
-            background-color: #003d7a;
-        }}
-        """
-        msg.setStyleSheet(dialog_style)
-        
-        # Set dialog size
-        msg.resize(450, 400)
-        
-        msg.exec()
+        from client.gui.components.about_dialog import show_about_dialog
+        show_about_dialog(self, self.theme_manager)
+
 
     def show_advanced(self):
         """Show the Advanced Settings dialog"""
@@ -1798,233 +816,79 @@ class MainWindow(QMainWindow):
         
         if result == QDialog.DialogCode.Accepted:
             # Settings were saved, show confirmation
-            msg = QMessageBox(
-                QMessageBox.Icon.Information,
-                "Settings Saved",
-                "Advanced settings have been saved successfully.",
-                parent=self
-            )
-            msg.setWindowFlags(msg.windowFlags() | Qt.WindowType.FramelessWindowHint)
-            msg.setStyleSheet(self.theme_manager.get_dialog_styles())
-            msg.exec()
+            self.dialogs.show_info("Settings Saved", "Advanced settings have been saved successfully.")
     
     def logout(self):
-        """Logout from the application and show login window"""
-        # Confirm logout
-        msg = QMessageBox(
-            QMessageBox.Icon.Question,
-            "Logout",
-            "Are you sure you want to logout?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            parent=self
-        )
-        msg.setWindowFlags(msg.windowFlags() | Qt.WindowType.FramelessWindowHint)
-        msg.setStyleSheet(self.theme_manager.get_dialog_styles())
-        msg.setDefaultButton(QMessageBox.StandardButton.No)
-        
-        if msg.exec() == QMessageBox.StandardButton.Yes:
-            # Stop any running conversions
-            if self.conversion_engine and self.conversion_engine.isRunning():
-                self.conversion_engine.stop_conversion()
-                self.conversion_engine.wait(1000)  # Wait up to 1 second
-            
-            # Clean up conversion engine
-            self.conversion_engine = None
-            
-            # Get the QApplication instance
-            from PyQt6.QtWidgets import QApplication
-            from PyQt6.QtCore import QTimer
-            app = QApplication.instance()
-            
-            # Prevent app from quitting when main window closes
-            app.setQuitOnLastWindowClosed(False)
-            
-            # Define function to show login window after main window closes
-            def show_login_after_close():
-                try:
-                    from client.gui.login_window_new import ModernLoginWindow
-                    login_window = ModernLoginWindow()
-                    
-                    # Store reference to prevent garbage collection
-                    app._login_window = login_window
-                    
-                    # Show login window modally
-                    result = login_window.exec()
-                    
-                    if result == QDialog.DialogCode.Accepted:
-                        # Login successful - create new main window
-                        is_trial = getattr(login_window, 'is_trial', False)
-                        
-                        # Use centralized initialization to ensure splash screen and tool checks run
-                        from client.main import initialize_main_window
-                        new_main_window = initialize_main_window(is_trial=is_trial)
-                        new_main_window.show()
-                        # Store reference to prevent garbage collection
-                        app._main_window = new_main_window
-                        # Re-enable quit on last window closed
-                        app.setQuitOnLastWindowClosed(True)
-                    else:
-                        # Login cancelled - exit application
-                        app.quit()
-                    
-                except Exception as e:
-                    print(f"Error showing login window: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    # If login window fails, exit application
-                    app.quit()
-            
-            # Close main window
-            self.close()
-            
-            # Use QTimer to show login window after event loop processes the close
-            QTimer.singleShot(100, show_login_after_close)
-
-    def toggle_status_bar(self, checked):
-        """Toggle status bar visibility"""
-        if hasattr(self, 'bottom_frame'):
-            self.bottom_frame.setVisible(checked)
+        """Logout from the application and show login window."""
+        # Confirm logout first (dialog stays in MainWindow for UI control)
+        if self.dialogs.confirm_action("Logout", "Are you sure you want to logout?"):
+            # Delegate to SessionManager for clean logout flow
+            session_mgr = SessionManager(self, lambda: self.conversion_engine)
+            session_mgr.logout()
             
     def resizeEvent(self, event):
-        """Handle resize event"""
+        """Handle resize event - sync title bar width"""
         super().resizeEvent(event)
-        # NOTE: Preset overlay removed - resize handled by future plugin
+        # Sync title bar width
+        if hasattr(self, 'title_bar_window'):
+            self.title_bar_window._sync_width()
+
+    def moveEvent(self, event):
+        """Handle move event - sync title bar position"""
+        super().moveEvent(event)
+        # Sync title bar position
+        if hasattr(self, 'title_bar_window'):
+            self.title_bar_window._sync_position()
 
     def showEvent(self, event):
-        """Override showEvent"""
+        """Override showEvent - show title bar window"""
         super().showEvent(event)
-        self.enable_blur()
+        # Show and position the separate title bar window
+        if hasattr(self, 'title_bar_window'):
+            self.title_bar_window.attach_to(self)
+            self.title_bar_window.show()
+        # NOTE: Blur is now ONLY on the title bar window, not main window
         self.enable_mouse_tracking_all()
+        
+    def closeEvent(self, event):
+        """Close title bar window when main window closes"""
+        if hasattr(self, 'title_bar_window'):
+            self.title_bar_window.close()
+        super().closeEvent(event)
         
     def enable_mouse_tracking_all(self):
         """Recursively enable mouse tracking for all widgets to ensure resize events propagate"""
         self.setMouseTracking(True)
         for widget in self.findChildren(QWidget):
             widget.setMouseTracking(True)
-        
-    def enable_blur(self):
-        """Enable Windows Blur/Acrylic effect"""
-        if os.name != 'nt':
-            return
-            
-        try:
-            class ACCENT_POLICY(Structure):
-                _fields_ = [
-                    ("AccentState", c_int),
-                    ("AccentFlags", c_int),
-                    ("GradientColor", c_int),
-                    ("AnimationId", c_int)
-                ]
-
-            class WINDOWCOMPOSITIONATTRIBDATA(Structure):
-                _fields_ = [
-                    ("Attribute", c_int),
-                    ("Data", ctypes.c_void_p), # Use void pointer
-                    ("SizeOfData", c_int)
-                ]
-                
-            # SetAccentPolicy constants
-            ACCENT_ENABLE_BLURBEHIND = 3
-            
-            hwnd = int(self.winId())
-            
-            accent = ACCENT_POLICY()
-            accent.AccentState = ACCENT_ENABLE_BLURBEHIND
-            accent.GradientColor = 0 
-            
-            data = WINDOWCOMPOSITIONATTRIBDATA()
-            data.Attribute = 19
-            data.Data = ctypes.cast(byref(accent), ctypes.c_void_p)
-            data.SizeOfData = sizeof(accent)
-            
-            windll.user32.SetWindowCompositionAttribute(hwnd, byref(data))
-            
-        except Exception as e:
-            print(f"Failed to enable blur: {e}")
-
-
     
     def mousePressEvent(self, event):
-        """Start manual window resize calculation"""
-        if event.button() == Qt.MouseButton.LeftButton:
-            pos = event.pos()
-            border = 8
-            w = self.width()
-            h = self.height()
-            
-            left = pos.x() < border
-            right = pos.x() > w - border
-            top = pos.y() < border
-            bottom = pos.y() > h - border
-            
-            self.resize_edge = ""
-            if top: self.resize_edge += "top"
-            if bottom: self.resize_edge += "bottom"
-            if left: self.resize_edge += "left"
-            if right: self.resize_edge += "right"
-            
-            if self.resize_edge:
-                self.resize_start_pos = event.globalPosition().toPoint()
-                self.resize_start_geo = self.geometry()
-                event.accept()
-                return
-                    
+        """Delegate window resize to FramelessWindowBehavior."""
+        if self.window_behavior.handle_mouse_press(event):
+            return
         super().mousePressEvent(event)
         
     def mouseReleaseEvent(self, event):
-        """Reset resize state"""
-        self.resize_edge = ""
+        """Delegate to FramelessWindowBehavior."""
+        self.window_behavior.handle_mouse_release(event)
         super().mouseReleaseEvent(event)
 
     def mouseMoveEvent(self, event):
-        """Handle manual resizing and cursor updates"""
-        # Handle resizing if active
-        if hasattr(self, 'resize_edge') and self.resize_edge:
-            bg = self.resize_start_geo
-            delta = event.globalPosition().toPoint() - self.resize_start_pos
-            
-            new_geo = QRect(bg)
-            
-            if "top" in self.resize_edge:
-                new_geo.setTop(bg.top() + delta.y())
-            if "bottom" in self.resize_edge:
-                new_geo.setBottom(bg.bottom() + delta.y())
-            if "left" in self.resize_edge:
-                new_geo.setLeft(bg.left() + delta.x())
-            if "right" in self.resize_edge:
-                new_geo.setRight(bg.right() + delta.x())
-                
-            # Respect minimum size
-            if new_geo.width() >= self.minimumWidth() and new_geo.height() >= self.minimumHeight():
-                self.setGeometry(new_geo)
-            
-            event.accept()
+        """Delegate resize and cursor updates to FramelessWindowBehavior."""
+        if self.window_behavior.handle_mouse_move(event):
             return
-
-        # Regular cursor update logic
-        pos = event.pos()
-        border = 8
-        w = self.width()
-        h = self.height()
-        
-        left = pos.x() < border
-        right = pos.x() > w - border
-        top = pos.y() < border
-        bottom = pos.y() > h - border
-        
-        # Set appropriate cursor
-        if (top and left) or (bottom and right):
-            self.setCursor(Qt.CursorShape.SizeFDiagCursor)
-        elif (top and right) or (bottom and left):
-            self.setCursor(Qt.CursorShape.SizeBDiagCursor)
-        elif left or right:
-            self.setCursor(Qt.CursorShape.SizeHorCursor)
-        elif top or bottom:
-            self.setCursor(Qt.CursorShape.SizeVerCursor)
-        else:
-            self.unsetCursor()
-            
         super().mouseMoveEvent(event)
+    
+    def changeEvent(self, event):
+        """Handle window state changes - sync title bar visibility on minimize/restore"""
+        super().changeEvent(event)
+        if event.type() == event.Type.WindowStateChange:
+            if hasattr(self, 'title_bar_window'):
+                if self.isMinimized():
+                    self.title_bar_window.hide()
+                else:
+                    self.title_bar_window.show()
+                    self.title_bar_window._sync_position()
     
     # --- Drag & Drop - Forward to DragDropArea ---
     
@@ -2105,7 +969,7 @@ class MainWindow(QMainWindow):
         self.update_status(f"Applied Preset: {preset.name}")
         
         # Hide Command Panel with animation (Preset mode is simple drag & drop)
-        self.toggle_command_panel(False)
+        self.panel_animator.close()
 
     def on_mode_changed(self, mode):
         """Handle global mode change (e.g. switching to Manual)"""
