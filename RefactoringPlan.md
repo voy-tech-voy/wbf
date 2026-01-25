@@ -62,6 +62,6 @@ USE_NEW_IMAGE_TAB = False  # Instant rollback
 ## Current Progress
 
 - [x] Phase A: ImageTab Integration
-- [ ] Phase B: VideoTab Integration  
-- [ ] Phase C: LoopTab Integration
+- [x] Phase B: VideoTab Integration  
+- [ ] Phase C: LoopTab Integration (WIP - needs ~20 more legacy aliases)
 - [ ] Phase D: Cleanup
