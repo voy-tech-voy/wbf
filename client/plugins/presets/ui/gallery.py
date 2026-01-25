@@ -292,9 +292,12 @@ class PresetGallery(QWidget):
             self.dismissed.emit()
         super().mousePressEvent(event)
     
+    
     def show_animated(self):
-        """Show the gallery with fade-in animation."""
-        self.setGeometry(self.parent().rect())
+        """Show the gallery with fade-in animation and blur background."""
+        if self.parent():
+            self.setGeometry(self.parent().rect())
+            self._capture_blur_background()
         
         # Setup opacity animation
         if not hasattr(self, '_opacity_effect'):
@@ -311,6 +314,46 @@ class PresetGallery(QWidget):
         self._show_anim.setEndValue(1.0)
         self._show_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
         self._show_anim.start()
+    
+    def _capture_blur_background(self):
+        """
+        Capture parent window content and apply blur effect.
+        Simulates acrylic/frosted glass for child widgets.
+        """
+        if not self.parent():
+            return
+            
+        # Hide self temporarily to capture what's behind
+        self.setVisible(False)
+        
+        # Grab parent pixmap
+        parent_pixmap = self.parent().grab(self.parent().rect())
+        
+        # Restore visibility (will be fully shown by show_animated)
+        # We don't call show() here to avoid flicker, let show_animated handle it
+        
+        # Create a blurred version
+        from PyQt6.QtWidgets import QGraphicsScene, QGraphicsPixmapItem, QGraphicsBlurEffect, QGraphicsScene
+        from PyQt6.QtGui import QPainter, QPixmap
+        
+        blur_radius = 20
+        
+        # Create scene to apply blur
+        scene = QGraphicsScene()
+        item = QGraphicsPixmapItem(parent_pixmap)
+        blur = QGraphicsBlurEffect()
+        blur.setBlurRadius(blur_radius)
+        item.setGraphicsEffect(blur)
+        scene.addItem(item)
+        
+        # Render scene to new pixmap
+        output_pixmap = QPixmap(parent_pixmap.size())
+        output_pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(output_pixmap)
+        scene.render(painter)
+        painter.end()
+        
+        self._blurred_background = output_pixmap
     
     def hide_animated(self):
         """Hide the gallery with fade-out animation."""
@@ -330,12 +373,23 @@ class PresetGallery(QWidget):
         """Handle resize."""
         if self.parent():
             self.setGeometry(self.parent().rect())
+            # Re-capture background on resize if visible
+            if self.isVisible():
+                self._capture_blur_background()
         super().resizeEvent(event)
     
     def paintEvent(self, event):
-        """Paint the dark grey semi-transparent background."""
+        """Paint the blurred background and dark overlay."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        # Dark grey with 90% opacity (alpha = 230 out of 255)
-        painter.fillRect(self.rect(), QColor(40, 40, 40, 230))
+        
+        # 1. Draw blurred background if available
+        if hasattr(self, '_blurred_background') and self._blurred_background:
+            painter.drawPixmap(0, 0, self._blurred_background)
+        
+        # 2. Draw dark tint overlay
+        # Dark grey with 70% opacity (alpha = 180 out of 255) - reduced from 230 to show blur
+        painter.fillRect(self.rect(), QColor(20, 20, 20, 180))
+        
         super().paintEvent(event)
+

@@ -267,6 +267,26 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'drag_drop_area'):
             self.drag_drop_area.set_view_mode(ViewMode.PRESETS)
     
+    def _toggle_preset_gallery(self):
+        """
+        Toggle the preset gallery overlay visibility without changing modes.
+        
+        This is called when the user clicks the preset button while already
+        in Preset mode. Closing the gallery doesn't exit Preset mode - only
+        selecting a Lab option does that.
+        """
+        if not hasattr(self, 'drag_drop_area'):
+            return
+        
+        current_view = self.drag_drop_area.current_view_mode
+        
+        if current_view == ViewMode.PRESETS:
+            # Gallery is open - close it (but stay in Preset mode)
+            self.drag_drop_area.set_view_mode(ViewMode.FILES)
+        else:
+            # Gallery is closed - open it
+            self.drag_drop_area.set_view_mode(ViewMode.PRESETS)
+    
     def _enter_lab_mode(self, lab_tab: int):
         """Internal: Configure UI for Lab mode."""
         # Icon paths matching tab order
@@ -309,8 +329,20 @@ class MainWindow(QMainWindow):
     # =========================================================================
     
     def _on_preset_btn_clicked(self):
-        """Handle preset button click - delegate to switch_mode()."""
-        self.switch_mode(Mode.PRESET)
+        """
+        Handle preset button click.
+        
+        Behavior:
+        - If currently in LAB mode: Switch to PRESET mode (opens gallery)
+        - If currently in PRESET mode: Toggle gallery visibility only
+          (keeps Preset Mode ON until Lab option is selected)
+        """
+        if self._current_mode == Mode.LAB:
+            # Switch from Lab to Preset mode
+            self.switch_mode(Mode.PRESET)
+        else:
+            # Already in Preset mode - just toggle the gallery visibility
+            self._toggle_preset_gallery()
     
     def _on_lab_item_clicked(self, item_id):
         """Handle lab button menu item click - delegate to switch_mode()."""
