@@ -205,7 +205,7 @@ class ImageTab(BaseTab):
         """Collect image conversion parameters from UI."""
         params = {
             'type': 'image',
-            'format': self.format.currentFormat(),
+            'format': self.format.currentText(),
             'quality': self.quality.value(),
             'multiple_qualities': self.multiple_qualities.isChecked(),
             'quality_variants': self._parse_variants(self.quality_variants.text()),

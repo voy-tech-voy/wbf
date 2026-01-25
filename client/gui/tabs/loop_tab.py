@@ -306,11 +306,11 @@ class LoopTab(BaseTab):
     
     def get_params(self) -> dict:
         """Collect loop conversion parameters from UI."""
-        is_gif = self.format_selector.currentFormat() == "GIF"
+        is_gif = self.format_selector.currentText() == "GIF"
         
         params = {
             'type': 'loop',
-            'loop_format': self.format_selector.currentFormat(),
+            'loop_format': self.format_selector.currentText(),
             'max_size_mb': self.max_size_spinbox.value() if self.max_size_spinbox.isVisible() else None,
             'auto_resize': self.auto_resize_checkbox.isChecked(),
             'resize_mode': self.resize_mode.currentText(),
@@ -381,7 +381,7 @@ class LoopTab(BaseTab):
     
     def current_format(self) -> str:
         """Get current format (GIF or WebM)."""
-        return self.format_selector.currentFormat()
+        return self.format_selector.currentText()
     
     # -------------------------------------------------------------------------
     # PRIVATE METHODS
