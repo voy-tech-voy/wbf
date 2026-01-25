@@ -1,43 +1,55 @@
 """
 Presets Plugin - Preset Gallery
 
-Overlay widget displaying a grid of preset cards.
+Overlay widget displaying a responsive grid of preset cards.
+Adapts to container width and groups presets by category when showing all.
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, 
     QGridLayout, QLabel, QGraphicsOpacityEffect, QFrame
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QColor
+from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QTimer
+from PyQt6.QtGui import QPainter, QColor
 
-from typing import List
+from typing import List, Dict
 from client.plugins.presets.logic.models import PresetDefinition
 from client.plugins.presets.ui.card import PresetCard
+from client.plugins.presets.ui.filter_bar import CategoryFilterBar
 
 
 class PresetGallery(QWidget):
     """
-    Overlay widget displaying preset cards in a grid.
+    Overlay widget displaying preset cards in a responsive grid.
     
-    Shows inside the DragDropArea when preset selection is needed.
-    
-    Signals:
-        preset_selected: Emitted when user clicks a preset card
-        dismissed: Emitted when user clicks outside cards
+    Features:
+    - Responsive layout: adapts columns to available width
+    - No horizontal scroll: cards wrap to new rows
+    - Category grouping: when ALL selected, each category starts on new row
+    - Centered cards within each row
     """
     
     preset_selected = pyqtSignal(object)  # PresetDefinition
     dismissed = pyqtSignal()
     
     # Layout configuration
-    CARDS_PER_ROW = 4
+    CARD_WIDTH = 120
     CARD_SPACING = 16
     PADDING = 24
+    MIN_CARDS_PER_ROW = 2
+    MAX_CARDS_PER_ROW = 6
+    
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("PresetGallery")
         self._cards: List[PresetCard] = []
+        self._presets: List[PresetDefinition] = []
+        self._meta = {}
+        self._row_widgets: List[QWidget] = []  # Track row widgets for cleanup
+        
+        # Enable proper background painting
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setAutoFillBackground(True)
         
         self._setup_ui()
         self._apply_styles()
@@ -45,36 +57,40 @@ class PresetGallery(QWidget):
         # Initially hidden
         self.hide()
     
+    def set_meta(self, meta: dict):
+        """Store media metadata for parameter visibility rules."""
+        self._meta = meta
+    
     def _setup_ui(self):
         """Setup the gallery layout."""
-        # Main layout - minimal margins for full coverage overlay
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(16, 16, 16, 16)
         main_layout.setSpacing(12)
         
-        # Header
-        header = QLabel("SELECT PRESET")
-        header.setObjectName("GalleryHeader")
-        header.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        main_layout.addWidget(header)
+        # Category filter bar
+        self._filter_bar = CategoryFilterBar()
+        self._filter_bar.filterChanged.connect(self._apply_filter)
+        main_layout.addWidget(self._filter_bar)
         
         # Scroll area for cards
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("background: transparent;")
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll.setStyleSheet("background: transparent;")
         
         # Card container
         self._card_container = QWidget()
-        self._card_layout = QGridLayout(self._card_container)
-        self._card_layout.setSpacing(self.CARD_SPACING)
-        self._card_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+        self._card_container.setStyleSheet("background: transparent;")
+        self._container_layout = QVBoxLayout(self._card_container)
+        self._container_layout.setContentsMargins(0, 0, 0, 0)
+        self._container_layout.setSpacing(self.CARD_SPACING)
+        self._container_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         
-        scroll.setWidget(self._card_container)
-        main_layout.addWidget(scroll, 1)
+        self._scroll.setWidget(self._card_container)
+        main_layout.addWidget(self._scroll, 1)
         
-        # Parameter panel (shown after preset selection)
+        # Parameter panel
         from client.plugins.presets.ui.parameter_form import ParameterForm
         self._param_panel = QFrame()
         self._param_panel.setObjectName("ParamPanel")
@@ -89,78 +105,188 @@ class PresetGallery(QWidget):
         param_layout = QVBoxLayout(self._param_panel)
         param_layout.setContentsMargins(12, 12, 12, 12)
         
-        self._selected_preset_label = QLabel("")
-        self._selected_preset_label.setObjectName("SelectedPresetLabel")
-        self._selected_preset_label.setStyleSheet("color: #00E0FF; font-size: 14px; font-weight: bold;")
+        self._selected_preset_label = QLabel("Settings")
+        self._selected_preset_label.setStyleSheet("""
+            color: #F5F5F7;
+            font-weight: bold;
+            font-size: 14px;
+        """)
         param_layout.addWidget(self._selected_preset_label)
         
         self._parameter_form = ParameterForm()
         param_layout.addWidget(self._parameter_form)
         
-        self._param_panel.hide()  # Hidden until preset selected
+        self._param_panel.hide()
         main_layout.addWidget(self._param_panel)
     
+    
     def _apply_styles(self):
-        """Apply gallery styling."""
+        """Apply gallery-specific styles."""
         self.setStyleSheet("""
             QWidget#PresetGallery {
-                background-color: rgba(30, 30, 30, 0.9);
-                border-radius: 0px;
+                background-color: rgba(40, 40, 40, 0.9);
             }
-            QLabel#GalleryHeader {
-                color: #F5F5F7;
-                font-size: 16px;
-                font-weight: bold;
-                padding: 12px;
-                background: transparent;
-            }
-            QScrollArea {
+            QLabel#CategoryLabel {
+                color: #86868B;
+                font-size: 13px;
+                font-weight: 600;
+                letter-spacing: 1px;
+                padding: 4px 0px;
+                margin-top: 8px;
                 background: transparent;
             }
         """)
     
+    def get_parameter_values(self) -> dict:
+        """Get current parameter values from the form."""
+        return self._parameter_form.get_values()
+    
     def set_presets(self, presets: List[PresetDefinition]):
         """Populate the gallery with preset cards."""
-        # Clear existing cards
+        self._presets = presets
+        self._filter_bar.set_categories(presets)
+        self._rebuild_cards()
+    
+    def _rebuild_cards(self):
+        """Recreate all cards and layout them."""
+        # Clean up existing cards and rows
+        self._cleanup_layout()
+        
+        # Create new cards
+        for preset in self._presets:
+            card = PresetCard(preset)
+            card.clicked.connect(self._on_card_clicked)
+            self._cards.append(card)
+        
+        # Layout based on filter
+        self._apply_filter()
+    
+    def _cleanup_layout(self):
+        """Remove all cards and row widgets."""
+        # Delete row widgets (which contain cards)
+        for row in self._row_widgets:
+            row.deleteLater()
+        self._row_widgets.clear()
+        
+        # Delete cards
         for card in self._cards:
             card.deleteLater()
         self._cards.clear()
         
-        # Clear layout
-        while self._card_layout.count():
-            item = self._card_layout.takeAt(0)
+        # Clear container layout
+        while self._container_layout.count():
+            item = self._container_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+    
+    def _calculate_cards_per_row(self) -> int:
+        """Calculate how many cards fit per row based on available width."""
+        available_width = self._scroll.viewport().width() - 2 * self.PADDING
+        if available_width <= 0:
+            return self.MIN_CARDS_PER_ROW
+        
+        card_with_spacing = self.CARD_WIDTH + self.CARD_SPACING
+        cols = max(self.MIN_CARDS_PER_ROW, available_width // card_with_spacing)
+        return min(cols, self.MAX_CARDS_PER_ROW)
+    
+    def _apply_filter(self):
+        """Apply current filter and rebuild visible layout."""
+        # Remove rows from layout but don't delete cards yet
+        for row in self._row_widgets:
+            self._container_layout.removeWidget(row)
+            row.deleteLater()
+        self._row_widgets.clear()
+        
+        # Clear any remaining items
+        while self._container_layout.count():
+            item = self._container_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
         
-        # Add new cards
-        row, col = 0, 0
+        active_categories = self._filter_bar.get_active_categories()
+        cards_per_row = self._calculate_cards_per_row()
+        
+        if not active_categories:
+            # Show ALL with category grouping
+            self._layout_grouped(cards_per_row)
+        else:
+            # Show filtered category
+            self._layout_filtered(active_categories[0], cards_per_row)
+    
+    def _layout_grouped(self, cards_per_row: int):
+        """Layout cards grouped by category."""
+        # Group presets by category
+        categories: Dict[str, List[PresetDefinition]] = {}
+        for preset in self._presets:
+            cat = preset.category or "other"
+            if cat not in categories:
+                categories[cat] = []
+            categories[cat].append(preset)
+        
+        # Layout each category
+        for category in sorted(categories.keys()):
+            presets = categories[category]
+            
+            # Category label
+            label = QLabel(category.upper())
+            label.setObjectName("CategoryLabel")
+            label.setStyleSheet("""
+                color: #86868B;
+                font-size: 13px;
+                font-weight: 600;
+                letter-spacing: 1px;
+                padding: 8px 0px 4px 0px;
+                background: transparent;
+            """)
+            self._container_layout.addWidget(label)
+            
+            # Cards for this category
+            self._add_preset_rows(presets, cards_per_row)
+    
+    def _layout_filtered(self, category: str, cards_per_row: int):
+        """Layout only cards for a specific category."""
+        presets = [p for p in self._presets if p.category == category]
+        self._add_preset_rows(presets, cards_per_row)
+    
+    def _add_preset_rows(self, presets: List[PresetDefinition], cards_per_row: int):
+        """Add rows of cards for the given presets."""
+        for i in range(0, len(presets), cards_per_row):
+            row_presets = presets[i:i + cards_per_row]
+            row_widget = self._create_row(row_presets)
+            self._row_widgets.append(row_widget)
+            self._container_layout.addWidget(row_widget)
+    
+    def _create_row(self, presets: List[PresetDefinition]) -> QWidget:
+        """Create a centered row of new cards."""
+        row = QWidget()
+        row.setStyleSheet("background: transparent;")
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(self.CARD_SPACING)
+        
+        # Center with stretch
+        layout.addStretch()
         for preset in presets:
             card = PresetCard(preset)
             card.clicked.connect(self._on_card_clicked)
-            self._cards.append(card)
-            
-            self._card_layout.addWidget(card, row, col)
-            col += 1
-            if col >= self.CARDS_PER_ROW:
-                col = 0
-                row += 1
+            layout.addWidget(card)
+        layout.addStretch()
+        
+        return row
     
     def _on_card_clicked(self, preset: PresetDefinition):
-        """Handle card click - show parameters and emit selection."""
-        # Show parameter panel for this preset
+        """Handle card click."""
         if preset.parameters:
             self._selected_preset_label.setText(f"⚙ {preset.name} Settings")
-            self._parameter_form.set_parameters(preset.parameters, {})
+            self._parameter_form.set_parameters(preset.parameters, self._meta)
             self._param_panel.show()
         else:
             self._param_panel.hide()
         
-        # Emit selection signal
         self.preset_selected.emit(preset)
     
     def mousePressEvent(self, event):
         """Handle click on background - dismiss gallery."""
-        # Only dismiss if clicking on the gallery background, not on cards
         child = self.childAt(event.pos())
         if child is None or child == self:
             self.dismissed.emit()
@@ -201,7 +327,15 @@ class PresetGallery(QWidget):
         self._hide_anim.start()
     
     def resizeEvent(self, event):
-        """Handle parent resize."""
+        """Handle resize."""
         if self.parent():
             self.setGeometry(self.parent().rect())
         super().resizeEvent(event)
+    
+    def paintEvent(self, event):
+        """Paint the dark grey semi-transparent background."""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # Dark grey with 90% opacity (alpha = 230 out of 255)
+        painter.fillRect(self.rect(), QColor(40, 40, 40, 230))
+        super().paintEvent(event)

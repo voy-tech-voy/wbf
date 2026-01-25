@@ -10,6 +10,7 @@ from PyQt6.QtGui import QPixmap, QIcon, QColor, QPainter
 
 from client.plugins.presets.logic.models import PresetDefinition
 from client.utils.resource_path import get_resource_path
+from client.gui.theme import Theme
 
 
 class PresetCard(QFrame):
@@ -108,28 +109,28 @@ class PresetCard(QFrame):
         
         self.setStyleSheet(f"""
             QFrame#PresetCard {{
-                background-color: #1C1C1C;
-                border: 1px solid #333333;
-                border-radius: 12px;
+                background-color: {Theme.surface()};
+                border: 1px solid {Theme.border()};
+                border-radius: {Theme.RADIUS_LG}px;
             }}
             QFrame#PresetCard:hover {{
-                background-color: #252525;
-                border: 1px solid #666666;
+                background-color: {Theme.color('surface_hover')};
+                border: 1px solid {Theme.border_focus()};
             }}
             QLabel#CardIcon {{
                 background-color: transparent;
                 padding: 10px;
             }}
             QLabel#CardTitle {{
-                color: #F5F5F7;
-                font-size: 12px;
+                color: {Theme.text()};
+                font-size: {Theme.FONT_SIZE_SM}px;
                 font-weight: bold;
                 background: transparent;
                 margin-bottom: 2px;
             }}
             QLabel#CardSubtitle {{
-                color: #86868B;
-                font-size: 10px;
+                color: {Theme.text_muted()};
+                font-size: {Theme.FONT_SIZE_XS}px;
                 background: transparent;
             }}
         """)
@@ -144,14 +145,14 @@ class PresetCard(QFrame):
     def set_drag_active(self, active: bool):
         """Set drag-active state for visual feedback."""
         if active:
-            self.setStyleSheet(self.styleSheet() + """
-                QFrame#PresetCard {
+            self.setStyleSheet(self.styleSheet() + f"""
+                QFrame#PresetCard {{
                     background-color: rgba(0, 224, 255, 0.1);
-                    border: 2px solid #00E0FF;
-                }
-                QLabel#CardSubtitle {
-                    color: #00E0FF;
-                }
+                    border: 2px solid {Theme.accent_turbo()};
+                }}
+                QLabel#CardSubtitle {{
+                    color: {Theme.accent_turbo()};
+                }}
             """)
         else:
             self._apply_styles()

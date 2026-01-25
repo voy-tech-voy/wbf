@@ -10,7 +10,7 @@ meta:
 
 style:
   accent_color: "#E1306C"
-  icon: "instagram"
+  icon: "insta"
   glow_strength: "strong"
 
 constraints:

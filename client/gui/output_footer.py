@@ -12,7 +12,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QTime
 from PyQt6.QtGui import QColor, QFont
 
 from client.utils.font_manager import FONT_FAMILY, FONT_FAMILY_APP_NAME, FONT_SIZE_BUTTON
-from client.gui.theme_variables import get_theme, get_color
+from client.gui.theme import Theme
 from client.gui.custom_widgets import SegmentedControl
 
 
@@ -148,13 +148,13 @@ class OutputFooter(QWidget):
         self._apply_styles()
         
     def _apply_styles(self):
-        theme = get_theme(self._is_dark)
+        Theme.set_dark_mode(self._is_dark)
         
         # Container styling
         self.setStyleSheet(f"""
             OutputFooter {{
-                background-color: {theme['surface_main']};
-                border-top: 1px solid {theme['border_dim']};
+                background-color: {Theme.surface()};
+                border-top: 1px solid {Theme.border()};
             }}
         """)
         
@@ -162,23 +162,23 @@ class OutputFooter(QWidget):
         
         # Tooltip styling
         self.organized_tooltip.setStyleSheet(
-            f"font-size: 10px; color: {theme['text_secondary']}; font-style: italic;"
+            f"font-family: '{Theme.FONT_BODY}'; font-size: {Theme.FONT_SIZE_SM}px; color: {Theme.text_muted()}; font-style: italic;"
         )
         
     def _apply_start_style(self):
-        theme = get_theme(self._is_dark)
+        Theme.set_dark_mode(self._is_dark)
         
         if self._gpu_available:
             # GPU Turbo style with gradient and glow
             self.start_btn.setStyleSheet(f"""
                 QPushButton#BtnStart {{
                     background-color: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, 
-                        stop:0 {theme['accent_turbo']}, stop:1 #007AFF);
+                        stop:0 {Theme.accent_turbo()}, stop:1 {Theme.color('info')});
                     color: #000000;
                     border: none;
-                    border-radius: 8px;
-                    font-family: '{FONT_FAMILY_APP_NAME}';
-                    font-size: {FONT_SIZE_BUTTON}px;
+                    border-radius: {Theme.RADIUS_MD}px;
+                    font-family: '{Theme.FONT_BODY}';
+                    font-size: {Theme.FONT_SIZE_LG}px;
                     font-weight: 700;
                     padding: 8px 30px;
                 }}
@@ -202,46 +202,46 @@ class OutputFooter(QWidget):
             # Standard (CPU) style
             self.start_btn.setStyleSheet(f"""
                 QPushButton#BtnStart {{
-                    background-color: {theme['accent_primary']};
-                    color: {theme['app_bg']};
+                    background-color: {Theme.accent()};
+                    color: {Theme.bg()};
                     border: none;
-                    border-radius: 8px;
-                    font-family: '{FONT_FAMILY_APP_NAME}';
-                    font-size: {FONT_SIZE_BUTTON}px;
+                    border-radius: {Theme.RADIUS_MD}px;
+                    font-family: '{Theme.FONT_BODY}';
+                    font-size: {Theme.FONT_SIZE_LG}px;
                     font-weight: 700;
                     padding: 8px 30px;
                 }}
                 QPushButton#BtnStart:hover {{
-                    background-color: {theme['border_focus']};
-                    color: {theme['text_primary']};
+                    background-color: {Theme.border_focus()};
+                    color: {Theme.text()};
                 }}
                 QPushButton#BtnStart:pressed {{
-                    background-color: {theme['border_dim']};
+                    background-color: {Theme.border()};
                 }}
                 QPushButton#BtnStart:disabled {{
-                    background-color: {theme['surface_element']};
-                    color: {theme['text_secondary']};
+                    background-color: {Theme.surface_element()};
+                    color: {Theme.text_muted()};
                 }}
             """)
             # Remove glow if any
             self.start_btn.setGraphicsEffect(None)
         
     def _apply_stop_style(self):
-        theme = get_theme(self._is_dark)
+        Theme.set_dark_mode(self._is_dark)
         
         self.start_btn.setStyleSheet(f"""
             QPushButton#BtnStart {{
                 background-color: transparent;
-                border: 2px solid #FF3B30;
-                border-radius: 8px;
-                color: #FF3B30;
-                font-family: '{FONT_FAMILY_APP_NAME}';
-                font-size: {FONT_SIZE_BUTTON}px;
+                border: 2px solid {Theme.error()};
+                border-radius: {Theme.RADIUS_MD}px;
+                color: {Theme.error()};
+                font-family: '{Theme.FONT_BODY}';
+                font-size: {Theme.FONT_SIZE_LG}px;
                 font-weight: 700;
                 padding: 8px 30px;
             }}
             QPushButton#BtnStart:hover {{
-                background-color: #FF3B30;
+                background-color: {Theme.error()};
                 color: white;
             }}
             QPushButton#BtnStart:pressed {{

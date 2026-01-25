@@ -10,6 +10,7 @@ from client.utils.resource_path import get_resource_path
 # Global font settings - CHANGE THESE TO UPDATE FONTS EVERYWHERE
 FONT_FAMILY = "Lexend"  # Custom font family
 FONT_FAMILY_APP_NAME = "Montserrat Alternates" # Special font for App Name
+FONT_FAMILY_MONO = "Roboto Mono"  # For paths, logs, code
 FONT_SIZE_BASE = 14  # Base font size for the application
 FONT_SIZE_TITLE = 12  # Title bar fonts
 FONT_SIZE_BUTTON = 16  # Button fonts

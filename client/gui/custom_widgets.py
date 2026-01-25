@@ -3,7 +3,7 @@ Custom PyQt6 Widgets with Dark Mode Support
 Provides TimeRangeSlider, ResizeFolder, and Rotation classes
 """
 
-from PyQt6.QtCore import Qt, pyqtSignal, QRect, QRectF, QPoint, QPointF, QSize, QPropertyAnimation, QVariantAnimation, QEasingCurve, pyqtProperty, QTimer, QObject
+from PyQt6.QtCore import Qt, pyqtSignal, QRect, QRectF, QPoint, QPointF, QSize, QPropertyAnimation, QVariantAnimation, QEasingCurve, pyqtProperty, QTimer, QObject, QByteArray
 from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QPalette, QIcon, QPixmap, QFont, QFontMetrics, QPainterPath
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, 
@@ -11,12 +11,649 @@ from PyQt6.QtWidgets import (
     QApplication, QButtonGroup, QStyleOptionButton, QStyle, QFrame, QFileDialog,
     QGraphicsOpacityEffect, QGraphicsDropShadowEffect
 )
+from PyQt6.QtSvg import QSvgRenderer
 from client.utils.font_manager import AppFonts, FONT_FAMILY
 from client.utils.resource_path import get_resource_path
-from client.gui.theme_variables import get_theme, get_color
+from client.gui.theme import Theme
 from client.gui.effects.glow_effect import GlowEffectManager, GlowState
 import os
 import math
+
+
+class HoverIconButton(QPushButton):
+    """Button that changes its SVG icon colors based on hover state and theme"""
+    def __init__(self, svg_name, icon_size=QSize(28, 28), parent=None):
+        super().__init__(parent)
+        self.svg_path = get_resource_path(f"client/assets/icons/{svg_name}")
+        self.icon_size = icon_size
+        self._is_dark = False
+        
+        self.setMouseTracking(True)
+        self.setIconSize(icon_size)
+        
+        self.normal_icon = None
+        self.hover_icon = None
+        
+        self.update_icons()
+        if self.normal_icon:
+            self.setIcon(self.normal_icon)
+
+    def enterEvent(self, event):
+        if self.hover_icon:
+            self.setIcon(self.hover_icon)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        if self.normal_icon:
+            self.setIcon(self.normal_icon)
+        super().leaveEvent(event)
+
+    def set_dark_mode(self, is_dark):
+        if self._is_dark != is_dark:
+            self._is_dark = is_dark
+            self.update_icons()
+            self.setIcon(self.hover_icon if self.underMouse() else self.normal_icon)
+
+    def update_icons(self):
+        if not os.path.exists(self.svg_path):
+            return
+            
+        # Read SVG
+        with open(self.svg_path, 'r') as f:
+            svg_content = f.read()
+        
+        # Determine theme base color (black or white) for the main outline
+        base_color = "white" if self._is_dark else "black"
+        
+        # 1. Adjust main outline color based on theme
+        # Replace black strokes with base_color
+        svg_base = svg_content.replace('stroke="black"', f'stroke="{base_color}"')
+        svg_base = svg_base.replace('stroke="#000000"', f'stroke="{base_color}"')
+        svg_base = svg_base.replace('stroke="#000"', f'stroke="{base_color}"')
+        
+        # 2. Create the Normal version (colored curves -> gray)
+        # Replace green (#4CAF50) and red (#D32F2F) with grey
+        gray_color = "#888888"
+        svg_normal = svg_base.replace('#4CAF50', gray_color).replace('#4caf50', gray_color)
+        svg_normal = svg_normal.replace('#D32F2F', gray_color).replace('#d32f2f', gray_color)
+        
+        # 3. Create the Hover version (original colored curves)
+        svg_hover = svg_base
+        
+        # Generate Icons
+        def svg_to_icon(content):
+            try:
+                renderer = QSvgRenderer(QByteArray(content.encode('utf-8')))
+                # Render at high resolution (2x) for sharp look
+                pixmap = QPixmap(self.icon_size * 2)
+                pixmap.fill(Qt.GlobalColor.transparent)
+                painter = QPainter(pixmap)
+                renderer.render(painter)
+                painter.end()
+                return QIcon(pixmap)
+            except:
+                import traceback
+                traceback.print_exc()
+                return QIcon()
+
+        self.normal_icon = svg_to_icon(svg_normal)
+        self.hover_icon = svg_to_icon(svg_hover)
+
+
+import subprocess
+import tempfile
+
+
+class FileListItemWidget(QWidget):
+    """Custom widget for list items with hover-based remove button and progress indicator"""
+    remove_clicked = pyqtSignal()
+    
+    def __init__(self, text, file_path=None, parent=None):
+        super().__init__(parent)
+        from PyQt6.QtCore import QEvent
+        from PyQt6.QtGui import QCursor
+        
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover)
+        self.installEventFilter(self)
+        self._hovered = False
+        self.file_path = file_path
+        self._is_completed = False  # Track if conversion is complete
+        self._QEvent = QEvent  # Store for eventFilter
+        
+        # Set transparent background
+        self.setStyleSheet("background-color: transparent;")
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(10)
+        
+        # Thumbnail label (48x48 square)
+        self.thumbnail_label = QLabel()
+        self.thumbnail_label.setFixedSize(48, 48)
+        self.thumbnail_label.setScaledContents(False)
+        self.thumbnail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.thumbnail_label.setStyleSheet("background: #1a1a1a; border: 1px solid #444; border-radius: 4px;")
+        
+        # Load thumbnail if file_path provided
+        if file_path:
+            self.load_thumbnail(file_path)
+        
+        layout.addWidget(self.thumbnail_label)
+        
+        # Text label
+        self.text_label = QLabel(text)
+        self.text_label.setStyleSheet("background: transparent; border: none;")
+        self.text_label.setWordWrap(False)
+        self.text_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(self.text_label, 1)
+        
+        # Remove button (X)
+        self.remove_btn = QPushButton("✕")
+        self.remove_btn.setMaximumSize(28, 28)
+        self.remove_btn.setMinimumSize(24, 24)
+        self.remove_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.remove_btn.setVisible(False)
+        self.remove_btn.clicked.connect(self.remove_clicked.emit)
+        layout.addWidget(self.remove_btn, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
+        
+        self.update_button_style(False)
+    
+    def set_completed(self):
+        """Mark item as completed"""
+        self._is_completed = True
+    
+    def update_theme(self, is_dark):
+        """Update widget colors based on theme"""
+        Theme.set_dark_mode(is_dark)
+        
+        text_color = Theme.text()
+        thumb_bg = Theme.color("input_bg") if is_dark else "#f5f5f5"
+        thumb_border = Theme.border()
+        
+        self.text_label.setStyleSheet(f"background: transparent; border: none; color: {text_color};")
+        self.thumbnail_label.setStyleSheet(f"background: {thumb_bg}; border: 1px solid {thumb_border}; border-radius: {Theme.RADIUS_SM}px;")
+        
+    def sizeHint(self):
+        """Return the recommended size for the widget"""
+        return QSize(0, 56)
+    
+    def minimumSizeHint(self):
+        """Return the minimum recommended size"""
+        return QSize(0, 50)
+        
+    def eventFilter(self, obj, event):
+        if obj == self:
+            if event.type() == self._QEvent.Type.Enter:
+                self._hovered = True
+                self.remove_btn.setVisible(True)
+            elif event.type() == self._QEvent.Type.Leave:
+                self._hovered = False
+                self.remove_btn.setVisible(False)
+        return super().eventFilter(obj, event)
+    
+    def load_thumbnail(self, file_path):
+        """Load and display thumbnail for the file"""
+        try:
+            from pathlib import Path
+            
+            file_ext = Path(file_path).suffix.lower()
+            pixmap = None
+            
+            # For images, load directly
+            if file_ext in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp', '.gif']:
+                pixmap = QPixmap(file_path)
+            
+            # For videos, extract first frame
+            elif file_ext in ['.mp4', '.avi', '.mov', '.mkv', '.flv', '.webm', '.m4v']:
+                pixmap = self.extract_video_thumbnail(file_path)
+            
+            # If thumbnail loaded successfully, scale and display
+            if pixmap and not pixmap.isNull():
+                scaled_pixmap = pixmap.scaled(
+                    48, 48,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                self.thumbnail_label.setPixmap(scaled_pixmap)
+            else:
+                self.set_fallback_icon(file_ext)
+        except Exception as e:
+            print(f"Failed to load thumbnail: {e}")
+            from pathlib import Path
+            self.set_fallback_icon(Path(file_path).suffix.lower())
+    
+    def extract_video_thumbnail(self, video_path):
+        """Extract first frame from video as thumbnail"""
+        try:
+            ffmpeg_path = os.environ.get('FFMPEG_BINARY', 'ffmpeg')
+            
+            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
+                thumb_path = tmp.name
+            
+            try:
+                cmd = [
+                    str(ffmpeg_path),
+                    '-ss', '0.5',
+                    '-i', str(video_path),
+                    '-vframes', '1',
+                    '-vf', 'scale=128:-1',
+                    '-q:v', '2',
+                    '-y',
+                    thumb_path
+                ]
+                
+                result = subprocess.run(
+                    cmd, 
+                    capture_output=True, 
+                    timeout=5,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                )
+                
+                if os.path.exists(thumb_path) and os.path.getsize(thumb_path) > 0:
+                    pixmap = QPixmap(thumb_path)
+                    try:
+                        os.remove(thumb_path)
+                    except:
+                        pass
+                    
+                    if not pixmap.isNull():
+                        return pixmap
+                
+            finally:
+                if os.path.exists(thumb_path):
+                    try:
+                        os.remove(thumb_path)
+                    except:
+                        pass
+            
+        except subprocess.TimeoutExpired:
+            print(f"Video thumbnail extraction timed out for {video_path}")
+        except Exception as e:
+            print(f"Video thumbnail extraction failed: {e}")
+        
+        return None
+    
+    def set_fallback_icon(self, file_ext):
+        """Set a fallback icon based on file type"""
+        if file_ext in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp', '.gif']:
+            icon_text = "🖼"
+        elif file_ext in ['.mp4', '.avi', '.mov', '.mkv', '.flv', '.webm', '.m4v']:
+            icon_text = "🎬"
+        elif file_ext in ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a']:
+            icon_text = "🎵"
+        else:
+            icon_text = "📄"
+        
+        self.thumbnail_label.setText(icon_text)
+        self.thumbnail_label.setStyleSheet(
+            "background: #1a1a1a; border: 1px solid #444; border-radius: 4px; "
+            "font-size: 24px; color: #888;"
+        )
+    
+    def update_button_style(self, is_dark_theme):
+        """Update button styling based on theme"""
+        if is_dark_theme:
+            btn_style = """
+                QPushButton {
+                    background-color: transparent;
+                    color: #888888;
+                    border: none;
+                    font-size: 16px;
+                    font-weight: bold;
+                    padding: 0px;
+                }
+                QPushButton:hover {
+                    color: #ff4444;
+                    background-color: rgba(255, 68, 68, 0.1);
+                    border-radius: 3px;
+                }
+                QPushButton:pressed {
+                    color: #ff0000;
+                    background-color: rgba(255, 0, 0, 0.2);
+                }
+            """
+            text_style = "background: transparent; border: none; color: #ffffff; font-size: 13px;"
+        else:
+            btn_style = """
+                QPushButton {
+                    background-color: transparent;
+                    color: #999999;
+                    border: none;
+                    font-size: 16px;
+                    font-weight: bold;
+                    padding: 0px;
+                }
+                QPushButton:hover {
+                    color: #ff4444;
+                    background-color: rgba(255, 68, 68, 0.1);
+                    border-radius: 3px;
+                }
+                QPushButton:pressed {
+                    color: #ff0000;
+                    background-color: rgba(255, 0, 0, 0.2);
+                }
+            """
+            text_style = "background: transparent; border: none; color: #333333; font-size: 13px;"
+        
+        self.remove_btn.setStyleSheet(btn_style)
+        self.text_label.setStyleSheet(text_style)
+        
+        current_thumb_style = self.thumbnail_label.styleSheet()
+        if is_dark_theme:
+            thumb_style = "background: #1a1a1a; border: 1px solid #444; border-radius: 4px;"
+            if "font-size" in current_thumb_style:
+                thumb_style += " font-size: 24px; color: #888;"
+        else:
+            thumb_style = "background: #f5f5f5; border: 1px solid #ddd; border-radius: 4px;"
+            if "font-size" in current_thumb_style:
+                thumb_style += " font-size: 24px; color: #666;"
+        
+        self.thumbnail_label.setStyleSheet(thumb_style)
+
+
+class DynamicFontButton(QPushButton):
+    """
+    Hardware-aware Start button with GPU acceleration visual effects.
+    
+    When GPU is available:
+    - Circuit trace effect: 1px cyan line traces the border on hover
+    - Scanline fill: subtle diagonal pattern moves across background
+    - Bolt icon lights up in cyan
+    
+    When CPU only:
+    - Standard button appearance, no animation
+    """
+    
+    def __init__(self, text=""):
+        super().__init__(text)
+        from client.utils.font_manager import FONT_FAMILY_APP_NAME, FONT_SIZE_BUTTON
+        
+        self._font_family = FONT_FAMILY_APP_NAME
+        self._font_size = FONT_SIZE_BUTTON
+        
+        # GPU state
+        self._gpu_available = False
+        self._is_hovered = False
+        
+        # Animation properties
+        self._trace_offset = 0.0
+        self._scanline_offset = 0.0
+        
+        # Animation timers
+        self._trace_timer = QTimer(self)
+        self._trace_timer.timeout.connect(self._update_trace_animation)
+        self._trace_timer.setInterval(16)  # ~60 FPS
+        
+        self._scanline_timer = QTimer(self)
+        self._scanline_timer.timeout.connect(self._update_scanline_animation)
+        self._scanline_timer.setInterval(33)  # ~30 FPS
+        
+        # Base style
+        self.base_style = {
+            "normal": (
+                "background-color: #2196f3; "
+                "color: white; "
+                "border: 2px solid #43a047; "
+                "border-radius: 8px; "
+                "padding: 12px 0px; "
+                "font-weight: bold; "
+            ),
+            "hover": "background-color: #43a047; color: white; border-color: #43a047;",
+            "pressed": "background-color: #388e3c; color: white; border-color: #2e7d32;",
+            "disabled": "background-color: #2196f3; color: #eeeeee; border-color: #bdbdbd;",
+            "stop_normal": (
+                "background-color: transparent; "
+                "color: #d32f2f; "
+                "border: 2px solid #d32f2f; "
+                "border-radius: 8px; "
+                "padding: 12px 0px; "
+                "font-weight: bold; "
+            ),
+            "stop_hover": "background-color: #d32f2f; color: white; border-color: #b71c1c;",
+            "stop_pressed": "background-color: #b71c1c; color: white; border-color: #9c0d0d;",
+        }
+        
+        self._cached_stylesheet = None
+        self.update_stylesheet()
+        
+    def set_gpu_available(self, available: bool):
+        """Set whether GPU acceleration is available for current format"""
+        self._gpu_available = available
+        self.update()
+        
+    def enterEvent(self, event):
+        """Handle mouse enter - start animations if GPU available"""
+        self._is_hovered = True
+        if self._gpu_available and "STOP" not in self.text().upper():
+            self._trace_timer.start()
+            self._scanline_timer.start()
+        super().enterEvent(event)
+        
+    def leaveEvent(self, event):
+        """Handle mouse leave - stop animations"""
+        self._is_hovered = False
+        self._trace_timer.stop()
+        self._scanline_timer.stop()
+        self._trace_offset = 0.0
+        self._scanline_offset = 0.0
+        self.update()
+        super().leaveEvent(event)
+        
+    def _update_trace_animation(self):
+        """Update circuit trace animation offset"""
+        self._trace_offset += 0.02
+        if self._trace_offset > 1.0:
+            self._trace_offset = 0.0
+        self.update()
+        
+    def _update_scanline_animation(self):
+        """Update scanline animation offset"""
+        self._scanline_offset += 2.0
+        if self._scanline_offset > 20.0:
+            self._scanline_offset = 0.0
+        self.update()
+        
+    def paintEvent(self, event):
+        """Custom paint to add GPU effects"""
+        super().paintEvent(event)
+        
+        if not self._gpu_available or not self._is_hovered or "STOP" in self.text().upper():
+            return
+            
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        self._draw_circuit_trace(painter)
+        self._draw_scanline_overlay(painter)
+        self._draw_bolt_icon(painter)
+        
+        painter.end()
+        
+    def _draw_circuit_trace(self, painter):
+        """Draw the animated circuit trace around the border"""
+        pen = QPen(QColor("#00F3FF"))
+        pen.setWidth(2)
+        painter.setPen(pen)
+        
+        w, h = self.width(), self.height()
+        perimeter = 2 * (w + h) - 16
+        
+        trace_pos = self._trace_offset * perimeter
+        trace_length = perimeter * 0.15
+        
+        margin = 4
+        corner_radius = 8
+        
+        points = self._get_border_points(trace_pos, trace_length, margin, corner_radius)
+        
+        if len(points) >= 2:
+            for i in range(len(points) - 1):
+                painter.drawLine(points[i], points[i + 1])
+                
+    def _get_border_points(self, start_pos, length, margin, radius):
+        """Get points along the border for circuit trace"""
+        w, h = self.width() - margin * 2, self.height() - margin * 2
+        perimeter = 2 * (w + h)
+        
+        points = []
+        pos = start_pos
+        remaining = length
+        
+        while remaining > 0 and len(points) < 50:
+            pos = pos % perimeter
+            
+            if pos < w:
+                x = margin + pos
+                y = margin
+            elif pos < w + h:
+                x = margin + w
+                y = margin + (pos - w)
+            elif pos < 2 * w + h:
+                x = margin + w - (pos - w - h)
+                y = margin + h
+            else:
+                x = margin
+                y = margin + h - (pos - 2 * w - h)
+                
+            points.append(QPoint(int(x), int(y)))
+            pos += 3
+            remaining -= 3
+            
+        return points
+        
+    def _draw_scanline_overlay(self, painter):
+        """Draw subtle diagonal scanline pattern"""
+        painter.setOpacity(0.08)
+        pen = QPen(QColor("#00F3FF"))
+        pen.setWidth(1)
+        painter.setPen(pen)
+        
+        spacing = 10
+        offset = int(self._scanline_offset)
+        
+        for i in range(-self.height(), self.width() + self.height(), spacing):
+            x1 = i + offset
+            y1 = 0
+            x2 = i + self.height() + offset
+            y2 = self.height()
+            painter.drawLine(x1, y1, x2, y2)
+            
+        painter.setOpacity(1.0)
+        
+    def _draw_bolt_icon(self, painter):
+        """Draw small bolt icon that lights up when GPU is active"""
+        icon_size = 10
+        x = self.width() - icon_size - 8
+        y = 6
+        
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor("#00F3FF")))
+        
+        bolt = [
+            QPoint(x + 6, y),
+            QPoint(x + 2, y + 5),
+            QPoint(x + 5, y + 5),
+            QPoint(x + 4, y + 10),
+            QPoint(x + 8, y + 4),
+            QPoint(x + 5, y + 4),
+        ]
+        painter.drawPolygon(bolt)
+        
+    def update_stylesheet(self):
+        """Build stylesheet with CURRENT font values from font_manager"""
+        text_upper = self.text().upper()
+        if "STOP" in text_upper:
+            stylesheet = (
+                f"QPushButton {{ "
+                f"{self.base_style['stop_normal']} "
+                f"font-family: '{self._font_family}'; "
+                f"font-size: {self._font_size}px; "
+                f"}} "
+                f"QPushButton:hover {{ {self.base_style['stop_hover']} }} "
+                f"QPushButton:pressed {{ {self.base_style['stop_pressed']} }} "
+                f"QPushButton:disabled {{ background-color: #2196f3; color: #eeeeee; border-color: #bdbdbd; }}"
+            )
+        else:
+            stylesheet = (
+                f"QPushButton {{ "
+                f"{self.base_style['normal']} "
+                f"font-family: '{self._font_family}'; "
+                f"font-size: {self._font_size}px; "
+                f"}} "
+                f"QPushButton:hover {{ {self.base_style['hover']} }} "
+                f"QPushButton:pressed {{ {self.base_style['pressed']} }} "
+                f"QPushButton:disabled {{ {self.base_style['disabled']} }}"
+            )
+        
+        if stylesheet != self._cached_stylesheet:
+            self._cached_stylesheet = stylesheet
+            self.setStyleSheet(stylesheet)
+
+
+class ThemedCheckBox(QCheckBox):
+
+    """
+    Themed pill-shaped toggle checkbox using Theme class.
+    
+    Style: Tesla-style toggle switch (32x18px pill shape).
+    Use this instead of raw QCheckBox for consistent theming across the app.
+    Supports automatic dark/light mode switching via update_theme().
+    """
+    
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self._is_dark = True
+        self._apply_style()
+    
+    def update_theme(self, is_dark: bool):
+        """Update checkbox styling for dark or light mode."""
+        self._is_dark = is_dark
+        self._apply_style()
+    
+    def _apply_style(self):
+        """Apply pill-shaped toggle styling using Theme class."""
+        Theme.set_dark_mode(self._is_dark)
+        
+        # Colors from theme
+        text_color = Theme.text()
+        border_dim = Theme.border()
+        success = Theme.success()
+        hover_border = "#555555" if self._is_dark else "#999999"
+        
+        self.setStyleSheet(f"""
+            QCheckBox {{
+                color: {text_color};
+                spacing: 8px;
+                font-family: '{Theme.FONT_BODY}';
+                font-size: {Theme.FONT_SIZE_BASE}px;
+            }}
+            QCheckBox::indicator {{
+                width: 32px;
+                height: 18px;
+                border-radius: 9px;
+            }}
+            QCheckBox::indicator:unchecked {{
+                background-color: {border_dim};
+                border: 1px solid {border_dim};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {success};
+                border: 1px solid {success};
+            }}
+            QCheckBox::indicator:unchecked:hover {{
+                border: 1px solid {hover_border};
+            }}
+            QCheckBox::indicator:checked:hover {{
+                background-color: #45a049;
+            }}
+            QCheckBox:disabled {{
+                color: {Theme.text_muted()};
+            }}
+            QCheckBox::indicator:disabled {{
+                background-color: {Theme.bg()};
+                border-color: {Theme.border()};
+            }}
+        """)
 
 
 class SegmentedButton(QPushButton):
@@ -97,40 +734,38 @@ class GenericSegmentedControl(QFrame):
         self._apply_styles()
         
     def _apply_styles(self):
-        theme = get_theme(self._is_dark)
+        Theme.set_dark_mode(self._is_dark)
         
         # Container styles (SegmentContainer)
         # Using subtle semi-transparent white (rgba 255,255,255,12) for a "glassy" delicate feel
         self.setStyleSheet(f"""
             QFrame#SegmentContainer {{
                 background-color: rgba(255, 255, 255, 12);
-                border: 1px solid {theme['border_dim']};
-                border-radius: 10px;
+                border: 1px solid {Theme.border()};
+                border-radius: {Theme.RADIUS_LG}px;
                 min-height: 42px;
             }}
         """)
         
         # Button styles (SegmentBtn) injected via stylesheet
-        font_family = FONT_FAMILY
-        
         btn_style = f"""
             QPushButton#SegmentBtn {{
                 background-color: transparent;
-                color: {theme['text_secondary']};
+                color: {Theme.text_muted()};
                 border: none;
-                border-radius: 6px;
+                border-radius: {Theme.RADIUS_MD - 2}px;
                 padding: 10px 22px;
-                font-family: '{font_family}';
+                font-family: '{Theme.FONT_BODY}';
                 font-size: 15px;
                 font-weight: 500;
             }}
             QPushButton#SegmentBtn:hover:!checked {{
                 background-color: rgba(255, 255, 255, 15);
-                color: {theme['text_primary']};
+                color: {Theme.text()};
             }}
             QPushButton#SegmentBtn:checked {{
                 background-color: rgba(255, 255, 255, 30);
-                color: {theme['text_primary']};
+                color: {Theme.text()};
                 font-weight: 600;
             }}
         """
@@ -158,8 +793,8 @@ class OutputDestinationSelector(GenericSegmentedControl):
         self.path_label.setMaximumWidth(150)
         
         # Initial theme variable needed for path_label style
-        theme = get_theme(self._is_dark)
-        self.path_label.setStyleSheet(f"font-size: 10px; color: {theme['text_secondary']}; padding-left: 8px;")
+        Theme.set_dark_mode(self._is_dark)
+        self.path_label.setStyleSheet(f"font-size: {Theme.FONT_SIZE_XS}px; color: {Theme.text_muted()}; padding-left: 8px;")
         
         self.layout.addWidget(self.path_label)
         
@@ -192,8 +827,8 @@ class OutputDestinationSelector(GenericSegmentedControl):
             
     def update_theme(self, is_dark):
         super().update_theme(is_dark)
-        theme = get_theme(is_dark)
-        self.path_label.setStyleSheet(f"font-size: 10px; color: {theme['text_secondary']}; padding-left: 8px;")
+        Theme.set_dark_mode(is_dark)
+        self.path_label.setStyleSheet(f"font-size: {Theme.FONT_SIZE_XS}px; color: {Theme.text_muted()}; padding-left: 8px;")
 
     def _truncate_path(self, path, max_len=20):
         if len(path) <= max_len: return path
@@ -603,32 +1238,29 @@ class ModeButtonsWidget(QWidget):
 
     def update_theme(self, is_dark):
         """Update button icons and styles based on theme"""
-        icon_color = QColor(255, 255, 255) if is_dark else QColor(0, 0, 0) # White or Pure Black
+        Theme.set_dark_mode(is_dark)
+        icon_color = QColor(255, 255, 255) if is_dark else QColor(0, 0, 0)
         
         self.max_size_btn.setIcon(self._get_tinted_icon("client/assets/icons/target_icon.svg", icon_color))
         self.presets_btn.setIcon(self._get_tinted_icon("client/assets/icons/presets.svg", icon_color))
         self.manual_btn.setIcon(self._get_tinted_icon("client/assets/icons/settings.svg", icon_color))
         
-        if is_dark:
-            bg_hover = "rgba(255, 255, 255, 0.1)"
-            border_color = "#555555"
-        else:
-            bg_hover = "rgba(0, 0, 0, 0.05)"
-            border_color = "#cccccc"
+        bg_hover = "rgba(255, 255, 255, 0.1)" if is_dark else "rgba(0, 0, 0, 0.05)"
+        border_color = Theme.border()
 
         if self.orientation == Qt.Orientation.Vertical:
             button_style = (
-                f"QPushButton {{ padding: 4px; border-top-left-radius: 8px; border-bottom-left-radius: 8px; "
+                f"QPushButton {{ padding: 4px; border-top-left-radius: {Theme.RADIUS_MD}px; border-bottom-left-radius: {Theme.RADIUS_MD}px; "
                 f"border-top-right-radius: 0px; border-bottom-right-radius: 0px; "
                 f"border: 1px solid {border_color}; border-right: none; background-color: transparent; }}"
                 f"QPushButton:hover {{ background-color: {bg_hover}; }}"
-                "QPushButton:checked { background-color: #4CAF50; color: white; border-color: #43a047; }"
+                f"QPushButton:checked {{ background-color: {Theme.success()}; color: white; border-color: {Theme.success()}; }}"
             )
         else:
             button_style = (
-                f"QPushButton {{ padding: 8px; border-radius: 6px; border: 1px solid {border_color}; background-color: transparent; }}"
+                f"QPushButton {{ padding: 8px; border-radius: {Theme.RADIUS_MD - 2}px; border: 1px solid {border_color}; background-color: transparent; }}"
                 f"QPushButton:hover {{ background-color: {bg_hover}; }}"
-                "QPushButton:checked { background-color: #4CAF50; color: white; border-color: #43a047; }"
+                f"QPushButton:checked {{ background-color: {Theme.success()}; color: white; border-color: {Theme.success()}; }}"
             )
         
         self.max_size_btn.setStyleSheet(button_style)
@@ -739,31 +1371,28 @@ class SideButtonGroup(QWidget):
         # Update button styles based on state
         from client.utils.theme_utils import is_dark_mode
         is_dark = is_dark_mode()
+        Theme.set_dark_mode(is_dark)
         
-        if is_dark:
-            bg_hover = "rgba(255, 255, 255, 0.1)"
-            border_color = "#555555"
-        else:
-            bg_hover = "rgba(0, 0, 0, 0.05)"
-            border_color = "#cccccc"
+        bg_hover = "rgba(255, 255, 255, 0.1)" if is_dark else "rgba(0, 0, 0, 0.05)"
+        border_color = Theme.border()
         
         if not colored:
             # Grayscale / No Color style
             button_style = (
-                f"QPushButton {{ padding: 6px; border-top-left-radius: 8px; border-bottom-left-radius: 8px; "
+                f"QPushButton {{ padding: 6px; border-top-left-radius: {Theme.RADIUS_MD}px; border-bottom-left-radius: {Theme.RADIUS_MD}px; "
                 f"border-top-right-radius: 0px; border-bottom-right-radius: 0px; "
                 f"border: 1px solid {border_color}; border-right: none; background-color: transparent; }}"
                 f"QPushButton:hover {{ background-color: {bg_hover}; }}"
-                "QPushButton:checked { background-color: rgba(128, 128, 128, 0.2); color: #888888; border-color: #666666; }"
+                f"QPushButton:checked {{ background-color: rgba(128, 128, 128, 0.2); color: {Theme.text_muted()}; border-color: {Theme.border_focus()}; }}"
             )
         else:
             # Vibrant Colored style
             button_style = (
-                f"QPushButton {{ padding: 6px; border-top-left-radius: 8px; border-bottom-left-radius: 8px; "
+                f"QPushButton {{ padding: 6px; border-top-left-radius: {Theme.RADIUS_MD}px; border-bottom-left-radius: {Theme.RADIUS_MD}px; "
                 f"border-top-right-radius: 0px; border-bottom-right-radius: 0px; "
                 f"border: 1px solid {border_color}; border-right: none; background-color: transparent; }}"
                 f"QPushButton:hover {{ background-color: {bg_hover}; }}"
-                "QPushButton:checked { background-color: #2196F3; color: white; border-color: #1e88e5; }"
+                f"QPushButton:checked {{ background-color: {Theme.color('info')}; color: white; border-color: {Theme.color('info')}; }}"
             )
         
         for btn in self.buttons.values():

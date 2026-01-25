@@ -24,14 +24,21 @@ class PresetOrchestrator(QObject):
     - Displaying gallery via PresetGallery
     - Building commands via CommandBuilder when preset is selected
     - Analyzing media via MediaAnalyzer for smart presets
+    - Executing conversions via run_conversion()
     
     Signals:
         preset_selected: Emitted when user selects a preset (PresetDefinition)
         gallery_dismissed: Emitted when gallery is dismissed without selection
+        conversion_started: Emitted when conversion begins
+        conversion_progress: Emitted with (current, total, message) during conversion
+        conversion_finished: Emitted with (success, message) when conversion completes
     """
     
     preset_selected = pyqtSignal(object)  # PresetDefinition
     gallery_dismissed = pyqtSignal()
+    conversion_started = pyqtSignal()
+    conversion_progress = pyqtSignal(int, int, str)  # current, total, message
+    conversion_finished = pyqtSignal(bool, str)  # success, message
     
     def __init__(self, registry: 'ToolRegistryProtocol', parent_widget: QWidget):
         """
@@ -69,6 +76,110 @@ class PresetOrchestrator(QObject):
         self._presets = self._manager.load_all()
         self._gallery.set_presets(self._presets)
         print(f"[PresetOrchestrator] Loaded {len(self._presets)} presets")
+    
+    def run_conversion(self, files: List[str], output_mode: str = "source", 
+                       organized_name: str = "output", custom_path: str = None) -> tuple:
+        """
+        Execute conversion using the selected preset.
+        
+        This method encapsulates all subprocess and file path logic,
+        keeping MainWindow clean of business logic.
+        
+        Args:
+            files: List of input file paths
+            output_mode: "source", "organized", or "custom"
+            organized_name: Folder name for organized mode
+            custom_path: Path for custom mode
+            
+        Returns:
+            Tuple of (success_count, total_count)
+        """
+        import subprocess
+        import os
+        from pathlib import Path
+        
+        if not files:
+            return (0, 0)
+        
+        preset = self._selected_preset
+        if not preset:
+            print("[PresetOrchestrator] No preset selected")
+            return (0, 0)
+        
+        print(f"[PresetOrchestrator] Starting conversion with preset: {preset.name}")
+        print(f"[PresetOrchestrator] Processing {len(files)} file(s)")
+        
+        self.conversion_started.emit()
+        
+        total_files = len(files)
+        success_count = 0
+        
+        for i, input_path in enumerate(files):
+            try:
+                input_p = Path(input_path)
+                
+                # Determine output directory
+                if output_mode == "source":
+                    output_dir = input_p.parent
+                elif output_mode == "organized":
+                    output_dir = input_p.parent / organized_name
+                    output_dir.mkdir(exist_ok=True)
+                elif output_mode == "custom" and custom_path:
+                    output_dir = Path(custom_path)
+                    output_dir.mkdir(exist_ok=True)
+                else:
+                    output_dir = input_p.parent
+                
+                output_path = output_dir / f"{input_p.stem}_preset{input_p.suffix}"
+                
+                # Analyze media for smart presets
+                meta = self.analyze_file(str(input_path))
+                print(f"[PresetOrchestrator] Meta: fps={meta.get('fps')}, landscape={meta.get('is_landscape')}")
+                
+                # Get parameter values
+                param_values = self.get_parameter_values()
+                print(f"[PresetOrchestrator] Params: {param_values}")
+                
+                # Build context for template
+                context = {
+                    'input_path': str(input_path),
+                    'output_path': str(output_path),
+                    'output_path_no_ext': str(output_dir / input_p.stem),
+                    'meta': meta,
+                    **param_values,
+                }
+                
+                # Build and execute command
+                if preset.pipeline:
+                    cmd = self._builder.build_command(preset.pipeline[0], context)
+                    print(f"[PresetOrchestrator] Command: {cmd[:200]}...")
+                    
+                    result = subprocess.run(
+                        cmd,
+                        shell=True,
+                        capture_output=True,
+                        text=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                    )
+                    
+                    if result.returncode == 0:
+                        success_count += 1
+                        print(f"[PresetOrchestrator] ✓ Success: {input_p.name}")
+                    else:
+                        print(f"[PresetOrchestrator] ✗ Failed: {input_p.name}")
+                        print(f"[PresetOrchestrator] stderr: {result.stderr[:200]}")
+                
+                # Emit progress
+                self.conversion_progress.emit(i + 1, total_files, f"Processed: {input_p.name}")
+                
+            except Exception as e:
+                print(f"[PresetOrchestrator] Error processing {input_path}: {e}")
+        
+        # Emit finished
+        message = f"Preset conversion complete: {success_count}/{total_files} files"
+        self.conversion_finished.emit(success_count == total_files, message)
+        
+        return (success_count, total_files)
     
     def show_gallery(self):
         """Show the preset gallery overlay."""
@@ -147,6 +258,13 @@ class PresetOrchestrator(QObject):
         Returns:
             Dict of parameter id -> value
         """
+        # Query the gallery's form (where the user actually interacts)
+        if hasattr(self._gallery, '_parameter_form') and self._gallery._parameter_form:
+            values = self._gallery._parameter_form.get_values()
+            print(f"[Orchestrator] Got values from gallery form: {values}")
+            return values
+        
+        # Fallback to orchestrator's own form (shouldn't be used)
         if self._parameter_form:
             return self._parameter_form.get_values()
         

@@ -16,358 +16,31 @@ import tempfile
 import re
 from pathlib import Path
 from client.utils.resource_path import get_resource_path
-from client.utils.resource_path import get_resource_path
-from client.gui.theme_variables import get_theme, get_color
-from client.gui.custom_widgets import PresetStatusButton
+from client.gui.theme import Theme
+from client.gui.custom_widgets import PresetStatusButton, HoverIconButton, FileListItemWidget
 
-class HoverIconButton(QPushButton):
-    """Button that changes its SVG icon colors based on hover state and theme"""
-    def __init__(self, svg_name, icon_size=QSize(28, 28), parent=None):
-        super().__init__(parent)
-        self.svg_path = get_resource_path(f"client/assets/icons/{svg_name}")
-        self.icon_size = icon_size
-        self._is_dark = False
-        
-        self.setMouseTracking(True)
-        self.setIconSize(icon_size)
-        
-        self.normal_icon = None
-        self.hover_icon = None
-        
-        self.update_icons()
-        if self.normal_icon:
-            self.setIcon(self.normal_icon)
+from enum import Enum
 
-    def enterEvent(self, event):
-        if self.hover_icon:
-            self.setIcon(self.hover_icon)
-        super().enterEvent(event)
 
-    def leaveEvent(self, event):
-        if self.normal_icon:
-            self.setIcon(self.normal_icon)
-        super().leaveEvent(event)
+class ViewMode(Enum):
+    """View modes for the DragDropArea smart container."""
+    FILES = "files"      # Show file list (default)
+    PRESETS = "presets"  # Show preset gallery overlay
 
-    def set_dark_mode(self, is_dark):
-        if self._is_dark != is_dark:
-            self._is_dark = is_dark
-            self.update_icons()
-            self.setIcon(self.hover_icon if self.underMouse() else self.normal_icon)
-
-    def update_icons(self):
-        if not os.path.exists(self.svg_path):
-            return
-            
-        # Read SVG
-        with open(self.svg_path, 'r') as f:
-            svg_content = f.read()
-        
-        # Determine theme base color (black or white) for the main outline
-        base_color = "white" if self._is_dark else "black"
-        
-        # 1. Adjust main outline color based on theme
-        # Replace black strokes with base_color
-        svg_base = svg_content.replace('stroke="black"', f'stroke="{base_color}"')
-        svg_base = svg_base.replace('stroke="#000000"', f'stroke="{base_color}"')
-        svg_base = svg_base.replace('stroke="#000"', f'stroke="{base_color}"')
-        
-        # 2. Create the Normal version (colored curves -> gray)
-        # Replace green (#4CAF50) and red (#D32F2F) with grey
-        gray_color = "#888888"
-        svg_normal = svg_base.replace('#4CAF50', gray_color).replace('#4caf50', gray_color)
-        svg_normal = svg_normal.replace('#D32F2F', gray_color).replace('#d32f2f', gray_color)
-        
-        # 3. Create the Hover version (original colored curves)
-        svg_hover = svg_base
-        
-        # Generate Icons
-        def svg_to_icon(content):
-            try:
-                renderer = QSvgRenderer(QByteArray(content.encode('utf-8')))
-                # Render at high resolution (2x) for sharp look
-                pixmap = QPixmap(self.icon_size * 2)
-                pixmap.fill(Qt.GlobalColor.transparent)
-                painter = QPainter(pixmap)
-                renderer.render(painter)
-                painter.end()
-                return QIcon(pixmap)
-            except:
-                import traceback
-                traceback.print_exc()
-                return QIcon()
-
-        self.normal_icon = svg_to_icon(svg_normal)
-        self.hover_icon = svg_to_icon(svg_hover)
-
-class FileListItemWidget(QWidget):
-    """Custom widget for list items with hover-based remove button and progress indicator"""
-    remove_clicked = pyqtSignal()
-    
-    def __init__(self, text, file_path=None, parent=None):
-        super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_Hover)
-        self.installEventFilter(self)
-        self._hovered = False
-        self.file_path = file_path
-        self._is_completed = False  # Track if conversion is complete
-        
-        # Set transparent background
-        self.setStyleSheet("background-color: transparent;")
-        
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)  # Give more space vertically
-        layout.setSpacing(10)
-        
-        # Thumbnail label (48x48 square)
-        self.thumbnail_label = QLabel()
-        self.thumbnail_label.setFixedSize(48, 48)
-        self.thumbnail_label.setScaledContents(False)
-        self.thumbnail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.thumbnail_label.setStyleSheet("background: #1a1a1a; border: 1px solid #444; border-radius: 4px;")
-        
-        # Load thumbnail if file_path provided
-        if file_path:
-            self.load_thumbnail(file_path)
-        
-        layout.addWidget(self.thumbnail_label)
-        
-        # Text label - expand to fill height
-        self.text_label = QLabel(text)
-        self.text_label.setStyleSheet("background: transparent; border: none;")
-        self.text_label.setWordWrap(False)  # Prevent wrapping
-        self.text_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-        layout.addWidget(self.text_label, 1)
-        
-        # Remove button (X) - use MinimumExpanding to not constrain the layout
-        self.remove_btn = QPushButton("✕")
-        self.remove_btn.setMaximumSize(28, 28)  # Max size instead of fixed
-        self.remove_btn.setMinimumSize(24, 24)
-        self.remove_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.remove_btn.setVisible(False)  # Hidden by default
-        self.remove_btn.clicked.connect(self.remove_clicked.emit)
-        layout.addWidget(self.remove_btn, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
-        
-        self.update_button_style(False)
-    
-    def set_completed(self):
-        """Mark item as completed"""
-        self._is_completed = True
-    
-    def update_theme(self, is_dark):
-        """Update widget colors based on theme"""
-        if is_dark:
-            text_color = "#ffffff"
-            thumb_bg = "#1a1a1a"
-            thumb_border = "#444"
-        else:
-            text_color = "#333333"
-            thumb_bg = "#f5f5f5"
-            thumb_border = "#cccccc"
-        
-        self.text_label.setStyleSheet(f"background: transparent; border: none; color: {text_color};")
-        self.thumbnail_label.setStyleSheet(f"background: {thumb_bg}; border: 1px solid {thumb_border}; border-radius: 4px;")
-        
-    def sizeHint(self):
-        """Return the recommended size for the widget"""
-        from PyQt6.QtCore import QSize
-        # Don't set a specific width - let the parent container define it
-        # Just return height; width will be handled by the parent list widget
-        return QSize(0, 56)  # Width 0 means fill available space
-    
-    def minimumSizeHint(self):
-        """Return the minimum recommended size"""
-        from PyQt6.QtCore import QSize
-        return QSize(0, 50)  # Width 0 means fill available space
-        
-    def eventFilter(self, obj, event):
-        if obj == self:
-            if event.type() == QEvent.Type.Enter:
-                self._hovered = True
-                self.remove_btn.setVisible(True)
-            elif event.type() == QEvent.Type.Leave:
-                self._hovered = False
-                self.remove_btn.setVisible(False)
-        return super().eventFilter(obj, event)
-    
-    def load_thumbnail(self, file_path):
-        """Load and display thumbnail for the file"""
-        try:
-            from PyQt6.QtGui import QPixmap
-            from pathlib import Path
-            import subprocess
-            
-            file_ext = Path(file_path).suffix.lower()
-            pixmap = None
-            
-            # For images, load directly
-            if file_ext in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp', '.gif']:
-                pixmap = QPixmap(file_path)
-            
-            # For videos, extract first frame
-            elif file_ext in ['.mp4', '.avi', '.mov', '.mkv', '.flv', '.webm', '.m4v']:
-                pixmap = self.extract_video_thumbnail(file_path)
-            
-            # If thumbnail loaded successfully, scale and display
-            if pixmap and not pixmap.isNull():
-                scaled_pixmap = pixmap.scaled(
-                    48, 48,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                self.thumbnail_label.setPixmap(scaled_pixmap)
-            else:
-                # Show file type icon as fallback
-                self.set_fallback_icon(file_ext)
-        except Exception as e:
-            print(f"Failed to load thumbnail: {e}")
-            self.set_fallback_icon(Path(file_path).suffix.lower())
-    
-    def extract_video_thumbnail(self, video_path):
-        """Extract first frame from video as thumbnail"""
-        try:
-            # Get ffmpeg path from environment (set by init_bundled_tools)
-            ffmpeg_path = os.environ.get('FFMPEG_BINARY', 'ffmpeg')
-            
-            # Create temp file for thumbnail
-            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
-                thumb_path = tmp.name
-            
-            try:
-                # Extract frame at 0.5 seconds (safer than 1s for short videos)
-                cmd = [
-                    str(ffmpeg_path),
-                    '-ss', '0.5',
-                    '-i', str(video_path),
-                    '-vframes', '1',
-                    '-vf', 'scale=128:-1',
-                    '-q:v', '2',  # High quality JPEG
-                    '-y',
-                    thumb_path
-                ]
-                
-                result = subprocess.run(
-                    cmd, 
-                    capture_output=True, 
-                    timeout=5,
-                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-                )
-                
-                if os.path.exists(thumb_path) and os.path.getsize(thumb_path) > 0:
-                    pixmap = QPixmap(thumb_path)
-                    try:
-                        os.remove(thumb_path)
-                    except:
-                        pass
-                    
-                    if not pixmap.isNull():
-                        return pixmap
-                    else:
-                        print(f"Failed to load pixmap from thumbnail")
-                else:
-                    print(f"Thumbnail file not created or empty. Return code: {result.returncode}")
-                    if result.stderr:
-                        stderr_text = result.stderr.decode('utf-8', errors='ignore')[:300]
-                        print(f"FFmpeg stderr: {stderr_text}")
-                
-            finally:
-                # Clean up temp file if it exists
-                if os.path.exists(thumb_path):
-                    try:
-                        os.remove(thumb_path)
-                    except:
-                        pass
-            
-        except subprocess.TimeoutExpired:
-            print(f"Video thumbnail extraction timed out for {video_path}")
-        except Exception as e:
-            print(f"Video thumbnail extraction failed: {e}")
-            import traceback
-            traceback.print_exc()
-        
-        return None
-    
-    def set_fallback_icon(self, file_ext):
-        """Set a fallback icon based on file type"""
-        # Simple text-based icon
-        if file_ext in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp', '.gif']:
-            icon_text = "🖼"
-        elif file_ext in ['.mp4', '.avi', '.mov', '.mkv', '.flv', '.webm', '.m4v']:
-            icon_text = "🎬"
-        elif file_ext in ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a']:
-            icon_text = "🎵"
-        else:
-            icon_text = "📄"
-        
-        self.thumbnail_label.setText(icon_text)
-        self.thumbnail_label.setStyleSheet(
-            "background: #1a1a1a; border: 1px solid #444; border-radius: 4px; "
-            "font-size: 24px; color: #888;"
-        )
-    
-    def update_button_style(self, is_dark_theme):
-        """Update button styling based on theme"""
-        if is_dark_theme:
-            btn_style = """
-                QPushButton {
-                    background-color: transparent;
-                    color: #888888;
-                    border: none;
-                    font-size: 16px;
-                    font-weight: bold;
-                    padding: 0px;
-                }
-                QPushButton:hover {
-                    color: #ff4444;
-                    background-color: rgba(255, 68, 68, 0.1);
-                    border-radius: 3px;
-                }
-                QPushButton:pressed {
-                    color: #ff0000;
-                    background-color: rgba(255, 0, 0, 0.2);
-                }
-            """
-            text_style = "background: transparent; border: none; color: #ffffff; font-size: 13px;"
-        else:
-            btn_style = """
-                QPushButton {
-                    background-color: transparent;
-                    color: #999999;
-                    border: none;
-                    font-size: 16px;
-                    font-weight: bold;
-                    padding: 0px;
-                }
-                QPushButton:hover {
-                    color: #ff4444;
-                    background-color: rgba(255, 68, 68, 0.1);
-                    border-radius: 3px;
-                }
-                QPushButton:pressed {
-                    color: #ff0000;
-                    background-color: rgba(255, 0, 0, 0.2);
-                }
-            """
-            text_style = "background: transparent; border: none; color: #333333; font-size: 13px;"
-        
-        self.remove_btn.setStyleSheet(btn_style)
-        self.text_label.setStyleSheet(text_style)
-        
-        # Update thumbnail border color based on theme
-        current_thumb_style = self.thumbnail_label.styleSheet()
-        if is_dark_theme:
-            thumb_style = "background: #1a1a1a; border: 1px solid #444; border-radius: 4px;"
-            if "font-size" in current_thumb_style:  # Has emoji fallback
-                thumb_style += " font-size: 24px; color: #888;"
-        else:
-            thumb_style = "background: #f5f5f5; border: 1px solid #ddd; border-radius: 4px;"
-            if "font-size" in current_thumb_style:  # Has emoji fallback
-                thumb_style += " font-size: 24px; color: #666;"
-        
-        self.thumbnail_label.setStyleSheet(thumb_style)
 
 class DragDropArea(QWidget):
+    """
+    Smart Container for file management with overlay support.
+    
+    Implements the Mediator-Shell pattern:
+    - Manages multiple view modes (FILES, PRESETS)
+    - Exposes set_view_mode() API for external control
+    - Emits signals for parent coordination
+    """
+    
     files_added = pyqtSignal(list)  # Signal emitted when files are added
     preset_applied = pyqtSignal(object, list)  # Emits (preset, files) when preset selected
+    view_mode_changed = pyqtSignal(str)  # Emits new view mode name
     
     # Supported file extensions for graphics conversion
     SUPPORTED_EXTENSIONS = {
@@ -383,8 +56,8 @@ class DragDropArea(QWidget):
         self.setAcceptDrops(True)  # Enable drag/drop on the main widget
         self._current_processing_index = -1  # Track which file is being processed
         self._pending_files = None  # Files waiting for preset selection
+        self._current_view_mode = ViewMode.FILES  # Default view mode
         self.setup_ui()
-        # NOTE: Preset overlay removed - new preset plugin will be implemented separately
     
     def set_file_progress(self, file_index, progress):
         """Set progress for a specific file in the list (0.0 to 1.0) - No-op now"""
@@ -481,9 +154,42 @@ class DragDropArea(QWidget):
     def _on_preset_dismissed(self):
         """Handle gallery dismissal."""
         print("[DragDropArea] Preset gallery dismissed")
+        self._current_view_mode = ViewMode.FILES
+        self.view_mode_changed.emit(ViewMode.FILES.value)
     
-    def show_preset_view(self):
-        """Show the preset gallery overlay."""
+    # =========================================================================
+    # SMART CONTAINER API (Mediator-Shell Pattern)
+    # =========================================================================
+    
+    def set_view_mode(self, mode: ViewMode):
+        """
+        Switch the container's view mode.
+        
+        This is the primary API for external controllers (MainWindow) to
+        switch between file list and preset gallery views.
+        
+        Args:
+            mode: ViewMode.FILES or ViewMode.PRESETS
+        """
+        if self._current_view_mode == mode:
+            return
+        
+        self._current_view_mode = mode
+        
+        if mode == ViewMode.PRESETS:
+            self._show_preset_overlay()
+        else:
+            self._hide_preset_overlay()
+        
+        self.view_mode_changed.emit(mode.value)
+    
+    @property
+    def current_view_mode(self) -> ViewMode:
+        """Get the current view mode."""
+        return self._current_view_mode
+    
+    def _show_preset_overlay(self):
+        """Internal: Show the preset gallery overlay."""
         if hasattr(self, '_preset_orchestrator') and self._preset_orchestrator:
             self._preset_orchestrator.show_gallery()
         else:
@@ -492,10 +198,20 @@ class DragDropArea(QWidget):
             if self._preset_orchestrator:
                 self._preset_orchestrator.show_gallery()
     
-    def hide_preset_view(self):
-        """Hide the preset gallery overlay."""
+    def _hide_preset_overlay(self):
+        """Internal: Hide the preset gallery overlay."""
         if hasattr(self, '_preset_orchestrator') and self._preset_orchestrator:
             self._preset_orchestrator.hide_gallery()
+    
+    # --- Backward Compatibility Methods ---
+    
+    def show_preset_view(self):
+        """Show the preset gallery overlay. (Backward compatible)"""
+        self.set_view_mode(ViewMode.PRESETS)
+    
+    def hide_preset_view(self):
+        """Hide the preset gallery overlay. (Backward compatible)"""
+        self.set_view_mode(ViewMode.FILES)
     
     def resizeEvent(self, event):
         """Update placeholder size and overlay geometry"""
@@ -645,26 +361,23 @@ class DragDropArea(QWidget):
         is_dark = True
         if self.theme_manager:
             is_dark = self.theme_manager.current_theme == 'dark'
-            
-        surface_main = get_color("surface_main", is_dark)
-        border_dim = get_color("border_dim", is_dark)
-        border_focus = get_color("border_focus", is_dark)
-        text_primary = get_color("text_primary", is_dark)
+        
+        Theme.set_dark_mode(is_dark)
         
         # Base DropZone style
         base_style = f"""
             QListWidget#DropZone {{
-                background-color: {surface_main};
-                border: 2px dashed {border_dim};
-                border-radius: 12px;
-                color: {text_primary};
-                font-size: 14px;
+                background-color: {Theme.surface()};
+                border: 2px dashed {Theme.border()};
+                border-radius: {Theme.RADIUS_LG}px;
+                color: {Theme.text()};
+                font-size: {Theme.FONT_SIZE_BASE}px;
                 padding: 10px;
                 outline: none;
             }}
             QListWidget#DropZone:hover {{
-                border-color: {border_focus};
-                background-color: {surface_main}; /* Keep same or slightly lighter? */
+                border-color: {Theme.border_focus()};
+                background-color: {Theme.surface()};
             }}
         """
         # Append scrollbar styling
@@ -672,8 +385,6 @@ class DragDropArea(QWidget):
         self.file_list_widget.setStyleSheet(full_style)
         
         # Restore completion backgrounds for completed items
-        is_dark = self.theme_manager and self.theme_manager.current_theme == 'dark'
-        
         for i in range(self.file_list_widget.count()):
             item = self.file_list_widget.item(i)
             if item:
@@ -685,137 +396,80 @@ class DragDropArea(QWidget):
     def _get_scrollbar_style(self):
         """Get modern minimalistic scrollbar styling with grey item selection"""
         is_dark = self.theme_manager and self.theme_manager.current_theme == 'dark'
+        Theme.set_dark_mode(is_dark)
         
-        if is_dark:
-            return """
-                QListWidget::item {
-                    outline: none;
-                    border: none;
-                }
-                QListWidget::item:selected {
-                    background-color: #3a3a3a;
-                    color: #ffffff;
-                    outline: none;
-                    border: none;
-                }
-                QListWidget::item:focus {
-                    outline: none;
-                    border: none;
-                }
-                QListWidget::item:selected:focus {
-                    background-color: #3a3a3a;
-                    outline: none;
-                    border: none;
-                }
-                QListWidget::item:hover:!selected {
-                    background-color: #4a4a4a;
-                }
-                QScrollBar:vertical {
-                    background: #1a1a1a;
-                    width: 10px;
-                    border: none;
-                    border-radius: 5px;
-                }
-                QScrollBar::handle:vertical {
-                    background: #404040;
-                    border-radius: 5px;
-                    min-height: 30px;
-                }
-                QScrollBar::handle:vertical:hover {
-                    background: #505050;
-                }
-                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                    height: 0px;
-                }
-                QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-                    background: none;
-                }
-                QScrollBar:horizontal {
-                    background: #1a1a1a;
-                    height: 10px;
-                    border: none;
-                    border-radius: 5px;
-                }
-                QScrollBar::handle:horizontal {
-                    background: #404040;
-                    border-radius: 5px;
-                    min-width: 30px;
-                }
-                QScrollBar::handle:horizontal:hover {
-                    background: #505050;
-                }
-                QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-                    width: 0px;
-                }
-                QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
-                    background: none;
-                }
-            """
-        else:
-            return """
-                QListWidget::item {
-                    outline: none;
-                    border: none;
-                }
-                QListWidget::item:selected {
-                    background-color: #d3d3d3;
-                    color: #333333;
-                    outline: none;
-                    border: none;
-                }
-                QListWidget::item:focus {
-                    outline: none;
-                    border: none;
-                }
-                QListWidget::item:selected:focus {
-                    background-color: #d3d3d3;
-                    outline: none;
-                    border: none;
-                }
-                QListWidget::item:hover:!selected {
-                    background-color: #e0e0e0;
-                }
-                QScrollBar:vertical {
-                    background: #f0f0f0;
-                    width: 10px;
-                    border: none;
-                    border-radius: 5px;
-                }
-                QScrollBar::handle:vertical {
-                    background: #c0c0c0;
-                    border-radius: 5px;
-                    min-height: 30px;
-                }
-                QScrollBar::handle:vertical:hover {
-                    background: #a0a0a0;
-                }
-                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                    height: 0px;
-                }
-                QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-                    background: none;
-                }
-                QScrollBar:horizontal {
-                    background: #f0f0f0;
-                    height: 10px;
-                    border: none;
-                    border-radius: 5px;
-                }
-                QScrollBar::handle:horizontal {
-                    background: #c0c0c0;
-                    border-radius: 5px;
-                    min-width: 30px;
-                }
-                QScrollBar::handle:horizontal:hover {
-                    background: #a0a0a0;
-                }
-                QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-                    width: 0px;
-                }
-                QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
-                    background: none;
-                }
-            """
+        # Common colors from Theme
+        item_selected_bg = Theme.color("surface_hover")
+        item_hover_bg = Theme.color("surface_pressed") if is_dark else Theme.color("surface_hover")
+        text_color = Theme.text()
+        scrollbar_bg = Theme.color("scrollbar_bg")
+        scrollbar_thumb = Theme.color("scrollbar_thumb")
+        scrollbar_thumb_hover = Theme.border_focus()
+        
+        return f"""
+            QListWidget::item {{
+                outline: none;
+                border: none;
+            }}
+            QListWidget::item:selected {{
+                background-color: {item_selected_bg};
+                color: {text_color};
+                outline: none;
+                border: none;
+            }}
+            QListWidget::item:focus {{
+                outline: none;
+                border: none;
+            }}
+            QListWidget::item:selected:focus {{
+                background-color: {item_selected_bg};
+                outline: none;
+                border: none;
+            }}
+            QListWidget::item:hover:!selected {{
+                background-color: {item_hover_bg};
+            }}
+            QScrollBar:vertical {{
+                background: {scrollbar_bg};
+                width: 10px;
+                border: none;
+                border-radius: 5px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {scrollbar_thumb};
+                border-radius: 5px;
+                min-height: 30px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {scrollbar_thumb_hover};
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+                background: none;
+            }}
+            QScrollBar:horizontal {{
+                background: {scrollbar_bg};
+                height: 10px;
+                border: none;
+                border-radius: 5px;
+            }}
+            QScrollBar::handle:horizontal {{
+                background: {scrollbar_thumb};
+                border-radius: 5px;
+                min-width: 30px;
+            }}
+            QScrollBar::handle:horizontal:hover {{
+                background: {scrollbar_thumb_hover};
+            }}
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+                width: 0px;
+            }}
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+                background: none;
+            }}
+        """
     
     def _apply_scrollbar_style(self):
         """Apply scrollbar styling to the file list widget"""

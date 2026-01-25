@@ -150,45 +150,25 @@ class CommandPanel(QWidget):
     
     def _create_side_buttons(self):
         """Create side buttons for transform sections (Resize/Rotate/Time)."""
-        # Button config for Image tab (Resize, Rotate only)
-        image_btns_config = [
-            {'id': 'resize', 'icon_path': 'client/assets/icons/scale.png', 'tooltip': 'Resize Options'},
-            {'id': 'rotate', 'icon_path': 'client/assets/icons/rotate.svg', 'tooltip': 'Rotation Options'}
-        ]
-        self.image_side_buttons = SideButtonGroup(image_btns_config, default_selection='resize')
+        # Image tab side buttons (Resize, Rotate only)
+        self.image_side_buttons = SideButtonGroup(['resize', 'rotate'])
         self.image_side_buttons.selectionChanged.connect(
             lambda mode: self._image_tab.set_transform_mode(mode)
         )
-        if self.image_side_buttons.layout():
-            self.image_side_buttons.layout().setContentsMargins(0, 15, 0, 0)
         self.side_buttons_stack.addWidget(self.image_side_buttons)
         
-        # Button config for Video tab (Resize, Rotate, Time)
-        video_btns_config = [
-            {'id': 'resize', 'icon_path': 'client/assets/icons/scale.png', 'tooltip': 'Resize Options'},
-            {'id': 'rotate', 'icon_path': 'client/assets/icons/rotate.svg', 'tooltip': 'Rotation Options'},
-            {'id': 'time', 'icon_path': 'client/assets/icons/time.png', 'tooltip': 'Time Options'}
-        ]
-        self.video_side_buttons = SideButtonGroup(video_btns_config, default_selection='resize')
+        # Video tab side buttons (Resize, Rotate, Time)
+        self.video_side_buttons = SideButtonGroup(['resize', 'rotate', 'time'])
         self.video_side_buttons.selectionChanged.connect(
             lambda mode: self._video_tab.set_transform_mode(mode)
         )
-        if self.video_side_buttons.layout():
-            self.video_side_buttons.layout().setContentsMargins(0, 15, 0, 0)
         self.side_buttons_stack.addWidget(self.video_side_buttons)
         
-        # Button config for Loop tab (Resize, Rotate, Time)
-        loop_btns_config = [
-            {'id': 'resize', 'icon_path': 'client/assets/icons/scale.png', 'tooltip': 'Resize Options'},
-            {'id': 'rotate', 'icon_path': 'client/assets/icons/rotate.svg', 'tooltip': 'Rotation Options'},
-            {'id': 'time', 'icon_path': 'client/assets/icons/time.png', 'tooltip': 'Time Options'}
-        ]
-        self.loop_side_buttons = SideButtonGroup(loop_btns_config, default_selection='resize')
+        # Loop tab side buttons (Resize, Rotate, Time)
+        self.loop_side_buttons = SideButtonGroup(['resize', 'rotate', 'time'])
         self.loop_side_buttons.selectionChanged.connect(
             lambda mode: self._loop_tab.set_transform_mode(mode)
         )
-        if self.loop_side_buttons.layout():
-            self.loop_side_buttons.layout().setContentsMargins(0, 15, 0, 0)
         self.side_buttons_stack.addWidget(self.loop_side_buttons)
     
     def _init_state(self):

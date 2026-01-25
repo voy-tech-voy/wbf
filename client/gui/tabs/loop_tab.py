@@ -18,7 +18,7 @@ from client.gui.custom_widgets import (
     CustomComboBox, RotationButtonRow, ThemedCheckBox,
     CustomTargetSizeSpinBox, LoopFormatSelector, TimeRangeSlider
 )
-from client.gui.command_panel import get_combobox_style
+from client.gui.theme import get_combobox_style
 
 COMBOBOX_STYLE = get_combobox_style(True)
 

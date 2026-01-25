@@ -1,8 +1,11 @@
 # ============================================================================
-# PRESET TEMPLATE - Copy and modify this file to create new presets
+# PRESET TEMPLATE - Master Reference for Creating New Presets
 # ============================================================================
 # Location: client/plugins/presets/assets/presets/
 # Filename: Use snake_case, e.g., youtube_shorts.yaml, twitter_video.yaml
+#
+# ⚠️ READ THIS ENTIRE FILE BEFORE CREATING A NEW PRESET!
+# Incorrect variable usage will cause silent export failures.
 # ============================================================================
 
 # ============================================================================
@@ -10,8 +13,8 @@
 # ============================================================================
 meta:
   id: "unique_preset_id"         # Unique identifier (snake_case, no spaces)
-  name: "Display Name"            # Name shown on the preset card
-  category: "social"              # Category for grouping: social, format, optimize, custom
+  name: "Display Name"            # Name shown on the preset card (keep short)
+  category: "social"              # Category for filter bar: social, web, utility, format
   description: "Brief description of what this preset does"
   version: "1.0"
 
@@ -35,18 +38,24 @@ constraints:
 # ============================================================================
 # SECTION 4: PARAMETERS (Optional - user-adjustable settings)
 # ============================================================================
-# Each parameter creates a UI widget. Supported types:
-#   - toggle: Checkbox (boolean)
-#   - slider: Slider with min/max (number)
-#   - segmented_pill: Button group (string from options)
-#   - dropdown: Dropdown select (string from options)
+# Each parameter creates a UI widget. Parameter IDs become Jinja2 variables.
+#
+# SUPPORTED TYPES:
+#   toggle         → Checkbox (boolean: true/false)
+#   slider         → Slider with min/max (integer or float)
+#   segmented_pill → Button group (string from options list)
+#   dropdown       → Dropdown select (string from options list)
+#
+# VISIBILITY RULES:
+#   Use visibility_rule to conditionally show/hide a parameter.
+#   Available in rules: other param IDs, meta.* (is_landscape, fps, etc.)
 # ============================================================================
 parameters:
   # --- TOGGLE EXAMPLE ---
   - id: "enable_feature"          # Variable name in template (snake_case)
     type: "toggle"
     label: "Enable Feature"       # UI label
-    default: true                 # Default value
+    default: true                 # Default value (boolean)
     tooltip: "Tooltip shown on hover"
 
   # --- SLIDER EXAMPLE ---
@@ -64,9 +73,7 @@ parameters:
     label: "Fill Method"
     options: ["Blur", "Crop", "Fit"]  # Options shown as buttons
     default: "Blur"
-    # VISIBILITY RULE: Only show this widget when condition is true
-    # Available variables: other param IDs + meta.* (fps, is_landscape, etc.)
-    visibility_rule: "not enable_feature"
+    visibility_rule: "not enable_feature"  # Only shows when enable_feature is false
 
   # --- DROPDOWN EXAMPLE ---
   - id: "preset_speed"
@@ -78,34 +85,61 @@ parameters:
 # ============================================================================
 # SECTION 5: PIPELINE (Required - the actual conversion commands)
 # ============================================================================
-# Each step runs a tool (usually ffmpeg). The command_template uses Jinja2.
-# 
-# AVAILABLE VARIABLES:
-#   {{ tool_exe }}        - Full path to the tool executable
-#   {{ input_path }}      - Input file path
-#   {{ output_path }}     - Output file path
-#   {{ meta.fps }}        - Source video FPS (float)
-#   {{ meta.width }}      - Source video width (int)
-#   {{ meta.height }}     - Source video height (int)
-#   {{ meta.is_landscape }} - True if width > height
-#   {{ meta.has_audio }}  - True if audio stream present
-#   {{ meta.duration }}   - Duration in seconds
-#   {{ param_id }}        - Value of any parameter defined above
+#
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │ ⚠️  CRITICAL: AVAILABLE JINJA2 CONTEXT VARIABLES                       │
+# ├─────────────────────────────────────────────────────────────────────────┤
+# │ ALWAYS AVAILABLE:                                                       │
+# │   {{ tool_exe }}          → Full path to the tool executable (ffmpeg)  │
+# │   {{ input_path }}        → Full input file path WITH extension        │
+# │   {{ output_path }}       → Full output file path WITH extension       │
+# │   {{ output_path_no_ext }} → Output path WITHOUT extension             │
+# │                              USE THIS when your preset sets custom ext │
+# │                              Example: "{{ output_path_no_ext }}.mp3"   │
+# │                                                                         │
+# │ MEDIA METADATA (meta object - from source file analysis):              │
+# │   {{ meta.fps }}          → Source video FPS (float, e.g., 29.97)      │
+# │   {{ meta.width }}        → Source video width in pixels (int)         │
+# │   {{ meta.height }}       → Source video height in pixels (int)        │
+# │   {{ meta.is_landscape }} → True if width > height                     │
+# │   {{ meta.has_audio }}    → True if audio stream is present            │
+# │   {{ meta.duration }}     → Duration in seconds (float)                │
+# │                                                                         │
+# │ USER PARAMETERS:                                                        │
+# │   {{ param_id }}          → Value of any parameter defined above       │
+# │                             e.g., {{ quality }}, {{ fill_method }}     │
+# │                                                                         │
+# │ ⚠️  COMMON MISTAKE:                                                     │
+# │   WRONG: {{ output_file }} ← Does not exist, will cause silent failure │
+# │   RIGHT: {{ output_path }}  ← Use this for standard output             │
+# │   RIGHT: {{ output_path_no_ext }}.mp3 ← For custom extensions          │
+# └─────────────────────────────────────────────────────────────────────────┘
 #
 # JINJA2 FEATURES:
-#   {% if condition %}...{% endif %}        - Conditional
-#   {% set var %}...{% endset %}            - Variable assignment
-#   {{ value | default(fallback) }}         - Default filter
-#   {{ (value * 2) | int }}                 - Math + conversion
+#   {% if condition %}...{% endif %}        → Conditional blocks
+#   {% elif condition %}...{% endif %}      → Else-if chains
+#   {% set var = value %}                   → Variable assignment
+#   {{ value | default(fallback) }}         → Default value filter
+#   {{ (value * 2) | int }}                 → Math + type conversion
+#   {{ text.split(' ')[0] }}                → String manipulation
+#   {# This is a comment #}                 → Comments (not rendered)
+#
 # ============================================================================
 pipeline:
   - tool: "ffmpeg"
     description: "Main conversion pass"
     
     # OPTIONAL: Dynamic output filename suffix (Jinja2 template)
+    # This appends to the base filename before the extension
     filename_suffix: "_{{ 'hq' if quality < 20 else 'standard' }}"
     
     # THE COMMAND TEMPLATE
+    # ⚠️ RULES:
+    #   1. Always start with: {{ tool_exe }} -y -i "{{ input_path }}"
+    #   2. Always end with: "{{ output_path }}"
+    #      OR "{{ output_path_no_ext }}.EXTENSION" for custom formats
+    #   3. Wrap all file paths in double quotes for Windows compatibility
+    #   4. Use | operator for multi-line templates (YAML block scalar)
     command_template: |
       {{ tool_exe }} -y -i "{{ input_path }}"
       
@@ -116,13 +150,13 @@ pipeline:
         -vf "scale={{ meta.width }}:{{ meta.height }}"
       {% endif %}
       
-      {# --- EXAMPLE: Quality from slider --- #}
+      {# --- EXAMPLE: Quality from slider parameter --- #}
       -c:v libx264 -crf {{ quality | default(23) }}
       
       {# --- EXAMPLE: Encoding speed from dropdown --- #}
       -preset {{ preset_speed | default('medium') }}
       
-      {# --- EXAMPLE: Audio handling --- #}
+      {# --- EXAMPLE: Conditional audio handling --- #}
       {% if meta.has_audio %}
         -c:a aac -b:a 192k
       {% else %}
@@ -133,7 +167,29 @@ pipeline:
       "{{ output_path }}"
 
 # ============================================================================
-# MULTI-STEP PIPELINE EXAMPLE (optional - for complex workflows)
+# EXAMPLE: PRESET WITH CUSTOM OUTPUT EXTENSION
+# ============================================================================
+# Use case: Audio extraction (MP3/WAV/M4A), WebP images, etc.
+#
+# pipeline:
+#   - tool: "ffmpeg"
+#     description: "Extract Audio Track"
+#     command_template: |
+#       {{ tool_exe }} -y -i "{{ input_path }}"
+#       -vn
+#       {% if format == 'MP3' %}
+#         -c:a libmp3lame -b:a {{ bitrate }}
+#         "{{ output_path_no_ext }}.mp3"
+#       {% elif format == 'WAV' %}
+#         -c:a pcm_s16le
+#         "{{ output_path_no_ext }}.wav"
+#       {% else %}
+#         -c:a aac -b:a {{ bitrate }}
+#         "{{ output_path_no_ext }}.m4a"
+#       {% endif %}
+
+# ============================================================================
+# EXAMPLE: MULTI-STEP PIPELINE (for complex workflows)
 # ============================================================================
 # pipeline:
 #   - tool: "ffmpeg"
@@ -150,3 +206,15 @@ pipeline:
 #     description: "Step 3: Reassemble video"
 #     command_template: |
 #       {{ tool_exe }} -framerate 1 -i "frames_%04d.png" "{{ output_path }}"
+
+# ============================================================================
+# CHECKLIST BEFORE SAVING A NEW PRESET
+# ============================================================================
+# [ ] Unique id in meta section (no duplicates)
+# [ ] category is one of: social, web, utility, format
+# [ ] All parameter IDs use snake_case
+# [ ] command_template starts with: {{ tool_exe }} -y -i "{{ input_path }}"
+# [ ] command_template ends with "{{ output_path }}" or custom extension paths
+# [ ] All file paths are wrapped in double quotes: "{{ path }}"
+# [ ] Tested export with a real file to verify output is generated
+# ============================================================================
