@@ -22,7 +22,8 @@ from client.gui.custom_widgets import (
     TimeRangeSlider, ResizeFolder, RotationOptions, CustomComboBox,
     CustomTargetSizeSpinBox, ModeButtonsWidget, PresetButton,
     SquareButtonRow, SideButtonGroup, AnimatedSideModeButton, FormatButtonRow, RotationButtonRow,
-    LoopFormatSelector, GPUIndicator, VideoCodecSelector, install_app_tooltip, MorphingButton, PresetStatusButton
+    LoopFormatSelector, GPUIndicator, VideoCodecSelector, install_app_tooltip, MorphingButton, PresetStatusButton,
+    ThemedCheckBox, DynamicFontButton
 )
 from client.gui.custom_spinbox import CustomSpinBox
 from client.gui.command_group import CommandGroup
@@ -32,273 +33,6 @@ from client.utils.resource_path import get_resource_path
 from client.utils.theme_utils import is_dark_mode
 import json
 import winreg
-
-
-class DynamicFontButton(QPushButton):
-    """
-    Hardware-aware Start button with GPU acceleration visual effects.
-    
-    When GPU is available:
-    - Circuit trace effect: 1px cyan line traces the border on hover
-    - Scanline fill: subtle diagonal pattern moves across background
-    - Bolt icon lights up in cyan
-    
-    When CPU only:
-    - Standard button appearance, no animation
-    """
-    
-    def __init__(self, text=""):
-        super().__init__(text)
-        
-        # GPU state
-        self._gpu_available = False
-        self._is_hovered = False
-        
-        # Animation properties
-        self._trace_offset = 0.0  # 0.0 to 1.0, position along border perimeter
-        self._scanline_offset = 0.0
-        
-        # Animation timers
-        self._trace_timer = QTimer(self)
-        self._trace_timer.timeout.connect(self._update_trace_animation)
-        self._trace_timer.setInterval(16)  # ~60 FPS
-        
-        self._scanline_timer = QTimer(self)
-        self._scanline_timer.timeout.connect(self._update_scanline_animation)
-        self._scanline_timer.setInterval(33)  # ~30 FPS for subtle effect
-        
-        # Store the base style (without font properties)
-        self.base_style = {
-            "normal": (
-                "background-color: #2196f3; "
-                "color: white; "
-                "border: 2px solid #43a047; "
-                "border-radius: 8px; "
-                "padding: 12px 0px; "
-                "font-weight: bold; "
-            ),
-            "hover": "background-color: #43a047; color: white; border-color: #43a047;",
-            "pressed": "background-color: #388e3c; color: white; border-color: #2e7d32;",
-            "disabled": "background-color: #2196f3; color: #eeeeee; border-color: #bdbdbd;",
-            "stop_normal": (
-                "background-color: transparent; "
-                "color: #d32f2f; "
-                "border: 2px solid #d32f2f; "
-                "border-radius: 8px; "
-                "padding: 12px 0px; "
-                "font-weight: bold; "
-            ),
-            "stop_hover": "background-color: #d32f2f; color: white; border-color: #b71c1c;",
-            "stop_pressed": "background-color: #b71c1c; color: white; border-color: #9c0d0d;",
-        }
-        
-        # Cache stylesheet to avoid constant updates
-        self._cached_stylesheet = None
-        
-        # Initial update
-        self.update_stylesheet()
-        
-    def set_gpu_available(self, available: bool):
-        """Set whether GPU acceleration is available for current format"""
-        self._gpu_available = available
-        self.update()
-        
-    def enterEvent(self, event):
-        """Handle mouse enter - start animations if GPU available"""
-        self._is_hovered = True
-        if self._gpu_available and "STOP" not in self.text().upper():
-            self._trace_timer.start()
-            self._scanline_timer.start()
-        super().enterEvent(event)
-        
-    def leaveEvent(self, event):
-        """Handle mouse leave - stop animations"""
-        self._is_hovered = False
-        self._trace_timer.stop()
-        self._scanline_timer.stop()
-        self._trace_offset = 0.0
-        self._scanline_offset = 0.0
-        self.update()
-        super().leaveEvent(event)
-        
-    def _update_trace_animation(self):
-        """Update circuit trace animation offset"""
-        self._trace_offset += 0.02  # Speed of trace around border
-        if self._trace_offset > 1.0:
-            self._trace_offset = 0.0
-        self.update()
-        
-    def _update_scanline_animation(self):
-        """Update scanline animation offset"""
-        self._scanline_offset += 2.0  # Pixels per frame
-        if self._scanline_offset > 20.0:  # Reset after pattern repeats
-            self._scanline_offset = 0.0
-        self.update()
-        
-    def paintEvent(self, event):
-        """Custom paint to add GPU effects"""
-        # First, let the default painting happen
-        super().paintEvent(event)
-        
-        # Only add GPU effects when GPU is available and hovered (not in STOP mode)
-        if not self._gpu_available or not self._is_hovered or "STOP" in self.text().upper():
-            return
-            
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        # Draw circuit trace effect - cyan line tracing the border
-        self._draw_circuit_trace(painter)
-        
-        # Draw scanline effect - subtle diagonal pattern
-        self._draw_scanline_overlay(painter)
-        
-        # Draw bolt icon in corner
-        self._draw_bolt_icon(painter)
-        
-        painter.end()
-        
-    def _draw_circuit_trace(self, painter):
-        """Draw the animated circuit trace around the border"""
-        pen = QPen(QColor("#00F3FF"))  # Cyan
-        pen.setWidth(2)
-        painter.setPen(pen)
-        
-        # Calculate perimeter
-        w, h = self.width(), self.height()
-        perimeter = 2 * (w + h) - 16  # Adjust for border radius
-        
-        # Calculate trace position along perimeter
-        trace_pos = self._trace_offset * perimeter
-        trace_length = perimeter * 0.15  # Trace is 15% of perimeter
-        
-        # Draw trace as a segment along the border
-        # Simplify by drawing short line segments
-        margin = 4
-        corner_radius = 8
-        
-        # Convert trace_pos to actual coordinates on border
-        points = self._get_border_points(trace_pos, trace_length, margin, corner_radius)
-        
-        if len(points) >= 2:
-            for i in range(len(points) - 1):
-                painter.drawLine(points[i], points[i + 1])
-                
-    def _get_border_points(self, start_pos, length, margin, radius):
-        """Get points along the border for circuit trace"""
-        w, h = self.width() - margin * 2, self.height() - margin * 2
-        perimeter = 2 * (w + h)
-        
-        points = []
-        pos = start_pos
-        remaining = length
-        
-        while remaining > 0 and len(points) < 50:
-            # Normalize position to perimeter
-            pos = pos % perimeter
-            
-            # Top edge
-            if pos < w:
-                x = margin + pos
-                y = margin
-            # Right edge
-            elif pos < w + h:
-                x = margin + w
-                y = margin + (pos - w)
-            # Bottom edge
-            elif pos < 2 * w + h:
-                x = margin + w - (pos - w - h)
-                y = margin + h
-            # Left edge
-            else:
-                x = margin
-                y = margin + h - (pos - 2 * w - h)
-                
-            points.append(QPoint(int(x), int(y)))
-            pos += 3  # Step size
-            remaining -= 3
-            
-        return points
-        
-    def _draw_scanline_overlay(self, painter):
-        """Draw subtle diagonal scanline pattern"""
-        # Very subtle overlay
-        painter.setOpacity(0.08)
-        pen = QPen(QColor("#00F3FF"))
-        pen.setWidth(1)
-        painter.setPen(pen)
-        
-        # Diagonal lines moving with offset
-        spacing = 10
-        offset = int(self._scanline_offset)
-        
-        for i in range(-self.height(), self.width() + self.height(), spacing):
-            x1 = i + offset
-            y1 = 0
-            x2 = i + self.height() + offset
-            y2 = self.height()
-            painter.drawLine(x1, y1, x2, y2)
-            
-        painter.setOpacity(1.0)
-        
-    def _draw_bolt_icon(self, painter):
-        """Draw small bolt icon that lights up when GPU is active"""
-        # Position in top-right corner
-        icon_size = 10
-        x = self.width() - icon_size - 8
-        y = 6
-        
-        # Draw bolt shape
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor("#00F3FF")))  # Cyan when GPU active
-        
-        # Simple bolt polygon
-        bolt = [
-            QPoint(x + 6, y),
-            QPoint(x + 2, y + 5),
-            QPoint(x + 5, y + 5),
-            QPoint(x + 4, y + 10),
-            QPoint(x + 8, y + 4),
-            QPoint(x + 5, y + 4),
-        ]
-        painter.drawPolygon(bolt)
-        
-    def update_stylesheet(self):
-        """Build stylesheet with CURRENT font values from font_manager"""
-        # Get current font values
-        font_family = FONT_FAMILY_APP_NAME  # Use App Name font as requested
-        font_size = FONT_SIZE_BUTTON
-        
-        # Build stylesheet with font properties included
-        # Check against new text values
-        text_upper = self.text().upper()
-        if "STOP" in text_upper:
-            stylesheet = (
-                f"QPushButton {{ "
-                f"{self.base_style['stop_normal']} "
-                f"font-family: '{font_family}'; "
-                f"font-size: {font_size}px; "
-                f"}} "
-                f"QPushButton:hover {{ {self.base_style['stop_hover']} }} "
-                f"QPushButton:pressed {{ {self.base_style['stop_pressed']} }} "
-                f"QPushButton:disabled {{ background-color: #2196f3; color: #eeeeee; border-color: #bdbdbd; }}"
-            )
-        else:
-            stylesheet = (
-                f"QPushButton {{ "
-                f"{self.base_style['normal']} "
-                f"font-family: '{font_family}'; "
-                f"font-size: {font_size}px; "
-                f"}} "
-                f"QPushButton:hover {{ {self.base_style['hover']} }} "
-                f"QPushButton:pressed {{ {self.base_style['pressed']} }} "
-                f"QPushButton:disabled {{ {self.base_style['disabled']} }}"
-            )
-        
-        # Only update if stylesheet has changed
-        if stylesheet != self._cached_stylesheet:
-            self._cached_stylesheet = stylesheet
-            self.setStyleSheet(stylesheet)
 
 
 # Determine background color based on theme
@@ -387,6 +121,14 @@ COMBOBOX_STYLE = get_combobox_style(is_dark_mode())
 
 # Keep QRangeSlider as an alias for backwards compatibility
 QRangeSlider = TimeRangeSlider
+
+# =============================================================================
+# FEATURE FLAGS FOR SAFE TAB INTEGRATION (Phase 3+ Refactoring)
+# Set to True to use new extracted tab components, False for legacy code
+# =============================================================================
+USE_NEW_IMAGE_TAB = True  # Phase A: ImageTab integration - TESTING
+USE_NEW_VIDEO_TAB = False  # Phase B: VideoTab integration  
+USE_NEW_LOOP_TAB = False   # Phase C: LoopTab integration
 
 
 class CommandPanel(QWidget):
@@ -656,33 +398,13 @@ class CommandPanel(QWidget):
     def update_theme(self, is_dark):
         """Update theme-dependent styles"""
         self.is_dark_mode = is_dark
-        style = get_toggle_style(is_dark)
         combobox_style = get_combobox_style(is_dark)
         
-        # Update all toggle controls
-        toggles = self.findChildren((QCheckBox, QRadioButton))
-        for toggle in toggles:
-            # Only update those that use the custom toggle style
-            if toggle in [
-                getattr(self, 'multiple_qualities', None),
-                getattr(self, 'multiple_resize', None),
-                getattr(self, 'multiple_video_variants', None),
-                getattr(self, 'multiple_video_qualities', None),
-                getattr(self, 'enable_time_cutting', None),
-                getattr(self, 'enable_retime', None),
-                getattr(self, 'gif_multiple_resize', None),
-                getattr(self, 'gif_enable_time_cutting', None),
-                getattr(self, 'gif_enable_retime', None),
-                getattr(self, 'gif_ffmpeg_variants', None),
-                getattr(self, 'image_auto_resize_checkbox', None),
-                getattr(self, 'video_auto_resize_checkbox', None),
-                getattr(self, 'gif_auto_resize_checkbox', None),
-                getattr(self, 'ffmpeg_gif_blur', None),
-                getattr(self, 'output_mode_same', None),
-                getattr(self, 'output_mode_nested', None),
-                getattr(self, 'output_mode_custom', None)
-            ]:
-                toggle.setStyleSheet(style)
+        # Update all ThemedCheckBox controls automatically
+        from client.gui.custom_widgets import ThemedCheckBox
+        themed_checkboxes = self.findChildren(ThemedCheckBox)
+        for checkbox in themed_checkboxes:
+            checkbox.update_theme(is_dark)
         
         # Update all ComboBox controls
         comboboxes = self.findChildren(QComboBox)
@@ -1324,6 +1046,62 @@ class CommandPanel(QWidget):
         
     def create_image_tab(self):
         """Create image conversion options tab"""
+        # Feature flag: Use new extracted ImageTab component
+        if USE_NEW_IMAGE_TAB:
+            return self._create_image_tab_new()
+        return self._create_image_tab_legacy()
+    
+    def _create_image_tab_new(self):
+        """Create image tab using new extracted ImageTab component"""
+        from client.gui.tabs import ImageTab
+        
+        # Create new ImageTab instance
+        self._image_tab_component = ImageTab(
+            parent=self,
+            focus_callback=self._focus_active_tab
+        )
+        
+        # Sync references for compatibility with existing code
+        # These aliases allow existing code to access controls without modification
+        self.image_format = self._image_tab_component.format
+        self.image_quality = self._image_tab_component.quality
+        self.image_quality_label = self._image_tab_component.quality_label
+        self.image_quality_row_label = self._image_tab_component.quality_row_label
+        self.multiple_qualities = self._image_tab_component.multiple_qualities
+        self.quality_variants = self._image_tab_component.quality_variants
+        self.quality_variants_label = self._image_tab_component.quality_variants_label
+        self.image_max_size_spinbox = self._image_tab_component.max_size_spinbox
+        self.image_max_size_label = self._image_tab_component.max_size_label
+        self.image_auto_resize_checkbox = self._image_tab_component.auto_resize_checkbox
+        self.image_resize_mode = self._image_tab_component.resize_mode
+        self.resize_value = self._image_tab_component.resize_value
+        self.resize_value_label = self._image_tab_component.resize_value_label
+        self.multiple_resize = self._image_tab_component.multiple_resize
+        self.resize_variants = self._image_tab_component.resize_variants
+        self.resize_variants_label = self._image_tab_component.resize_variants_label
+        self.image_rotation_angle = self._image_tab_component.rotation_angle
+        self.image_resize_container = self._image_tab_component.resize_container
+        self.image_rotate_container = self._image_tab_component.rotate_container
+        self.image_format_group = self._image_tab_component.format_group
+        self.image_transform_group = self._image_tab_component.transform_group
+        
+        # Create side buttons (still managed by CommandPanel)
+        self.image_side_buttons = self._create_transform_side_buttons('image')
+        self.image_side_buttons.selectionChanged.connect(
+            lambda mode: self._image_tab_component.set_transform_mode(mode)
+        )
+        
+        # Create presets section (managed by CommandPanel, added to format group)
+        self.image_presets_section = self._create_presets_section("image")
+        self._image_tab_component.format_group.add_row(self.image_presets_section)
+        
+        # Store mode value for compatibility
+        self.image_size_mode_value = "max_size"
+        
+        return self._image_tab_component
+    
+    def _create_image_tab_legacy(self):
+        """Create image tab using legacy inline code (original implementation)"""
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1365,9 +1143,8 @@ class CommandPanel(QWidget):
         self.image_format_group.add_row(self.image_max_size_label, self.image_max_size_spinbox)
         
         # Auto-resize checkbox
-        self.image_auto_resize_checkbox = QCheckBox("Auto-resize")
+        self.image_auto_resize_checkbox = ThemedCheckBox("Auto-resize")
         self.image_auto_resize_checkbox.setChecked(True)
-        self.image_auto_resize_checkbox.setStyleSheet(TOGGLE_STYLE)
         self.image_auto_resize_checkbox.setToolTip(
             "Change the resolution in pixels (width×height) to match desired file size in MB."
         )
@@ -1381,9 +1158,8 @@ class CommandPanel(QWidget):
 
 
         # Multiple qualities option
-        self.multiple_qualities = QCheckBox("Multiple qualities")
+        self.multiple_qualities = ThemedCheckBox("Multiple qualities")
         self.multiple_qualities.toggled.connect(self.toggle_quality_mode)
-        self.multiple_qualities.setStyleSheet(TOGGLE_STYLE)
         self.image_format_group.add_row(self.multiple_qualities)
         
         # Quality settings
@@ -1449,9 +1225,8 @@ class CommandPanel(QWidget):
         self.image_resize_mode.currentTextChanged.connect(self.on_image_resize_ui_changed)
         resize_layout.addWidget(self.image_resize_mode)
         
-        self.multiple_resize = QCheckBox("Multiple resize variants")
+        self.multiple_resize = ThemedCheckBox("Multiple resize variants")
         self.multiple_resize.toggled.connect(self.toggle_resize_mode)
-        self.multiple_resize.setStyleSheet(TOGGLE_STYLE)
         resize_layout.addWidget(self.multiple_resize)
         
         # Single value row
@@ -1534,9 +1309,8 @@ class CommandPanel(QWidget):
         codec_group.add_row(self.video_max_size_label, self.video_max_size_spinbox)
 
         # Auto-resize checkbox (for Max Size mode)
-        self.video_auto_resize_checkbox = QCheckBox("Auto-resize")
+        self.video_auto_resize_checkbox = ThemedCheckBox("Auto-resize")
         self.video_auto_resize_checkbox.setChecked(True)
-        self.video_auto_resize_checkbox.setStyleSheet(TOGGLE_STYLE)
         self.video_auto_resize_checkbox.setToolTip(
             "Change the resolution in pixels (width×height) to match desired file size in MB."
         )
@@ -1567,9 +1341,8 @@ class CommandPanel(QWidget):
         quality_layout.addWidget(self.video_quality_value)
         
         # Multiple video quality variants option - ABOVE slider
-        self.multiple_video_qualities = QCheckBox("Multiple quality variants")
+        self.multiple_video_qualities = ThemedCheckBox("Multiple quality variants")
         self.multiple_video_qualities.toggled.connect(self.toggle_video_quality_mode)
-        self.multiple_video_qualities.setStyleSheet(TOGGLE_STYLE)
         codec_group.add_row(self.multiple_video_qualities)
         
         # Quality controls
@@ -1628,9 +1401,8 @@ class CommandPanel(QWidget):
         self.video_resize_mode.currentTextChanged.connect(self.on_video_resize_ui_changed)
         resize_layout.addWidget(self.video_resize_mode)
         
-        self.multiple_video_variants = QCheckBox("Multiple size variants")
+        self.multiple_video_variants = ThemedCheckBox("Multiple size variants")
         self.multiple_video_variants.toggled.connect(self.toggle_video_variant_mode)
-        self.multiple_video_variants.setStyleSheet(TOGGLE_STYLE)
         resize_layout.addWidget(self.multiple_video_variants)
         
         # Single value row
@@ -1678,8 +1450,7 @@ class CommandPanel(QWidget):
         time_layout.setSpacing(12)
         
         # Time range row
-        self.enable_time_cutting = QCheckBox("Time range")
-        self.enable_time_cutting.setStyleSheet(TOGGLE_STYLE)
+        self.enable_time_cutting = ThemedCheckBox("Time range")
         self.enable_time_cutting.toggled.connect(self.toggle_time_cutting)
         
         self.time_range_slider = TimeRangeSlider(is_dark_mode=self.is_dark_mode)
@@ -1696,8 +1467,7 @@ class CommandPanel(QWidget):
         time_layout.addLayout(time_range_row)
         
         # Retime row
-        self.enable_retime = QCheckBox("Retime")
-        self.enable_retime.setStyleSheet(TOGGLE_STYLE)
+        self.enable_retime = ThemedCheckBox("Retime")
         self.enable_retime.toggled.connect(self.toggle_retime)
         
         self.retime_slider = QSlider(Qt.Orientation.Horizontal)
@@ -1760,9 +1530,8 @@ class CommandPanel(QWidget):
         self.ffmpeg_group.add_row(self.gif_max_size_label, self.gif_max_size_spinbox)
         
         # Auto-resize checkbox
-        self.gif_auto_resize_checkbox = QCheckBox("Auto-resize")
+        self.gif_auto_resize_checkbox = ThemedCheckBox("Auto-resize")
         self.gif_auto_resize_checkbox.setChecked(True)
-        self.gif_auto_resize_checkbox.setStyleSheet(TOGGLE_STYLE)
         self.gif_auto_resize_checkbox.setVisible(False)
         self.ffmpeg_group.add_row(self.gif_auto_resize_checkbox)
 
@@ -1773,8 +1542,7 @@ class CommandPanel(QWidget):
 
         # -- GIF Specific Widgets --
         
-        self.gif_ffmpeg_variants = QCheckBox("Multiple Variants (FPS, Colors, Qualities)")
-        self.gif_ffmpeg_variants.setStyleSheet(TOGGLE_STYLE)
+        self.gif_ffmpeg_variants = ThemedCheckBox("Multiple Variants (FPS, Colors, Qualities)")
         self.gif_ffmpeg_variants.toggled.connect(self.toggle_gif_ffmpeg_variants)
         self.ffmpeg_group.add_row(self.gif_ffmpeg_variants)
         
@@ -1832,15 +1600,13 @@ class CommandPanel(QWidget):
         self.ffmpeg_group.add_row(self.ffmpeg_gif_dither_variants_label, self.ffmpeg_gif_dither_variants)
         
         # Blur
-        self.ffmpeg_gif_blur = QCheckBox("Reduce banding")
-        self.ffmpeg_gif_blur.setStyleSheet(TOGGLE_STYLE)
+        self.ffmpeg_gif_blur = ThemedCheckBox("Reduce banding")
         self.ffmpeg_group.add_row(self.ffmpeg_gif_blur)
 
         # -- WebM Specific Widgets (Hidden by default) --
         
         # WebM multi-variant toggle
-        self.loop_webm_variants = QCheckBox("Multiple quality variants")
-        self.loop_webm_variants.setStyleSheet(TOGGLE_STYLE)
+        self.loop_webm_variants = ThemedCheckBox("Multiple quality variants")
         self.loop_webm_variants.toggled.connect(self.on_loop_format_changed)
         self.loop_webm_variants.setVisible(False)
         self.ffmpeg_group.add_row(self.loop_webm_variants)
@@ -1909,8 +1675,7 @@ class CommandPanel(QWidget):
         self.gif_resize_mode.currentTextChanged.connect(self.on_gif_resize_ui_changed)
         resize_layout.addWidget(self.gif_resize_mode)
         
-        self.gif_multiple_resize = QCheckBox("Multiple size variants")
-        self.gif_multiple_resize.setStyleSheet(TOGGLE_STYLE)
+        self.gif_multiple_resize = ThemedCheckBox("Multiple size variants")
         self.gif_multiple_resize.toggled.connect(self.toggle_gif_resize_variant_mode)
         resize_layout.addWidget(self.gif_multiple_resize)
         
@@ -1954,8 +1719,7 @@ class CommandPanel(QWidget):
         time_layout.setContentsMargins(0, 0, 0, 0)
         time_layout.setSpacing(12)
         
-        self.gif_enable_time_cutting = QCheckBox("Time range")
-        self.gif_enable_time_cutting.setStyleSheet(TOGGLE_STYLE)
+        self.gif_enable_time_cutting = ThemedCheckBox("Time range")
         self.gif_enable_time_cutting.toggled.connect(self.toggle_gif_time_cutting)
         
         self.gif_time_range_slider = TimeRangeSlider(is_dark_mode=self.is_dark_mode)
@@ -1970,8 +1734,7 @@ class CommandPanel(QWidget):
         time_row.addWidget(self.gif_time_range_slider, 1)
         time_layout.addLayout(time_row)
         
-        self.gif_enable_retime = QCheckBox("Retime")
-        self.gif_enable_retime.setStyleSheet(TOGGLE_STYLE)
+        self.gif_enable_retime = ThemedCheckBox("Retime")
         self.gif_enable_retime.toggled.connect(self.toggle_gif_retime)
         
         self.gif_retime_slider = QSlider(Qt.Orientation.Horizontal)
@@ -2340,6 +2103,62 @@ class CommandPanel(QWidget):
                     'multiple_gif_variants': bool(gif_variants),
                 })
             
+        return params
+    
+    # --- Mediator-Shell API Alias ---
+    def get_parameters(self) -> dict:
+        """
+        Get current conversion parameters.
+        
+        Mediator-Shell API: This is the primary method for MainWindow
+        to retrieve configuration from the CommandPanel.
+        
+        Returns:
+            dict: Conversion parameters including type, format, quality, etc.
+        """
+        return self.get_conversion_params()
+    
+    def get_execution_payload(self) -> dict:
+        """
+        Get complete execution payload with all variants and rotation included.
+        
+        This method gathers ALL parameters needed for conversion, so MainWindow
+        does not need to do any additional parameter gathering.
+        
+        Returns:
+            dict: Complete conversion payload ready for ConversionEngine
+        """
+        params = self.get_conversion_params()
+        current_tab = self.tabs.currentIndex()
+        
+        # Add resize variants based on active tab
+        if current_tab == 0:  # Images Tab
+            resize_variants = self.get_resize_values()
+            if resize_variants:
+                params['resize_variants'] = resize_variants
+            # Add rotation
+            if hasattr(self, 'image_rotation_angle'):
+                rotation = self.image_rotation_angle.currentText()
+                if rotation != "No rotation":
+                    params['rotation_angle'] = rotation
+                    
+        elif current_tab == 1:  # Videos Tab
+            video_variants = self.get_video_variant_values()
+            if video_variants:
+                params['video_variants'] = video_variants
+            # Add rotation
+            if hasattr(self, 'video_rotation_angle'):
+                rotation = self.video_rotation_angle.currentText()
+                if rotation != "No rotation":
+                    params['rotation_angle'] = rotation
+                    
+        elif current_tab == 2:  # GIFs/Loop Tab
+            # Add rotation
+            if hasattr(self, 'gif_rotation_angle'):
+                rotation = self.gif_rotation_angle.currentText()
+                if rotation != "No rotation":
+                    params['gif_rotation_angle'] = rotation
+        
         return params
         
     def start_conversion(self):
