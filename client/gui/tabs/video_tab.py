@@ -7,7 +7,7 @@ This tab handles video codec, quality, resize, rotation, and time settings.
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, 
-    QLineEdit, QSizePolicy
+    QSizePolicy
 )
 from PyQt6.QtCore import Qt
 
@@ -16,7 +16,8 @@ from client.gui.command_group import CommandGroup
 from client.gui.custom_spinbox import CustomSpinBox
 from client.gui.custom_widgets import (
     CustomComboBox, RotationButtonRow, ThemedCheckBox,
-    CustomTargetSizeSpinBox, VideoCodecSelector, TimeRangeSlider
+    CustomTargetSizeSpinBox, VideoCodecSelector, TimeRangeSlider,
+    UnifiedVariantInput
 )
 from client.gui.theme import get_combobox_style
 
@@ -121,7 +122,7 @@ class VideoTab(BaseTab):
         self.codec_group.add_row(self.quality_label, quality_layout)
         
         # --- Quality variants ---
-        self.quality_variants = QLineEdit()
+        self.quality_variants = UnifiedVariantInput()
         self.quality_variants.setPlaceholderText("e.g., 25,40,70 (quality values 0-100)")
         self.quality_variants.setText("15,23,31")
         self.quality_variants.setVisible(False)
@@ -177,7 +178,7 @@ class VideoTab(BaseTab):
         # Variants row
         variants_row = QHBoxLayout()
         self.size_variants_label = QLabel("Size variants")
-        self.size_variants = QLineEdit()
+        self.size_variants = UnifiedVariantInput()
         self.size_variants.setPlaceholderText("e.g., 480,720,1080 or 25%,50%,75%")
         self.size_variants.setText("480,720,1280")
         variants_row.addWidget(self.size_variants_label)
@@ -253,6 +254,31 @@ class VideoTab(BaseTab):
     
     def get_params(self) -> dict:
         """Collect video conversion parameters from UI."""
+        # Map resize_mode + resize_value to current_resize format
+        resize_mode = self.resize_mode.currentText()
+        resize_value = self.resize_value.value()
+        
+        if resize_mode == "No resize":
+            current_resize = None
+        elif resize_mode == "By longer edge (pixels)":
+            current_resize = f"L{resize_value}"
+        elif resize_mode == "By ratio (percent)":
+            current_resize = f"{resize_value}%"
+        else:  # "By width (pixels)"
+            current_resize = str(resize_value)
+        
+        # Format resize variants based on resize_mode
+        raw_variants = self._parse_variants(self.size_variants.text())
+        formatted_variants = []
+        if raw_variants:
+            for variant in raw_variants:
+                if resize_mode == "By longer edge (pixels)":
+                    formatted_variants.append(f"L{variant}")
+                elif resize_mode == "By ratio (percent)":
+                    formatted_variants.append(f"{variant}%")
+                else:  # "By width (pixels)" or "No resize"
+                    formatted_variants.append(str(variant))
+        
         params = {
             'type': 'video',
             'codec': self.codec.currentText(),
@@ -261,14 +287,15 @@ class VideoTab(BaseTab):
             'quality_variants': self._parse_variants(self.quality_variants.text()),
             'max_size_mb': self.max_size_spinbox.value() if self.max_size_spinbox.isVisible() else None,
             'auto_resize': self.auto_resize_checkbox.isChecked(),
-            'resize_mode': self.resize_mode.currentText(),
-            'resize_value': self.resize_value.value(),
-            'multiple_variants': self.multiple_variants.isChecked(),
-            'size_variants': self._parse_variants(self.size_variants.text()),
+            'current_resize': current_resize,
+            'resize_mode': resize_mode,
+            'resize_value': resize_value,
+            'multiple_size_variants': self.multiple_variants.isChecked(),
+            'video_variants': formatted_variants,
             'rotation_angle': self.rotation_angle.currentText(),
             'enable_time_cutting': self.enable_time_cutting.isChecked(),
-            'time_start': self.time_range_slider.startValue() if self.enable_time_cutting.isChecked() else 0.0,
-            'time_end': self.time_range_slider.endValue() if self.enable_time_cutting.isChecked() else 1.0,
+            'time_start': self.time_range_slider.start_value() if self.enable_time_cutting.isChecked() else 0.0,
+            'time_end': self.time_range_slider.end_value() if self.enable_time_cutting.isChecked() else 1.0,
             'retime_enabled': self.enable_retime.isChecked(),
             'retime_speed': self.retime_slider.value() / 10.0 if self.enable_retime.isChecked() else 1.0,
         }
@@ -277,9 +304,10 @@ class VideoTab(BaseTab):
     def update_theme(self, is_dark: bool):
         """Apply theme styling to all elements."""
         self._is_dark_theme = is_dark
-        global COMBOBOX_STYLE
-        COMBOBOX_STYLE = get_combobox_style(is_dark)
-        self.resize_mode.setStyleSheet(COMBOBOX_STYLE)
+        
+        # Update CustomComboBox instance
+        if hasattr(self.resize_mode, 'update_theme'):
+            self.resize_mode.update_theme(is_dark)
         
         # Update checkboxes
         for checkbox in [self.multiple_qualities, self.auto_resize_checkbox, 
@@ -296,16 +324,20 @@ class VideoTab(BaseTab):
         is_max_size = (mode == "Max Size")
         is_manual = (mode == "Manual")
         
-        # Max size controls
+        # Max size controls (only these visible in Max Size mode)
         self.max_size_label.setVisible(is_max_size)
         self.max_size_spinbox.setVisible(is_max_size)
         self.auto_resize_checkbox.setVisible(is_max_size)
         
-        # Quality controls
-        show_quality = is_max_size or is_manual
-        self.quality_label.setVisible(show_quality and not self.multiple_qualities.isChecked())
-        self.quality.setVisible(show_quality and not self.multiple_qualities.isChecked())
-        self.quality_value.setVisible(show_quality and not self.multiple_qualities.isChecked())
+        # Quality controls (only visible in Manual mode, hidden in Max Size)
+        self.quality_label.setVisible(is_manual and not self.multiple_qualities.isChecked())
+        self.quality.setVisible(is_manual and not self.multiple_qualities.isChecked())
+        self.quality_value.setVisible(is_manual and not self.multiple_qualities.isChecked())
+        
+        # Multiple qualities checkbox (only visible in Manual mode)
+        self.multiple_qualities.setVisible(is_manual)
+        self.quality_variants_label.setVisible(is_manual and self.multiple_qualities.isChecked())
+        self.quality_variants.setVisible(is_manual and self.multiple_qualities.isChecked())
     
     def set_transform_mode(self, mode: str):
         """Set which transform section is visible (resize, rotate, or time)."""

@@ -99,8 +99,8 @@ class MainWindow(QMainWindow):
         # Conversion engine
         self.conversion_engine = None
         
-        # Theme management
-        self.theme_manager = ThemeManager()
+        # Theme management (Singleton pattern)
+        self.theme_manager = ThemeManager.instance()
         
         # Dialog management (Mediator-Shell: centralized dialogs)
         self.dialogs = DialogManager(self, self.theme_manager)
@@ -162,7 +162,7 @@ class MainWindow(QMainWindow):
         self.content_container.setObjectName("ContentFrame")
         content_layout = QVBoxLayout(self.content_container)
         content_layout.setSpacing(5)
-        content_layout.setContentsMargins(5, 5, 5, 5)
+        content_layout.setContentsMargins(5, 0, 5, 5)  # No top margin to avoid gap with title bar
         
         # Create unified control bar (File Buttons | Preset | Lab)
         self.create_control_bar(content_layout)
@@ -263,7 +263,13 @@ class MainWindow(QMainWindow):
             self.command_panel.set_lab_mode_active(False)
             self.command_panel.set_top_bar_preset_mode(True)
         
-        # 4. Show Preset Overlay
+        # 4. Show Preset Overlay AFTER panel animation completes
+        # Delay to allow drop area to expand to full width first
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(350, self._show_preset_gallery_delayed)
+    
+    def _show_preset_gallery_delayed(self):
+        """Show preset gallery after panel animation delay."""
         if hasattr(self, 'drag_drop_area'):
             self.drag_drop_area.set_view_mode(ViewMode.PRESETS)
     

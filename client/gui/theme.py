@@ -24,6 +24,7 @@ from client.utils.font_manager import (
     FONT_SIZE_BASE, FONT_SIZE_TITLE, FONT_SIZE_BUTTON
 )
 from client.gui.theme_variables import DARK_THEME, LIGHT_THEME
+from PyQt6.QtGui import QColor
 
 
 class Theme:
@@ -33,6 +34,28 @@ class Theme:
     This class provides a single source of truth for all visual constants
     including colors, fonts, spacing, and border radii.
     """
+    
+    # ============================================
+    # COLOR PRIMITIVES & HELPERS
+    # ============================================
+    @classmethod
+    def to_qcolor(cls, key: str) -> QColor:
+        """
+        Get a QColor object for the given theme key.
+        Useful for custom painting in paintEvent().
+        """
+        hex_color = cls.color(key)
+        return QColor(hex_color)
+
+    @classmethod
+    def color_with_alpha(cls, key: str, alpha: float) -> str:
+        """
+        Get an RGBA string for the given theme key with specified alpha (0.0 - 1.0).
+        Useful for QSS stylesheets (e.g., 'rgba(255, 0, 0, 0.5)').
+        """
+        color = cls.to_qcolor(key)
+        color.setAlphaF(max(0.0, min(1.0, alpha)))
+        return f"rgba({color.red()}, {color.green()}, {color.blue()}, {color.alphaF()})"
     
     # ============================================
     # FONTS (Single Source)

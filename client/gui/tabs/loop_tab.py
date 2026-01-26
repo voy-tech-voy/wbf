@@ -7,7 +7,7 @@ This tab handles GIF and WebM loop conversion with format-specific settings.
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, 
-    QLineEdit, QSizePolicy
+    QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
@@ -16,7 +16,8 @@ from client.gui.command_group import CommandGroup
 from client.gui.custom_spinbox import CustomSpinBox
 from client.gui.custom_widgets import (
     CustomComboBox, RotationButtonRow, ThemedCheckBox,
-    CustomTargetSizeSpinBox, LoopFormatSelector, TimeRangeSlider
+    CustomTargetSizeSpinBox, LoopFormatSelector, TimeRangeSlider,
+    UnifiedVariantInput
 )
 from client.gui.theme import get_combobox_style
 
@@ -112,7 +113,7 @@ class LoopTab(BaseTab):
         self.settings_group.add_row(self.gif_fps_label, self.gif_fps)
         
         # FPS Variants
-        self.gif_fps_variants = QLineEdit()
+        self.gif_fps_variants = UnifiedVariantInput()
         self.gif_fps_variants.setPlaceholderText("e.g., 10,15,24")
         self.gif_fps_variants.setVisible(False)
         self.gif_fps_variants_label = QLabel("FPS variants")
@@ -127,7 +128,7 @@ class LoopTab(BaseTab):
         self.settings_group.add_row(self.gif_colors_label, self.gif_colors)
         
         # Colors Variants
-        self.gif_colors_variants = QLineEdit()
+        self.gif_colors_variants = UnifiedVariantInput()
         self.gif_colors_variants.setPlaceholderText("e.g., 64,128,256")
         self.gif_colors_variants.setVisible(False)
         self.gif_colors_variants_label = QLabel("Colors variants")
@@ -150,7 +151,7 @@ class LoopTab(BaseTab):
         self.settings_group.add_row(self.gif_dither_label, dither_layout)
         
         # Dither Variants
-        self.gif_dither_variants = QLineEdit()
+        self.gif_dither_variants = UnifiedVariantInput()
         self.gif_dither_variants.setPlaceholderText("e.g., 0,3,5")
         self.gif_dither_variants.setVisible(False)
         self.gif_dither_variants_label = QLabel("Quality variants (0-5)")
@@ -186,7 +187,7 @@ class LoopTab(BaseTab):
         self.settings_group.add_row(self.webm_quality_label, webm_quality_layout)
         
         # WebM Quality Variants
-        self.webm_quality_variants = QLineEdit()
+        self.webm_quality_variants = UnifiedVariantInput()
         self.webm_quality_variants.setPlaceholderText("e.g., 20,30,40")
         self.webm_quality_variants.setVisible(False)
         self.webm_quality_variants_label = QLabel("Quality variants")
@@ -238,7 +239,7 @@ class LoopTab(BaseTab):
         
         variants_row = QHBoxLayout()
         self.resize_variants_label = QLabel("Size variants")
-        self.resize_variants = QLineEdit()
+        self.resize_variants = UnifiedVariantInput()
         self.resize_variants.setPlaceholderText("e.g., 480,720,1080")
         self.resize_variants.setText("480,720,1080")
         variants_row.addWidget(self.resize_variants_label)
@@ -303,20 +304,49 @@ class LoopTab(BaseTab):
         # Initially show resize, hide others
         self.rotate_container.setVisible(False)
         self.time_container.setVisible(False)
+        
+        # Call _on_format_changed initially to set correct GIF/WebM visibility
+        self._on_format_changed(self.format_selector.currentText())
     
     def get_params(self) -> dict:
         """Collect loop conversion parameters from UI."""
         is_gif = self.format_selector.currentText() == "GIF"
+        
+        # Map resize_mode + resize_value to current_resize format
+        resize_mode = self.resize_mode.currentText()
+        resize_value = self.resize_value.value()
+        
+        if resize_mode == "No resize":
+            current_resize = None
+        elif resize_mode == "By longer edge (pixels)":
+            current_resize = f"L{resize_value}"
+        elif resize_mode == "By ratio (percent)":
+            current_resize = f"{resize_value}%"
+        else:  # "By width (pixels)"
+            current_resize = str(resize_value)
+        
+        # Format resize variants based on resize_mode
+        raw_variants = self._parse_variants(self.resize_variants.text())
+        formatted_variants = []
+        if raw_variants:
+            for variant in raw_variants:
+                if resize_mode == "By longer edge (pixels)":
+                    formatted_variants.append(f"L{variant}")
+                elif resize_mode == "By ratio (percent)":
+                    formatted_variants.append(f"{variant}%")
+                else:  # "By width (pixels)" or "No resize"
+                    formatted_variants.append(str(variant))
         
         params = {
             'type': 'loop',
             'loop_format': self.format_selector.currentText(),
             'max_size_mb': self.max_size_spinbox.value() if self.max_size_spinbox.isVisible() else None,
             'auto_resize': self.auto_resize_checkbox.isChecked(),
-            'resize_mode': self.resize_mode.currentText(),
-            'resize_value': self.resize_value.value(),
+            'current_resize': current_resize,
+            'resize_mode': resize_mode,
+            'resize_value': resize_value,
             'multiple_resize': self.multiple_resize.isChecked(),
-            'resize_variants': self._parse_variants(self.resize_variants.text()),
+            'resize_variants': formatted_variants,
             'rotation_angle': self.rotation_angle.currentText(),
             'enable_time_cutting': self.enable_time_cutting.isChecked(),
             'time_start': self.time_range_slider.startValue() if self.enable_time_cutting.isChecked() else 0.0,
@@ -348,9 +378,12 @@ class LoopTab(BaseTab):
     def update_theme(self, is_dark: bool):
         """Apply theme styling to all elements."""
         self._is_dark_theme = is_dark
-        global COMBOBOX_STYLE
-        COMBOBOX_STYLE = get_combobox_style(is_dark)
-        self.resize_mode.setStyleSheet(COMBOBOX_STYLE)
+        
+        # Update all CustomComboBox instances
+        comboboxes = [self.gif_fps, self.gif_colors, self.resize_mode]
+        for combobox in comboboxes:
+            if hasattr(combobox, 'update_theme'):
+                combobox.update_theme(is_dark)
         
         # Update all checkboxes
         checkboxes = [
@@ -368,10 +401,40 @@ class LoopTab(BaseTab):
     def set_mode(self, mode: str):
         """Set the size mode (Max Size, Presets, Manual)."""
         is_max_size = (mode == "Max Size")
+        is_manual = (mode == "Manual")
         
+        # Max size controls (only these visible in Max Size mode)
         self.max_size_label.setVisible(is_max_size)
         self.max_size_spinbox.setVisible(is_max_size)
         self.auto_resize_checkbox.setVisible(is_max_size)
+        
+        # GIF controls (only visible in Manual mode)
+        self.gif_fps_label.setVisible(is_manual)
+        self.gif_fps.setVisible(is_manual)
+        self.gif_fps_variants_label.setVisible(is_manual and self.gif_variants_checkbox.isChecked())
+        self.gif_fps_variants.setVisible(is_manual and self.gif_variants_checkbox.isChecked())
+        
+        self.gif_colors_label.setVisible(is_manual)
+        self.gif_colors.setVisible(is_manual)
+        self.gif_colors_variants_label.setVisible(is_manual and self.gif_variants_checkbox.isChecked())
+        self.gif_colors_variants.setVisible(is_manual and self.gif_variants_checkbox.isChecked())
+        
+        self.gif_dither_label.setVisible(is_manual)
+        self.gif_dither_slider.setVisible(is_manual)
+        self.gif_dither_value.setVisible(is_manual)
+        self.gif_dither_variants_label.setVisible(is_manual and self.gif_variants_checkbox.isChecked())
+        self.gif_dither_variants.setVisible(is_manual and self.gif_variants_checkbox.isChecked())
+        
+        self.gif_blur.setVisible(is_manual)
+        self.gif_variants_checkbox.setVisible(is_manual)
+        
+        # WebM controls (only visible in Manual mode)
+        self.webm_quality_label.setVisible(is_manual)
+        self.webm_quality.setVisible(is_manual)
+        self.webm_quality_value.setVisible(is_manual)
+        self.webm_quality_variants_label.setVisible(is_manual and self.webm_variants_checkbox.isChecked())
+        self.webm_quality_variants.setVisible(is_manual and self.webm_variants_checkbox.isChecked())
+        self.webm_variants_checkbox.setVisible(is_manual)
     
     def set_transform_mode(self, mode: str):
         """Set which transform section is visible."""
@@ -382,6 +445,38 @@ class LoopTab(BaseTab):
     def current_format(self) -> str:
         """Get current format (GIF or WebM)."""
         return self.format_selector.currentText()
+    
+    def _on_format_changed(self, format_name: str):
+        """Handle format change between GIF and WebM."""
+        is_gif = (format_name == "GIF")
+        
+        # Show/hide GIF controls
+        self.gif_fps_label.setVisible(is_gif)
+        self.gif_fps.setVisible(is_gif)
+        self.gif_fps_variants_label.setVisible(is_gif and self.gif_variants_checkbox.isChecked())
+        self.gif_fps_variants.setVisible(is_gif and self.gif_variants_checkbox.isChecked())
+        
+        self.gif_colors_label.setVisible(is_gif)
+        self.gif_colors.setVisible(is_gif)
+        self.gif_colors_variants_label.setVisible(is_gif and self.gif_variants_checkbox.isChecked())
+        self.gif_colors_variants.setVisible(is_gif and self.gif_variants_checkbox.isChecked())
+        
+        self.gif_dither_label.setVisible(is_gif)
+        self.gif_dither_slider.setVisible(is_gif)
+        self.gif_dither_value.setVisible(is_gif)
+        self.gif_dither_variants_label.setVisible(is_gif and self.gif_variants_checkbox.isChecked())
+        self.gif_dither_variants.setVisible(is_gif and self.gif_variants_checkbox.isChecked())
+        
+        self.gif_blur.setVisible(is_gif)
+        self.gif_variants_checkbox.setVisible(is_gif)
+        
+        # Show/hide WebM controls
+        self.webm_quality_label.setVisible(not is_gif)
+        self.webm_quality.setVisible(not is_gif)
+        self.webm_quality_value.setVisible(not is_gif)
+        self.webm_quality_variants_label.setVisible(not is_gif and self.webm_variants_checkbox.isChecked())
+        self.webm_quality_variants.setVisible(not is_gif and self.webm_variants_checkbox.isChecked())
+        self.webm_variants_checkbox.setVisible(not is_gif)
     
     # -------------------------------------------------------------------------
     # PRIVATE METHODS

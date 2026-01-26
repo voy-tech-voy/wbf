@@ -118,12 +118,20 @@ class ThemedCheckBox(QCheckBox):
     
     Style: Tesla-style toggle switch (32x18px pill shape).
     Use this instead of raw QCheckBox for consistent theming across the app.
-    Supports automatic dark/light mode switching via update_theme().
+    Automatically connects to ThemeManager for theme updates.
     """
     
     def __init__(self, text="", parent=None):
         super().__init__(text, parent)
         self._is_dark = True
+        
+        # Connect to ThemeManager singleton for automatic theme updates
+        from client.gui.theme_manager import ThemeManager
+        theme_manager = ThemeManager.instance()
+        theme_manager.theme_changed.connect(self.update_theme)
+        
+        # Set initial theme state
+        self._is_dark = theme_manager.is_dark_mode()
         self._apply_style()
     
     def update_theme(self, is_dark: bool):
@@ -139,14 +147,17 @@ class ThemedCheckBox(QCheckBox):
         text_color = Theme.text()
         border_dim = Theme.border()
         success = Theme.success()
-        hover_border = "#555555" if self._is_dark else "#999999"
+        hover_border = Theme.border_focus()  # Use theme instead of hardcoded
+        
+        # Use color_with_alpha for checked:hover state (slightly darker green)
+        success_hover = Theme.color_with_alpha('accent_success', 0.8)
         
         self.setStyleSheet(f"""
             QCheckBox {{
                 color: {text_color};
                 spacing: 8px;
                 font-family: '{Theme.FONT_BODY}';
-                font-size: {Theme.FONT_SIZE_BASE}px;
+                font-size: {Theme.FONT_SIZE_XL}px;
             }}
             QCheckBox::indicator {{
                 width: 32px;
@@ -165,7 +176,7 @@ class ThemedCheckBox(QCheckBox):
                 border: 1px solid {hover_border};
             }}
             QCheckBox::indicator:checked:hover {{
-                background-color: #45a049;
+                background-color: {success_hover};
             }}
             QCheckBox:disabled {{
                 color: {Theme.text_muted()};
@@ -175,6 +186,85 @@ class ThemedCheckBox(QCheckBox):
                 border-color: {Theme.border()};
             }}
         """)
+
+
+class UnifiedVariantInput(QLineEdit):
+    """
+    Unified themed input field for numeric variant values (quality, FPS, colors, sizes).
+    
+    Features:
+    - Auto-connects to ThemeManager for automatic theme updates
+    - Validates input to allow only numbers, commas, and spaces
+    - Consistent styling across all tabs
+    - Placeholder text support
+    
+    Usage:
+        input = UnifiedVariantInput()
+        input.setPlaceholderText("e.g., 10, 20, 30")
+        input.setText("40, 60, 80")
+    """
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._is_dark = True
+        
+        # Connect to ThemeManager singleton for automatic theme updates
+        from client.gui.theme_manager import ThemeManager
+        theme_manager = ThemeManager.instance()
+        theme_manager.theme_changed.connect(self.update_theme)
+        
+        # Set initial theme state
+        self._is_dark = theme_manager.is_dark_mode()
+        
+        # Set up input validation
+        from PyQt6.QtGui import QRegularExpressionValidator
+        from PyQt6.QtCore import QRegularExpression
+        # Allow: digits, commas, spaces, decimal points, and percent signs
+        validator = QRegularExpressionValidator(QRegularExpression(r"[0-9,.\s%]*"))
+        self.setValidator(validator)
+        
+        self._apply_style()
+    
+    def update_theme(self, is_dark: bool):
+        """Update input styling for dark or light mode."""
+        self._is_dark = is_dark
+        self._apply_style()
+    
+    def _apply_style(self):
+        """Apply themed styling using Theme class."""
+        Theme.set_dark_mode(self._is_dark)
+        
+        # Colors from theme
+        bg_color = Theme.surface_element()
+        text_color = Theme.text()
+        border_color = Theme.border()
+        border_focus = Theme.border_focus()
+        placeholder_color = Theme.text_muted()
+        
+        self.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {bg_color};
+                color: {text_color};
+                border: 1px solid {border_color};
+                border-radius: {Theme.RADIUS_SM}px;
+                padding: 6px 8px;
+                font-family: '{Theme.FONT_BODY}';
+                font-size: {Theme.FONT_SIZE_XL}px;
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {border_focus};
+            }}
+            QLineEdit:disabled {{
+                background-color: {Theme.bg()};
+                color: {Theme.text_muted()};
+            }}
+            QLineEdit::placeholder {{
+                color: {placeholder_color};
+            }}
+        """)
+
+
+
 
 
 class SegmentedButton(QPushButton):
@@ -192,6 +282,7 @@ class GenericSegmentedControl(QFrame):
     """
     Generic pill-style horizontal segmented control.
     Supports dynamic segments and unified styling.
+    Automatically connects to ThemeManager for theme updates.
     """
     selectionChanged = pyqtSignal(str) # Emits segment ID
     
@@ -211,6 +302,13 @@ class GenericSegmentedControl(QFrame):
         self.buttons = {} # id -> button
         self._button_ids = {} # button -> id
         
+        # Connect to ThemeManager singleton for automatic theme updates
+        from client.gui.theme_manager import ThemeManager
+        theme_manager = ThemeManager.instance()
+        theme_manager.theme_changed.connect(self.update_theme)
+        
+        # Set initial theme state
+        self._is_dark = theme_manager.is_dark_mode()
         self._apply_styles()
         
     def add_segment(self, segment_id, label, is_checked=False, button_class=SegmentedButton):
@@ -258,10 +356,12 @@ class GenericSegmentedControl(QFrame):
         Theme.set_dark_mode(self._is_dark)
         
         # Container styles (SegmentContainer)
-        # Using subtle semi-transparent white (rgba 255,255,255,12) for a "glassy" delicate feel
+        # Using Theme.color_with_alpha for "glassy" delicate feel
+        container_bg = Theme.color_with_alpha('accent_primary', 0.047)  # ~12/255 = 0.047
+        
         self.setStyleSheet(f"""
             QFrame#SegmentContainer {{
-                background-color: rgba(255, 255, 255, 12);
+                background-color: {container_bg};
                 border: 1px solid {Theme.border()};
                 border-radius: {Theme.RADIUS_LG}px;
                 min-height: 42px;
@@ -269,6 +369,10 @@ class GenericSegmentedControl(QFrame):
         """)
         
         # Button styles (SegmentBtn) injected via stylesheet
+        # Using Theme.color_with_alpha for hover and checked states
+        btn_hover_bg = Theme.color_with_alpha('accent_primary', 0.059)  # ~15/255 = 0.059
+        btn_checked_bg = Theme.color_with_alpha('accent_primary', 0.118)  # ~30/255 = 0.118
+        
         btn_style = f"""
             QPushButton#SegmentBtn {{
                 background-color: transparent;
@@ -281,11 +385,11 @@ class GenericSegmentedControl(QFrame):
                 font-weight: 500;
             }}
             QPushButton#SegmentBtn:hover:!checked {{
-                background-color: rgba(255, 255, 255, 15);
+                background-color: {btn_hover_bg};
                 color: {Theme.text()};
             }}
             QPushButton#SegmentBtn:checked {{
-                background-color: rgba(255, 255, 255, 30);
+                background-color: {btn_checked_bg};
                 color: {Theme.text()};
                 font-weight: 600;
             }}
@@ -1072,6 +1176,8 @@ class CustomComboBox(QComboBox):
                 border-radius: 4px;
                 padding: 4px {dropdown_width}px 4px {text_offset}px;
                 min-height: 20px;
+                font-family: '{Theme.FONT_BODY}';
+                font-size: {Theme.FONT_SIZE_XL}px;
             }}
             QComboBox:hover {{
                 border-color: {hover_border};
@@ -1123,6 +1229,8 @@ class CustomComboBox(QComboBox):
                 min-height: 20px;
                 border: none;
                 outline: none;
+                font-family: '{Theme.FONT_BODY}';
+                font-size: {Theme.FONT_SIZE_XL}px;
             }}
             QComboBox QAbstractItemView::item:hover {{
                 background-color: {menu_hover};
@@ -2500,90 +2608,13 @@ class LoopFormatSelector(QWidget):
             else:
                 self.codec_control.set_selected("av1")
                 
+                
     def update_theme(self, is_dark):
         """Update styling based on theme"""
         self.primary_control.update_theme(is_dark)
         self.codec_control.update_theme(is_dark)
-            
-    def currentText(self):
-        """Get the current format string (compatibility with FormatButtonRow)"""
-        if self.gif_btn.isChecked():
-            return "GIF"
-        else:
-            codec = "AV1" if self.av1_btn.isChecked() else "VP9"
-            return f"WebM ({codec})"
-            
-    def setCurrentText(self, text):
-        """Set the current format (compatibility)"""
-        if text == "GIF":
-            self.gif_btn.setChecked(True)
-        elif "WebM" in text:
-            self.webm_btn.setChecked(True)
-            if "VP9" in text:
-                self.vp9_btn.setChecked(True)
-            else:
-                self.av1_btn.setChecked(True)
-                
-    def update_theme(self, is_dark):
-        """Update styling based on theme"""
-        if is_dark:
-            bg_color = "transparent"
-            border_color = "#555555"
-            text_color = "#eeeeee"
-            hover_bg = "rgba(255, 255, 255, 0.1)"
-        else:
-            bg_color = "transparent"
-            border_color = "#cccccc"
-            text_color = "#333333"
-            hover_bg = "rgba(0, 0, 0, 0.05)"
-            
-        # Primary buttons style (larger)
-        primary_style = f"""
-            QPushButton {{
-                padding: 10px 20px;
-                border-radius: 8px;
-                border: 2px solid {border_color};
-                background-color: {bg_color};
-                color: {text_color};
-                font-weight: 600;
-                font-size: 18px;
-            }}
-            QPushButton:hover {{
-                background-color: {hover_bg};
-            }}
-            QPushButton:checked {{
-                background-color: #4CAF50;
-                border-color: #43a047;
-                color: white;
-                font-weight: bold;
-            }}
-        """
-        self.gif_btn.setStyleSheet(primary_style)
-        self.webm_btn.setStyleSheet(primary_style)
-        
-        # Codec buttons style (smaller, segmented look)
-        codec_style = f"""
-            QPushButton {{
-                padding: 8px 16px;
-                border-radius: 4px;
-                border: 1px solid {border_color};
-                background-color: {bg_color};
-                color: {text_color};
-                font-weight: 500;
-                font-size: 16px;
-            }}
-            QPushButton:hover {{
-                background-color: {hover_bg};
-            }}
-            QPushButton:checked {{
-                background-color: #2196F3;
-                border-color: #1976D2;
-                color: white;
-                font-weight: bold;
-            }}
-        """
-        self.av1_btn.setStyleSheet(codec_style)
-        self.vp9_btn.setStyleSheet(codec_style)
+
+
 
 class HardwareAwareCodecButton(QPushButton):
     """

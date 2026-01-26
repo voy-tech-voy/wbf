@@ -1,0 +1,90 @@
+Theme System Architecture Repair Task List
+Phase 1: Core Theme Engine Upgrade
+Establish the "Single Source of Truth" with necessary primitives for complex UI.
+
+ Enhance 
+Theme
+ Class (
+client/gui/theme.py
+)
+ Import QColor from PyQt6.QtGui.
+ Implement to_qcolor(key: str) -> QColor:
+Logic: Fetch hex string -> Return QColor(hex_str).
+ Implement color_with_alpha(key: str, alpha: float) -> str:
+Logic: Fetch QColor -> c.setAlphaF(alpha) -> return rgba(r, g, b, a) string formatted for QSS.
+ Verification: Create tests/test_theme_core.py.
+Test to_qcolor returns valid QColor object.
+Test color_with_alpha returns valid rgba(...) string.
+Phase 2: Style Sheet Factory Extraction
+Decouple logic (Python) from presentation (QSS).
+
+ Create StyleFactory (client/gui/styles/style_factory.py)
+ Define class StyleFactory.
+ Migration: Move QSS generation methods from 
+ThemeManager
+ to StyleFactory:
+ Extract 
+get_drag_drop_styles()
+ from 
+theme_manager.py
+.
+ Extract 
+get_main_window_style()
+ from 
+theme_manager.py
+.
+ Extract 
+get_dialog_styles()
+ from 
+theme_manager.py
+.
+ Ensure StyleFactory uses 
+Theme
+ class for all token resolution.
+ Verification: Create tests/test_style_factory.py.
+Assert StyleFactory.get_main_window_style() returns non-empty string.
+Phase 3: Theme Manager & Signal Propagation
+Fix the "Broken Telephone" signal issue.
+
+ Refactor 
+ThemeManager
+ (
+client/gui/theme_manager.py
+)
+ Implement Singleton Accessor (or strictly enforced global instance pattern).
+ Clean up: Remove all moved QSS methods (delegate to StyleFactory).
+ Signal Enhancement:
+Ensure theme_changed signal passes 
+is_dark
+ boolean or payload.
+ Verification: Create tests/test_signal_bus.py.
+Mock a widget -> connect to manager -> switch theme -> assert mock received signal.
+Phase 4: Component Wiring & Cleanup
+Apply the fixes to the "Real World" widgets.
+
+ Refactor 
+ThemedCheckBox
+ (
+client/gui/custom_widgets.py
+)
+ Update 
+init
+: Connect to 
+ThemeManager
+ signal.
+ Use Theme.color_with_alpha() for transparency states (replace hardcoded rgba).
+ Refactor 
+GenericSegmentedControl
+ (
+client/gui/custom_widgets.py
+)
+ Update to use Theme.color_with_alpha for "glassy" backgrounds.
+ Cleanup 
+MainWindow
+ (
+client/gui/main_window.py
+)
+ Remove manual recursion if hasattr(child, 'update_theme').
+ Rely on Signal/Slot connections.
+ Verification: Launch App.
+Visual check: Toggle Dark/Light mode -> Confirm Checkboxes and Segmented Controls update instantly.

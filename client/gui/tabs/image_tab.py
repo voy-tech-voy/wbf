@@ -7,7 +7,7 @@ This tab handles image format, quality, resize, and rotation settings.
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, 
-    QLineEdit, QSizePolicy
+    QSizePolicy
 )
 from PyQt6.QtCore import Qt
 
@@ -16,7 +16,7 @@ from client.gui.command_group import CommandGroup
 from client.gui.custom_spinbox import CustomSpinBox
 from client.gui.custom_widgets import (
     CustomComboBox, FormatButtonRow, RotationButtonRow, 
-    ThemedCheckBox, CustomTargetSizeSpinBox
+    ThemedCheckBox, CustomTargetSizeSpinBox, UnifiedVariantInput
 )
 from client.gui.theme import get_combobox_style
 
@@ -117,7 +117,7 @@ class ImageTab(BaseTab):
         self.format_group.add_row(self.quality_row_label, quality_layout)
         
         # --- Quality variants ---
-        self.quality_variants = QLineEdit()
+        self.quality_variants = UnifiedVariantInput()
         self.quality_variants.setPlaceholderText("e.g., 40, 60, 80, 95")
         self.quality_variants.setText("40, 60, 80, 95")
         self.quality_variants.setVisible(False)
@@ -173,7 +173,7 @@ class ImageTab(BaseTab):
         # Variants row
         variants_row = QHBoxLayout()
         self.resize_variants_label = QLabel("Resize values")
-        self.resize_variants = QLineEdit()
+        self.resize_variants = UnifiedVariantInput()
         self.resize_variants.setPlaceholderText("e.g., 30,50,80 or 720,1280,1920")
         self.resize_variants.setText("720,1280,1920")
         variants_row.addWidget(self.resize_variants_label)
@@ -203,6 +203,31 @@ class ImageTab(BaseTab):
     
     def get_params(self) -> dict:
         """Collect image conversion parameters from UI."""
+        # Map resize_mode + resize_value to current_resize format
+        resize_mode = self.resize_mode.currentText()
+        resize_value = self.resize_value.value()
+        
+        if resize_mode == "No resize":
+            current_resize = None
+        elif resize_mode == "By longer edge (pixels)":
+            current_resize = f"L{resize_value}"
+        elif resize_mode == "By ratio (percent)":
+            current_resize = f"{resize_value}%"
+        else:  # "By width (pixels)"
+            current_resize = str(resize_value)
+        
+        # Format resize variants based on resize_mode
+        raw_variants = self._parse_variants(self.resize_variants.text())
+        formatted_variants = []
+        if raw_variants:
+            for variant in raw_variants:
+                if resize_mode == "By longer edge (pixels)":
+                    formatted_variants.append(f"L{variant}")
+                elif resize_mode == "By ratio (percent)":
+                    formatted_variants.append(f"{variant}%")
+                else:  # "By width (pixels)" or "No resize"
+                    formatted_variants.append(str(variant))
+        
         params = {
             'type': 'image',
             'format': self.format.currentText(),
@@ -211,10 +236,11 @@ class ImageTab(BaseTab):
             'quality_variants': self._parse_variants(self.quality_variants.text()),
             'max_size_mb': self.max_size_spinbox.value() if self.max_size_spinbox.isVisible() else None,
             'auto_resize': self.auto_resize_checkbox.isChecked(),
-            'resize_mode': self.resize_mode.currentText(),
-            'resize_value': self.resize_value.value(),
+            'current_resize': current_resize,
+            'resize_mode': resize_mode,
+            'resize_value': resize_value,
             'multiple_resize': self.multiple_resize.isChecked(),
-            'resize_variants': self._parse_variants(self.resize_variants.text()),
+            'resize_variants': formatted_variants,
             'rotation_angle': self.rotation_angle.currentText(),
         }
         return params
@@ -222,10 +248,10 @@ class ImageTab(BaseTab):
     def update_theme(self, is_dark: bool):
         """Apply theme styling to all elements."""
         self._is_dark_theme = is_dark
-        # Update combobox style
-        global COMBOBOX_STYLE
-        COMBOBOX_STYLE = get_combobox_style(is_dark)
-        self.resize_mode.setStyleSheet(COMBOBOX_STYLE)
+        
+        # Update CustomComboBox instance
+        if hasattr(self.resize_mode, 'update_theme'):
+            self.resize_mode.update_theme(is_dark)
         
         # Update checkboxes
         for checkbox in [self.multiple_qualities, self.auto_resize_checkbox, self.multiple_resize]:
@@ -242,16 +268,20 @@ class ImageTab(BaseTab):
         is_max_size = (mode == "Max Size")
         is_manual = (mode == "Manual")
         
-        # Max size controls
+        # Max size controls (only these visible in Max Size mode)
         self.max_size_label.setVisible(is_max_size)
         self.max_size_spinbox.setVisible(is_max_size)
         self.auto_resize_checkbox.setVisible(is_max_size)
         
-        # Quality controls (visible in Max Size and Manual)
-        show_quality = is_max_size or is_manual
-        self.quality_row_label.setVisible(show_quality and not self.multiple_qualities.isChecked())
-        self.quality.setVisible(show_quality and not self.multiple_qualities.isChecked())
-        self.quality_label.setVisible(show_quality and not self.multiple_qualities.isChecked())
+        # Quality controls (only visible in Manual mode, hidden in Max Size)
+        self.quality_row_label.setVisible(is_manual and not self.multiple_qualities.isChecked())
+        self.quality.setVisible(is_manual and not self.multiple_qualities.isChecked())
+        self.quality_label.setVisible(is_manual and not self.multiple_qualities.isChecked())
+        
+        # Multiple qualities checkbox (only visible in Manual mode)
+        self.multiple_qualities.setVisible(is_manual)
+        self.quality_variants_label.setVisible(is_manual and self.multiple_qualities.isChecked())
+        self.quality_variants.setVisible(is_manual and self.multiple_qualities.isChecked())
     
     def set_transform_mode(self, mode: str):
         """Set which transform section is visible (resize or rotate)."""

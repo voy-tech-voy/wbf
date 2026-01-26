@@ -104,6 +104,9 @@ class DragDropArea(QWidget):
         # Disable dashed focus rectangle
         self.file_list_widget.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         
+        # Disable horizontal scrollbar
+        self.file_list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        
         # Initial styling will be set by theme manager
         self.reset_list_style()
         

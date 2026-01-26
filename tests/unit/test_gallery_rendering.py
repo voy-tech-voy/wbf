@@ -131,9 +131,13 @@ class TestGalleryRendering:
         gallery.setGeometry(parent.rect())  # Initial setup
         gallery.show()
         
-        # Simulate resize
-        parent.resize(1024, 768)
-        gallery.resizeEvent(QResizeEvent(QSize(1024, 768), QSize(800, 600)))
+        # Simulate parent resize
+        new_size = QSize(1024, 768)
+        parent.resize(new_size)
+        
+        # Manually trigger event filter since app loop isn't running
+        event = QResizeEvent(new_size, QSize(800, 600))
+        gallery.eventFilter(parent, event)
         
         assert gallery.geometry() == parent.rect()
     

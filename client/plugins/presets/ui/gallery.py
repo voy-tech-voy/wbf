@@ -15,6 +15,7 @@ from typing import List, Dict
 from client.plugins.presets.logic.models import PresetDefinition
 from client.plugins.presets.ui.card import PresetCard
 from client.plugins.presets.ui.filter_bar import CategoryFilterBar
+from client.gui.theme import Theme
 
 
 class PresetGallery(QWidget):
@@ -37,7 +38,7 @@ class PresetGallery(QWidget):
     PADDING = 24
     MIN_CARDS_PER_ROW = 2
     MAX_CARDS_PER_ROW = 6
-    
+    ANIMATION_DURATION = 250  # Fade-in duration in ms
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -51,13 +52,24 @@ class PresetGallery(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setAutoFillBackground(True)
         
+        # Install event filter on parent to follow its size
+        if parent:
+            parent.installEventFilter(self)
+        
         self._setup_ui()
         self._apply_styles()
         
         # Initially hidden
         self.hide()
     
-    def set_meta(self, meta: dict):
+    def eventFilter(self, obj, event):
+        """Monitor parent resize events to update geometry."""
+        from PyQt6.QtCore import QEvent
+        if obj == self.parent() and event.type() == QEvent.Type.Resize:
+            self.setGeometry(obj.rect())
+            if self.isVisible():
+                self._capture_blur_background()
+        return super().eventFilter(obj, event)
         """Store media metadata for parameter visibility rules."""
         self._meta = meta
     
@@ -309,7 +321,7 @@ class PresetGallery(QWidget):
         self.raise_()
         
         self._show_anim = QPropertyAnimation(self._opacity_effect, b"opacity")
-        self._show_anim.setDuration(200)
+        self._show_anim.setDuration(self.ANIMATION_DURATION)
         self._show_anim.setStartValue(0.0)
         self._show_anim.setEndValue(1.0)
         self._show_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
@@ -386,19 +398,21 @@ class PresetGallery(QWidget):
         self._hide_anim.finished.connect(self.hide)
         self._hide_anim.start()
     
-    def resizeEvent(self, event):
-        """Handle resize."""
-        if self.parent():
-            self.setGeometry(self.parent().rect())
-            # Re-capture background on resize if visible
-            if self.isVisible():
-                self._capture_blur_background()
-        super().resizeEvent(event)
+    # resizeEvent removed: Handled by eventFilter watching parent resize
     
     def paintEvent(self, event):
         """Paint the blurred background and dark overlay."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Clip to rounded corners to match parent drop area bevel
+        from PyQt6.QtGui import QPainterPath
+        from PyQt6.QtCore import QRectF
+        path = QPainterPath()
+        # Use Theme.RADIUS_LG for the bevel as used in Drop Area
+        radius = Theme.RADIUS_LG
+        path.addRoundedRect(QRectF(self.rect()), radius, radius)
+        painter.setClipPath(path)
         
         # 1. Draw blurred background if available (Upscale smoothly)
         if hasattr(self, '_blurred_background') and self._blurred_background:
