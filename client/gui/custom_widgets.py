@@ -16,6 +16,7 @@ from client.utils.font_manager import AppFonts, FONT_FAMILY
 from client.utils.resource_path import get_resource_path
 from client.gui.theme import Theme
 from client.gui.effects.glow_effect import GlowEffectManager, GlowState
+from client.gui.animators.animation_driver import AnimationDriver
 import os
 import math
 
@@ -3865,15 +3866,16 @@ class MorphingButton(QPushButton):
         self.setMinimumWidth(self.COLLAPSED_SIZE)
         self.setMaximumWidth(self.COLLAPSED_SIZE)
         
-        # Weighted Motion with Delicate Spring: 650ms with subtle overshoot
-        self._width_anim = QPropertyAnimation(self, b"animWidth")
-        self._width_anim.setDuration(self.ANIMATION_DURATION)
+        # Animation Config
+        self.anim_easing = 'OutCirc'
+        self.anim_amplitude = 0.80  # Used as overshoot for OutBack
+        self.anim_period = 0.30
         
-        # OutBack easing: Smooth deceleration with gentle spring overshoot
-        # Amplitude controls the spring intensity (lower = more subtle)
-        easing = QEasingCurve(QEasingCurve.Type.OutBack)
-        easing.setOvershoot(.8)  # Delicate spring effect (default is 1.70158)
-        self._width_anim.setEasingCurve(easing)
+        # Width animation
+        self._width_anim = QPropertyAnimation(self, b"animWidth", self)
+        self._width_driver = AnimationDriver(self._width_anim, duration=self.ANIMATION_DURATION, easing=self.anim_easing)
+        self._width_driver.overshoot = self.anim_amplitude
+        self._width_driver.period = self.anim_period
         
         self._update_main_icon()
 
@@ -3886,50 +3888,7 @@ class MorphingButton(QPushButton):
         self.setFixedWidth(w)
         self.update()
 
-    @pyqtProperty(str)
-    def animationEasing(self):
-        return getattr(self, '_easing_style_name', 'OutBack')
-        
-    @animationEasing.setter
-    def animationEasing(self, name):
-        self._easing_style_name = name
-        self._update_easing()
 
-    @pyqtProperty(float)
-    def easingAmplitude(self):
-        return getattr(self, '_easing_amp', 0.8) # Default for Back overshoot
-
-    @easingAmplitude.setter
-    def easingAmplitude(self, val):
-        self._easing_amp = val
-        self._update_easing()
-
-    @pyqtProperty(float)
-    def easingPeriod(self):
-        return getattr(self, '_easing_period', 0.3)
-
-    @easingPeriod.setter
-    def easingPeriod(self, val):
-        self._easing_period = val
-        self._update_easing()
-
-    def _update_easing(self):
-        name = getattr(self, '_easing_style_name', 'OutBack')
-        amp = getattr(self, '_easing_amp', 0.8)
-        period = getattr(self, '_easing_period', 0.3)
-        
-        try:
-            curve_type = getattr(QEasingCurve.Type, name)
-            easing = QEasingCurve(curve_type)
-            
-            # Apply generic params (Qt uses what's relevant for the curve type)
-            easing.setOvershoot(amp)    # For Back curves
-            easing.setAmplitude(amp)    # For Elastic/Bounce
-            easing.setPeriod(period)    # For Elastic
-            
-            self._width_anim.setEasingCurve(easing)
-        except:
-            pass
             
     def toggle_dev_panel(self):
         if not hasattr(self, '_param_panel'):
@@ -3949,9 +3908,9 @@ class MorphingButton(QPushButton):
             }
 
             params_anim = {
-                'animationEasing': (easing_styles,), 
-                'easingAmplitude': (0.0, 5.0, 0.1), # Controls Overshoot/Elasticity
-                'easingPeriod': (0.0, 2.0, 0.05),   # Controls Elastic Period
+                'anim_easing': (list(AnimationDriver.EASING_MAP.keys()),), 
+                'anim_amplitude': (0.0, 5.0, 0.1), # Controls Overshoot/Elasticity
+                'anim_period': (0.0, 2.0, 0.05),   # Controls Elastic Period
                 'ANIMATION_DURATION': (100, 2000, 50),
             }
             
@@ -3960,7 +3919,14 @@ class MorphingButton(QPushButton):
                 self.setFixedHeight(self.COLLAPSED_SIZE)
                 self.setMinimumWidth(self.COLLAPSED_SIZE)
                 self._hover_timer.setInterval(self.EXPAND_DELAY_MS)
-                self._width_anim.setDuration(self.ANIMATION_DURATION)
+                
+                # Push changes to driver
+                self._width_driver.duration = self.ANIMATION_DURATION
+                self._width_driver.easing_type = self.anim_easing
+                self._width_driver.overshoot = self.anim_amplitude
+                self._width_driver.amplitude = self.anim_amplitude # For Bounce/Elastic
+                self._width_driver.period = self.anim_period
+                
                 self.update()
             
             source_file = r"v:\_MY_APPS\ImgApp_1\client\gui\custom_widgets.py"
@@ -4310,9 +4276,9 @@ class PresetStatusButton(QWidget):
     
     # Constants
     MIN_WIDTH = 150  # Minimum to fit "PRESETS" text
-    MAX_WIDTH = 250  # Max for longer preset names
-    PADDING = 30  # 30px left + 30px right for wider look
-    ANIM_DURATION = 400 # Width animation duration (ms)
+    MAX_WIDTH = 359  # Max for longer preset names
+    PADDING = 60  # 30px left + 30px right for wider look
+    ANIM_DURATION = 450 # Width animation duration (ms)
     
     # ==================== BUTTON NOISE CONFIGURATION ====================
     # Anti-banding noise applied to the button's solid background
@@ -4351,25 +4317,59 @@ class PresetStatusButton(QWidget):
         # Glow Effect Manager
         self._glow_manager = None
         
+        # Animation State
+        # Animation State
+        self.width_easing_type = 'OutCirc'
+        self.anim_amplitude = 0.80
+        self.anim_period = 0.30
+        self.anim_overshoot = 1.70
+        
         # Width animation
         self._width_anim = QPropertyAnimation(self, b"animWidth", self)
-        self._width_anim.setDuration(self.ANIM_DURATION)
-        self._width_anim.setEasingCurve(QEasingCurve.Type.OutElastic)
+        self._width_driver = AnimationDriver(self._width_anim, duration=self.ANIM_DURATION, easing=self.width_easing_type)
+        self._width_driver.amplitude = self.anim_amplitude
+        self._width_driver.period = self.anim_period
+        self._width_driver.overshoot = self.anim_overshoot
+        # Click debounce flag
+        self._click_pending = False
         
         # Calculate initial width
         self._calculate_and_set_initial_width()
         
+    def _calculate_and_set_initial_width(self):
+        """Calculate and set initial width using the exact drawing font"""
+        font = QFont()
+        font.setFamily(FONT_FAMILY)
+        font.setPixelSize(16)
+        font.setWeight(QFont.Weight.DemiBold)
+        fm = QFontMetrics(font)
+        text_width = fm.horizontalAdvance(self._text)
+        initial_width = max(self.MIN_WIDTH, min(self.MAX_WIDTH, text_width + self.PADDING))
+        self._current_width = initial_width
+        self._target_width = initial_width
+        self.setFixedWidth(initial_width)
+        
     def mousePressEvent(self, event):
-        self.setFocus()
-        if hasattr(super(), 'mousePressEvent'):
-             super().mousePressEvent(event)
-             
-    def mouseReleaseEvent(self, event):
-        # Implement basic click behavior if missing
-        if self.rect().contains(event.position().toPoint()):
+        """Handle mouse press - emit clicked signal with debounce."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            # Debounce: prevent multiple rapid clicks
+            if self._click_pending:
+                event.accept()
+                return
+            
+            self._click_pending = True
             self.clicked.emit()
-        if hasattr(super(), 'mouseReleaseEvent'):
-             super().mouseReleaseEvent(event)
+            event.accept()
+            
+            # Reset debounce after 300ms
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(300, self._reset_click_pending)
+        else:
+            super().mousePressEvent(event)
+    
+    def _reset_click_pending(self):
+        """Reset the click debounce flag."""
+        self._click_pending = False
     
 
     
@@ -4431,7 +4431,7 @@ class PresetStatusButton(QWidget):
                 'NOISE_INTENSITY': (0, 100, 2),
             }
             def btn_change():
-                self._width_anim.setDuration(self.ANIM_DURATION)
+                self._width_driver.duration = self.ANIM_DURATION
                 self._update_width()
                 self.update()
             
@@ -4486,6 +4486,34 @@ class PresetStatusButton(QWidget):
                     source_file=r"v:\_MY_APPS\ImgApp_1\client\gui\effects\glow_effect.py",
                     on_change=lambda: None
                 )
+                
+                # --- Section 4: Button Animation ---
+                # --- Section 4: Button Animation ---
+                # Use AnimationDriver for full control without hardcoding
+                # Target 'self' so we can save changes to custom_widgets.py source
+                anim_driver_params = {
+                    'width_easing_type': (list(AnimationDriver.EASING_MAP.keys()),),
+                    'ANIM_DURATION': (100, 2000, 50),
+                    'anim_amplitude': (0.0, 5.0, 0.1),
+                    'anim_period': (0.0, 2.0, 0.05),
+                    'anim_overshoot': (0.0, 5.0, 0.1),
+                }
+                
+                def apply_anim_changes():
+                    # Push changes from self (Button) to Driver
+                    self._width_driver.duration = self.ANIM_DURATION
+                    self._width_driver.easing_type = self.width_easing_type
+                    self._width_driver.amplitude = self.anim_amplitude
+                    self._width_driver.period = self.anim_period
+                    self._width_driver.overshoot = self.anim_overshoot
+                    
+                self._param_panel.add_section(
+                    target=self,
+                    params=anim_driver_params,
+                    title="Button Animation (Driver)",
+                    source_file=r"v:\_MY_APPS\ImgApp_1\client\gui\custom_widgets.py",
+                    on_change=apply_anim_changes
+                )
             
         if self._param_panel.isVisible():
             self._param_panel.hide()
@@ -4535,17 +4563,7 @@ class PresetStatusButton(QWidget):
         self._update_glow_position()
         self.update()
     
-    def _calculate_and_set_initial_width(self):
-        """Calculate and set initial width using the exact drawing font"""
-        font = QFont()
-        font.setFamily(FONT_FAMILY)
-        font.setPixelSize(16)
-        font.setWeight(QFont.Weight.DemiBold)
-        fm = QFontMetrics(font)
-        text_width = fm.horizontalAdvance(self._text)
-        initial_width = max(self.MIN_WIDTH, min(self.MAX_WIDTH, text_width + self.PADDING))
-        self._current_width = initial_width
-        self.setFixedWidth(initial_width)
+
     
     def shrink_for_overlap(self, shrink):
         """Temporarily shrink button to make room for other widgets"""
@@ -4582,11 +4600,15 @@ class PresetStatusButton(QWidget):
             text_width = fm.horizontalAdvance(self._text)
             target = max(self.MIN_WIDTH, min(self.MAX_WIDTH, text_width + self.PADDING))
             
+        # Always update target width for rigid painting
+        self._target_width = target
+            
         if self.width() != target:
-            self._width_anim.stop()
-            self._width_anim.setStartValue(self.width())
-            self._width_anim.setEndValue(target)
-            self._width_anim.start()
+
+            self._width_driver.stop()
+            self._width_driver.setStartValue(self.width())
+            self._width_driver.setEndValue(target)
+            self._width_driver.start()
     
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -4635,17 +4657,20 @@ class PresetStatusButton(QWidget):
         font.setPixelSize(16)
         painter.setFont(font)
         
+        # Draw text centered without elision/truncation
+        # Draw text centered with integer snapping to prevent sub-pixel "shivering"
         fm = QFontMetrics(font)
-        text_width = fm.horizontalAdvance(self._text)
-        avail_width = w - self.PADDING
+        text_w = fm.horizontalAdvance(self._text)
+        text_h = fm.ascent() # cap height approx
         
-        painter.setClipRect(16, 0, w - 32, h)
+        # Calculate centered X based on TARGET width (rigid positioning)
+        # This eliminates the "sliding" text effect and shivering during animation
+        # The text simply sits at the final destination.
+        final_w = getattr(self, '_target_width', w)
+        text_x = int((final_w - text_w) / 2)
         
-        if text_width > avail_width:
-            elided = fm.elidedText(self._text, Qt.TextElideMode.ElideRight, avail_width)
-            painter.drawText(QRect(16, 0, w - 32, h), Qt.AlignmentFlag.AlignCenter, elided)
-        else:
-            painter.drawText(QRect(0, 0, w, h), Qt.AlignmentFlag.AlignCenter, self._text)
+        # Draw text at the rigid position
+        painter.drawText(QRect(text_x, 0, text_w, h), Qt.AlignmentFlag.AlignVCenter, self._text)
     
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:

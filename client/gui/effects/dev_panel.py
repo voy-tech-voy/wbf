@@ -287,17 +287,31 @@ class DevPanel(QWidget):
                 updates = 0
                 for attr_name in section['params']:
                     val = getattr(section['target'], attr_name)
-                    is_float = isinstance(val, float)
-                    val_str = f"{val:.2f}" if is_float else str(int(val))
                     
-                    # Regex replacement
-                    pattern = rf"(^\s*{attr_name}\s*=\s*)([\d\.]+)(.*$)"
+                    # Determine string representation and regex pattern based on type
+                    if isinstance(val, str):
+                        # For strings, we expect the file to have: var = "Value" or var = 'Value'
+                        val_str = f"'{val}'" # Default to single quotes for saving
+                        # Regex matches: name = "old_val" or name = 'old_val', supporting self.name = ...
+                        pattern = rf"(^\s*(?:self\.)?{attr_name}\s*=\s*)(['\"][\w\.]+['\"])(.*$)"
+                    elif isinstance(val, bool):
+                        val_str = str(val)
+                        pattern = rf"(^\s*(?:self\.)?{attr_name}\s*=\s*)(True|False)(.*$)"
+                    else:
+                        # Numbers (int/float)
+                        is_float = isinstance(val, float)
+                        val_str = f"{val:.2f}" if is_float else str(int(val))
+                        # Regex matches: name = 123 or name = 12.34
+                        pattern = rf"(^\s*(?:self\.)?{attr_name}\s*=\s*)([\d\.]+)(.*$)"
+                    
                     def replacer(m): return f"{m.group(1)}{val_str}{m.group(3)}"
                     
                     new_content, count = re.subn(pattern, replacer, content, flags=re.MULTILINE)
                     if count > 0:
                         content = new_content
                         updates += count
+                    else:
+                         print(f"Warning: Could not find/update variable '{attr_name}' in {source_file}")
                 
                 if updates > 0:
                     with open(source_file, 'w', encoding='utf-8') as f:
