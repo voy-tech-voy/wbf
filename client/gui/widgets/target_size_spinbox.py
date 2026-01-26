@@ -155,6 +155,10 @@ class CustomTargetSizeSpinBox(QWidget):
         
         # Drag state tracking
         self.drag_sensitivity = 0.01  # Value change per pixel dragged (10px = 0.1 value change)
+        self._drag_start_pos = 0.0
+        self._drag_start_value = 0.0
+        self._is_dragging = False
+        self._is_possible_drag = False
         
         # Create custom cursor (horizontal arrows with I-beam)
         self.custom_drag_cursor = self._create_custom_cursor(is_dark=True)
@@ -320,10 +324,45 @@ class CustomTargetSizeSpinBox(QWidget):
                 return True
                 
         # Handle mouse events for dragging functionality directly on the lineEdit
-        # This simplifies things vs using the DragOverlay widget
         if source == self.spinbox.lineEdit():
-             # Logic for drag vs click could go here
-             pass
+            if event.type() == QEvent.Type.MouseButtonPress:
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self._drag_start_pos = event.globalPosition().x()
+                    self._drag_start_value = self.spinbox.value()
+                    self._is_dragging = False
+                    self._is_possible_drag = True
+                    # Don't consume yet, let lineEdit handle focus if it's just a click
+                    # But if we don't consume, selection might start.
+                    # Standard behavior: Press -> Focus. 
+                    # If we subsequently move, we treat it as drag.
+                    
+            elif event.type() == QEvent.Type.MouseMove:
+                if getattr(self, '_is_possible_drag', False):
+                    delta = event.globalPosition().x() - self._drag_start_pos
+                    if abs(delta) > 2: # Threshold to detect drag
+                        self._is_dragging = True
+                        self._is_possible_drag = False # Confirmed drag
+                        # Hide cursor? or Change it
+                        self.spinbox.lineEdit().setCursor(Qt.CursorShape.BlankCursor)
+                        
+                if getattr(self, '_is_dragging', False):
+                    delta = event.globalPosition().x() - self._drag_start_pos
+                    
+                    # Sensitivity: 1px = x value
+                    change = delta * self.drag_sensitivity
+                    new_value = self._drag_start_value + change
+                    self.spinbox.setValue(new_value)
+                    return True # Consume move event
+                    
+            elif event.type() == QEvent.Type.MouseButtonRelease:
+                if getattr(self, '_is_dragging', False):
+                    self._is_dragging = False
+                    self.spinbox.lineEdit().setCursor(self.custom_drag_cursor)
+                    return True # Consume release event so we don't move cursor/selection
+                
+                if getattr(self, '_is_possible_drag', False):
+                    self._is_possible_drag = False
+                    # It was a click. Let default handler proceed (focus, cursor placement)
              
         return super().eventFilter(source, event)
         
