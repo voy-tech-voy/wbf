@@ -7,8 +7,17 @@ for better organization and maintainability.
 
 # Import extracted widgets for backward compatibility
 from .file_list_item import FileListItemWidget
+from .dynamic_font_button import DynamicFontButton
+from .target_size_spinbox import CustomTargetSizeSpinBox, DragOverlay, SpinBoxLineEdit
+from .morphing_button import MorphingButton
+from .preset_status_button import PresetStatusButton
 
 __all__ = [
     'FileListItemWidget',
+    'DynamicFontButton',
+    'CustomTargetSizeSpinBox',
+    'DragOverlay',
+    'SpinBoxLineEdit',
+    'MorphingButton',
+    'PresetStatusButton',
 ]
-
