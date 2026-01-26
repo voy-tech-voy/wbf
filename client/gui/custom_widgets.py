@@ -3813,10 +3813,10 @@ class MorphingButton(QPushButton):
     
     # Constants
     COLLAPSED_SIZE = 48
-    EXPAND_DELAY_MS = 60
-    ANIMATION_DURATION = 400  # Luxurious weighted motion: 650ms
+    EXPAND_DELAY_MS = 75
+    ANIMATION_DURATION = 429  # Luxurious weighted motion: 650ms
     EXPANDED_WIDTH = 200
-    STAGGER_DELAY = 120 # ms between items
+    STAGGER_DELAY = 200 # ms between items
     
     # Debug flag for alignment visualization
     DEBUG_ALIGNMENT = False
@@ -3867,9 +3867,9 @@ class MorphingButton(QPushButton):
         self.setMaximumWidth(self.COLLAPSED_SIZE)
         
         # Animation Config
-        self.anim_easing = 'OutCirc'
-        self.anim_amplitude = 0.80  # Used as overshoot for OutBack
-        self.anim_period = 0.30
+        self.anim_easing = 'InOutCirc'
+        self.anim_amplitude = 0.00  # Used as overshoot for OutBack
+        self.anim_period = 0.00
         
         # Width animation
         self._width_anim = QPropertyAnimation(self, b"animWidth", self)
@@ -4278,7 +4278,7 @@ class PresetStatusButton(QWidget):
     MIN_WIDTH = 150  # Minimum to fit "PRESETS" text
     MAX_WIDTH = 359  # Max for longer preset names
     PADDING = 60  # 30px left + 30px right for wider look
-    ANIM_DURATION = 450 # Width animation duration (ms)
+    ANIM_DURATION = 250 # Width animation duration (ms)
     
     # ==================== BUTTON NOISE CONFIGURATION ====================
     # Anti-banding noise applied to the button's solid background
@@ -4319,9 +4319,9 @@ class PresetStatusButton(QWidget):
         
         # Animation State
         # Animation State
-        self.width_easing_type = 'OutCirc'
-        self.anim_amplitude = 0.80
-        self.anim_period = 0.30
+        self.width_easing_type = 'InOutCirc'
+        self.anim_amplitude = 0.00
+        self.anim_period = 0.00
         self.anim_overshoot = 1.70
         
         # Width animation
@@ -4330,24 +4330,32 @@ class PresetStatusButton(QWidget):
         self._width_driver.amplitude = self.anim_amplitude
         self._width_driver.period = self.anim_period
         self._width_driver.overshoot = self.anim_overshoot
+
+
+        # Text Position Smoothing
+        self.text_easing_type = 'OutQuad'
+        self.text_anim_duration = 307
+        self._text_center_x = 0.0
+        self._text_pos_anim = QPropertyAnimation(self, b"textCenter", self)
+        self._text_pos_driver = AnimationDriver(self._text_pos_anim, duration=self.text_anim_duration, easing=self.text_easing_type)
+        
+        # Text Opacity Animation
+        self._text_opacity = 1.0
+        self._pending_text = None
+        self._pending_active = False
+
+        self.text_fade_duration = 120
+        self.text_fade_easing = 'InCubic'
+        
+        self._text_fade_anim = QPropertyAnimation(self, b"textOpacity", self)
+        self._text_fade_driver = AnimationDriver(self._text_fade_anim, duration=self.text_fade_duration, easing=self.text_fade_easing)
+        self._text_fade_anim.finished.connect(self._on_fade_out_finished)
+        
         # Click debounce flag
         self._click_pending = False
         
         # Calculate initial width
         self._calculate_and_set_initial_width()
-        
-    def _calculate_and_set_initial_width(self):
-        """Calculate and set initial width using the exact drawing font"""
-        font = QFont()
-        font.setFamily(FONT_FAMILY)
-        font.setPixelSize(16)
-        font.setWeight(QFont.Weight.DemiBold)
-        fm = QFontMetrics(font)
-        text_width = fm.horizontalAdvance(self._text)
-        initial_width = max(self.MIN_WIDTH, min(self.MAX_WIDTH, text_width + self.PADDING))
-        self._current_width = initial_width
-        self._target_width = initial_width
-        self.setFixedWidth(initial_width)
         
     def mousePressEvent(self, event):
         """Handle mouse press - emit clicked signal with debounce."""
@@ -4370,6 +4378,24 @@ class PresetStatusButton(QWidget):
     def _reset_click_pending(self):
         """Reset the click debounce flag."""
         self._click_pending = False
+    
+    @pyqtProperty(float)
+    def textCenter(self):
+        return self._text_center_x
+        
+    @textCenter.setter
+    def textCenter(self, x):
+        self._text_center_x = x
+        self.update()
+
+    @pyqtProperty(float)
+    def textOpacity(self):
+        return self._text_opacity
+
+    @textOpacity.setter
+    def textOpacity(self, output):
+        self._text_opacity = output
+        self.update()
     
 
     
@@ -4514,6 +4540,31 @@ class PresetStatusButton(QWidget):
                     source_file=r"v:\_MY_APPS\ImgApp_1\client\gui\custom_widgets.py",
                     on_change=apply_anim_changes
                 )
+
+                # --- Section 5: Text Smoothing ---
+                text_params = {
+                    'text_easing_type': (list(AnimationDriver.EASING_MAP.keys()),),
+                    'text_anim_duration': (100, 2000, 50),
+                    'text_fade_easing': (list(AnimationDriver.EASING_MAP.keys()),),
+                    'text_fade_duration': (50, 1000, 10),
+                }
+
+                def apply_text_changes():
+                    # Positional Smoothing
+                    self._text_pos_driver.easing_type = self.text_easing_type
+                    self._text_pos_driver.duration = self.text_anim_duration
+                    
+                    # Opacity Fade
+                    self._text_fade_driver.easing_type = self.text_fade_easing
+                    self._text_fade_driver.duration = self.text_fade_duration
+
+                self._param_panel.add_section(
+                    target=self,
+                    params=text_params,
+                    title="Text Smoothing",
+                    source_file=r"v:\_MY_APPS\ImgApp_1\client\gui\custom_widgets.py",
+                    on_change=apply_text_changes
+                )
             
         if self._param_panel.isVisible():
             self._param_panel.hide()
@@ -4563,7 +4614,19 @@ class PresetStatusButton(QWidget):
         self._update_glow_position()
         self.update()
     
+    def _calculate_and_set_initial_width(self):
+        """Calculate and set initial width using the exact drawing font"""
+        font = QFont()
+        font.setFamily(FONT_FAMILY)
+        font.setPixelSize(16)
+        font.setWeight(QFont.Weight.DemiBold)
+        fm = QFontMetrics(font)
+        text_width = fm.horizontalAdvance(self._text)
+        initial_width = max(self.MIN_WIDTH, min(self.MAX_WIDTH, text_width + self.PADDING))
 
+        self._current_width = initial_width
+        self._text_center_x = initial_width / 2.0  # Initialize center
+        self.setFixedWidth(initial_width)
     
     def shrink_for_overlap(self, shrink):
         """Temporarily shrink button to make room for other widgets"""
@@ -4573,10 +4636,42 @@ class PresetStatusButton(QWidget):
         self._update_width()
     
     def set_active(self, is_active, text="PRESETS"):
-        """Set active state and text"""
-        self._is_active = is_active
-        self._text = text.upper()
+        """Set active state and text with fade animation"""
+        new_text = text.upper()
         
+        # If nothing changed, do nothing
+        if self._text == new_text and self._is_active == is_active:
+             return
+             
+        # Store pending state
+        self._pending_active = is_active
+        self._pending_text = new_text
+        
+        # Start Fade Out
+        # We use the driver to ensure consistent behavior, but for opacity 
+        # linear or quad is usually best.
+        self._text_fade_driver.duration = self.text_fade_duration
+        self._text_fade_driver.easing_type = self.text_fade_easing
+        self._text_fade_driver.stop()
+        self._text_fade_driver.setStartValue(self._text_opacity)
+        self._text_fade_driver.setEndValue(0.0)
+        self._text_fade_driver.start()
+        
+        # Start Width Animation concurrently (don't wait for fade out)
+        # Use new_text to calculate target width
+        self._update_width(text=new_text)
+        
+    def _on_fade_out_finished(self):
+        """Called when text has faded out completely. Swap text and fade in."""
+        if self._text_opacity > 0.01: # Use epsilon for float comparison
+            # If we finished a Fade IN, do nothing
+            return
+            
+        # Apply new state
+        self._is_active = self._pending_active
+        self._text = self._pending_text
+        
+        # Update Colors
         if self._is_active:
             self._bg_color = QColor("#00AA00")
             self._text_color = QColor(255, 255, 255, 255)
@@ -4584,11 +4679,18 @@ class PresetStatusButton(QWidget):
             self._bg_color = QColor(255, 255, 255, 12)
             self._text_color = QColor(255, 255, 255, 100)
             
-        self._update_width()
+        # Start Fade In
+        self._text_fade_driver.stop()
+        self._text_fade_driver.setStartValue(0.0)
+        self._text_fade_driver.setEndValue(1.0)
+        self._text_fade_driver.start()
+        
         self.update()
     
-    def _update_width(self):
+    def _update_width(self, text=None):
         """Update width based on text content"""
+        target_text = text if text is not None else self._text
+        
         if self._temp_shrink:
             target = self.MIN_WIDTH
         else:
@@ -4597,18 +4699,22 @@ class PresetStatusButton(QWidget):
             font.setPixelSize(16)
             font.setWeight(QFont.Weight.DemiBold)
             fm = QFontMetrics(font)
-            text_width = fm.horizontalAdvance(self._text)
+            text_width = fm.horizontalAdvance(target_text)
             target = max(self.MIN_WIDTH, min(self.MAX_WIDTH, text_width + self.PADDING))
             
-        # Always update target width for rigid painting
-        self._target_width = target
-            
         if self.width() != target:
-
+            # Animate Width
             self._width_driver.stop()
             self._width_driver.setStartValue(self.width())
             self._width_driver.setEndValue(target)
             self._width_driver.start()
+            
+            # Animate Text Center to new middle
+            target_center = target / 2.0
+            self._text_pos_driver.stop()
+            self._text_pos_driver.setStartValue(self._text_center_x)
+            self._text_pos_driver.setEndValue(target_center)
+            self._text_pos_driver.start()
     
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -4650,7 +4756,11 @@ class PresetStatusButton(QWidget):
             painter.setClipping(False)
         
         # Text
-        painter.setPen(self._text_color)
+        text_color = QColor(self._text_color)
+        # Apply opacity animation
+        text_color.setAlphaF(text_color.alphaF() * self._text_opacity)
+        
+        painter.setPen(text_color)
         font = self.font()
         font.setFamily(FONT_FAMILY)
         font.setWeight(QFont.Weight.DemiBold if self._is_active else QFont.Weight.Medium)
@@ -4658,19 +4768,12 @@ class PresetStatusButton(QWidget):
         painter.setFont(font)
         
         # Draw text centered without elision/truncation
-        # Draw text centered with integer snapping to prevent sub-pixel "shivering"
-        fm = QFontMetrics(font)
-        text_w = fm.horizontalAdvance(self._text)
-        text_h = fm.ascent() # cap height approx
+        # Draw text centered at smoothed position
+        # Create a rect of same size, centered at (text_center_x, h/2)
+        text_rect = QRect(0, 0, w, h)
+        text_rect.moveCenter(QPoint(int(self._text_center_x), int(h/2)))
         
-        # Calculate centered X based on TARGET width (rigid positioning)
-        # This eliminates the "sliding" text effect and shivering during animation
-        # The text simply sits at the final destination.
-        final_w = getattr(self, '_target_width', w)
-        text_x = int((final_w - text_w) / 2)
-        
-        # Draw text at the rigid position
-        painter.drawText(QRect(text_x, 0, text_w, h), Qt.AlignmentFlag.AlignVCenter, self._text)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, self._text)
     
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:

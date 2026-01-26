@@ -186,14 +186,14 @@ class SiriGlowOverlay(QWidget):
     MASK_CORNER_RADIUS = 16             # Rounder corners to avoid boxy look
     
     # Blob appearance
-    BLOB_RADIUS = 72                    # Size of each color blob
-    BLOB_OPACITY_CENTER = 0           # Opacity at blob center (0-255) - MAX STRENGTH
+    BLOB_RADIUS = 70                    # Size of each color blob
+    BLOB_OPACITY_CENTER = 119           # Opacity at blob center (0-255) - MAX STRENGTH
     BLOB_OPACITY_MID = 255              # Opacity at blob mid-point (0-255) - STRONGER
     BLOB_OPACITY_EDGE = 0               # Opacity at blob edge (0-255)
     
     # Ellipse orbit
-    ELLIPSE_SCALE_X = 1.20               # Horizontal ellipse size (0.0-1.0, fraction of overlay width)
-    ELLIPSE_SCALE_Y = 1.28               # Vertical ellipse size (0.0-1.0, fraction of overlay height)
+    ELLIPSE_SCALE_X = 0.66               # Horizontal ellipse size (0.0-1.0, fraction of overlay width)
+    ELLIPSE_SCALE_Y = 0.86               # Vertical ellipse size (0.0-1.0, fraction of overlay height)
     
     # Pulsation
     PULSE_OPACITY_MIN = 0.26             # Minimum opacity during pulse (0.0-1.0)
