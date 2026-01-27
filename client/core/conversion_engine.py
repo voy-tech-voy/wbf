@@ -965,14 +965,14 @@ class ConversionEngine(QThread):
         format_type = self.params.get('format', 'jpg').lower()
         
         if format_type in ['jpg', 'jpeg']:
-            quality = self.params.get('quality', 85)
+            quality = int(self.params.get('quality', 85))
             # FFmpeg q:v scale is 1-31 (lower is better), convert from 1-100 scale
             output_args['q:v'] = max(1, min(31, int((100 - quality) * 31 / 100)))
         elif format_type == 'png':
-            quality = self.params.get('quality', 85)
+            quality = int(self.params.get('quality', 85))
             output_args['compression_level'] = min(9, max(0, (100 - quality) // 10))
         elif format_type == 'webp':
-            quality = self.params.get('quality', 85)
+            quality = int(self.params.get('quality', 85))
             output_args['quality'] = quality
             
         output = ffmpeg.output(stream, output_path, **output_args)

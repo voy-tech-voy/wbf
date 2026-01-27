@@ -275,8 +275,17 @@ class ImageTab(BaseTab):
         self._notify_param_change()
     
     def _parse_variants(self, text: str) -> list:
-        """Parse comma-separated variant values."""
+        """Parse comma-separated variant values as integers."""
         try:
-            return [v.strip() for v in text.split(',') if v.strip()]
+            result = []
+            for v in text.split(','):
+                v = v.strip()
+                if v:
+                    try:
+                        result.append(int(v))
+                    except ValueError:
+                        # Skip non-integer values
+                        continue
+            return result
         except:
             return []
