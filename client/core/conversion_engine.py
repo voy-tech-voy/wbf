@@ -1835,7 +1835,12 @@ class ConversionEngine(QThread):
     
     def _convert_video_to_gif_multiple_variants(self, file_path: str) -> bool:
         """Convert video to GIF with multiple variants using FFmpeg"""
+        original_type = self.params.get('type')
         try:
+            # Force type to 'gif' so get_output_path builds correct parameter suffixes
+            # (fps, colors, dither, etc.)
+            self.params['type'] = 'gif'
+            
             gif_variants = self.params.get('gif_variants', {})
             gif_resize_values = self.params.get('gif_resize_values', [])
             
@@ -1885,8 +1890,10 @@ class ConversionEngine(QThread):
                             if colors:
                                 self.params['ffmpeg_colors'] = int(colors)
                                 
-                            if dither:
-                                self.params['ffmpeg_dither'] = dither
+                            if dither is not None and str(dither).strip():
+                                d_val = int(dither)
+                                self.params['dither'] = d_val
+                                self.params['ffmpeg_dither'] = d_val
                                 
                             # Generate output path
                             output_path = self.get_output_path(file_path, 'gif')
@@ -1912,6 +1919,9 @@ class ConversionEngine(QThread):
         except Exception as e:
             self.status_updated.emit(f"Error in video-to-GIF multiple variants conversion: {str(e)}")
             return False
+        finally:
+            if original_type:
+                self.params['type'] = original_type
     
     def _convert_video_to_temp_gif(self, file_path: str, resize_variant: str = None, fps_variant: str = None) -> str:
         """Convert video to temporary GIF for variant processing"""
@@ -2308,7 +2318,15 @@ class ConversionEngine(QThread):
                     "bayer:bayer_scale=4": "quality2Medium",
                     "bayer:bayer_scale=3": "quality3High",
                     "bayer:bayer_scale=1": "quality4Higher",
-                    "floyd_steinberg": "quality5Best"
+                    "bayer:bayer_scale=1": "quality4Higher",
+                    "floyd_steinberg": "quality5Best",
+                    # Numeric mappings
+                    0: "quality0Lowest", "0": "quality0Lowest",
+                    1: "quality1Low",    "1": "quality1Low",
+                    2: "quality2Medium", "2": "quality2Medium",
+                    3: "quality3High",   "3": "quality3High",
+                    4: "quality4Higher", "4": "quality4Higher",
+                    5: "quality5Best",   "5": "quality5Best"
                 }
                 
                 # Check exact match first
