@@ -7,7 +7,7 @@ This tab handles GIF and WebM loop conversion with format-specific settings.
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, 
-    QSizePolicy, QFormLayout
+    QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
@@ -19,7 +19,6 @@ from client.gui.custom_widgets import (
     CustomTargetSizeSpinBox, LoopFormatSelector, TimeRangeSlider,
     UnifiedVariantInput
 )
-from client.gui.sections import ResizeSection
 from client.gui.theme import get_combobox_style
 
 COMBOBOX_STYLE = get_combobox_style(True)
@@ -103,48 +102,42 @@ class LoopTab(BaseTab):
         self.auto_resize_checkbox.setVisible(False)
         self.settings_group.add_row(self.auto_resize_checkbox)
         
-        # ============ GIF CONTROLS CONTAINER ============
-        self.gif_controls_container = QWidget()
-        gif_layout = QFormLayout(self.gif_controls_container)
-        gif_layout.setContentsMargins(0, 0, 0, 0)
-        gif_layout.setVerticalSpacing(14)
+        # ============ GIF-SPECIFIC CONTROLS ============
         
         # Multiple variants toggle
         self.gif_variants_checkbox = ThemedCheckBox("Multiple Variants (FPS, Colors, Qualities)")
         self.gif_variants_checkbox.toggled.connect(self._toggle_gif_variants)
-        gif_layout.addRow(self.gif_variants_checkbox)
+        self.settings_group.add_row(self.gif_variants_checkbox)
         
         # FPS
         self.gif_fps = CustomComboBox()
         self.gif_fps.addItems(["10", "12", "15", "18", "24"])
         self.gif_fps.setCurrentText("15")
         self.gif_fps_label = QLabel("FPS")
-        gif_layout.addRow(self.gif_fps_label, self.gif_fps)
+        self.settings_group.add_row(self.gif_fps_label, self.gif_fps)
         
         # FPS Variants
         self.gif_fps_variants = UnifiedVariantInput()
-        # self.gif_fps_variants.setPlaceholderText("e.g., 10,15,24")
-        self.gif_fps_variants.setText("10,15,24")
+        self.gif_fps_variants.setPlaceholderText("e.g., 10,15,24")
         self.gif_fps_variants.setVisible(False)
         self.gif_fps_variants_label = QLabel("FPS variants")
         self.gif_fps_variants_label.setVisible(False)
-        gif_layout.addRow(self.gif_fps_variants_label, self.gif_fps_variants)
+        self.settings_group.add_row(self.gif_fps_variants_label, self.gif_fps_variants)
         
         # Colors
         self.gif_colors = CustomComboBox()
         self.gif_colors.addItems(["8", "16", "32", "64", "128", "256"])
         self.gif_colors.setCurrentText("256")
         self.gif_colors_label = QLabel("Colors")
-        gif_layout.addRow(self.gif_colors_label, self.gif_colors)
+        self.settings_group.add_row(self.gif_colors_label, self.gif_colors)
         
         # Colors Variants
         self.gif_colors_variants = UnifiedVariantInput()
         self.gif_colors_variants.setPlaceholderText("e.g., 64,128,256")
-        self.gif_colors_variants.setText("32,64,128")
         self.gif_colors_variants.setVisible(False)
         self.gif_colors_variants_label = QLabel("Colors variants")
         self.gif_colors_variants_label.setVisible(False)
-        gif_layout.addRow(self.gif_colors_variants_label, self.gif_colors_variants)
+        self.settings_group.add_row(self.gif_colors_variants_label, self.gif_colors_variants)
         
         # Dither Quality
         self.gif_dither_slider = QSlider(Qt.Orientation.Horizontal)
@@ -159,60 +152,51 @@ class LoopTab(BaseTab):
         dither_layout = QHBoxLayout()
         dither_layout.addWidget(self.gif_dither_slider)
         dither_layout.addWidget(self.gif_dither_value)
-        gif_layout.addRow(self.gif_dither_label, dither_layout)
+        self.settings_group.add_row(self.gif_dither_label, dither_layout)
         
         # Dither Variants
         self.gif_dither_variants = UnifiedVariantInput()
         self.gif_dither_variants.setPlaceholderText("e.g., 0,3,5")
-        self.gif_dither_variants.setText("0,3,5")
         self.gif_dither_variants.setVisible(False)
         self.gif_dither_variants_label = QLabel("Quality variants (0-5)")
         self.gif_dither_variants_label.setVisible(False)
-        gif_layout.addRow(self.gif_dither_variants_label, self.gif_dither_variants)
+        self.settings_group.add_row(self.gif_dither_variants_label, self.gif_dither_variants)
         
         # Blur
         self.gif_blur = ThemedCheckBox("Reduce banding")
-        gif_layout.addRow(self.gif_blur)
+        self.settings_group.add_row(self.gif_blur)
         
-        # Add GIF container to main layout
-        self.settings_group.add_row(self.gif_controls_container)
-        
-        # ============ WEBM CONTROLS CONTAINER ============
-        self.webm_controls_container = QWidget()
-        webm_layout = QFormLayout(self.webm_controls_container)
-        webm_layout.setContentsMargins(0, 0, 0, 0)
-        webm_layout.setVerticalSpacing(14)
+        # ============ WEBM-SPECIFIC CONTROLS ============
         
         # WebM variants toggle
         self.webm_variants_checkbox = ThemedCheckBox("Multiple quality variants")
         self.webm_variants_checkbox.toggled.connect(self._toggle_webm_variants)
-        webm_layout.addRow(self.webm_variants_checkbox)
+        self.webm_variants_checkbox.setVisible(False)
+        self.settings_group.add_row(self.webm_variants_checkbox)
         
         # WebM Quality
         self.webm_quality = QSlider(Qt.Orientation.Horizontal)
         self.webm_quality.setRange(0, 63)
         self.webm_quality.setValue(30)
+        self.webm_quality.setVisible(False)
         self.webm_quality_value = QLabel("30")
+        self.webm_quality_value.setVisible(False)
         self.webm_quality.valueChanged.connect(lambda v: self.webm_quality_value.setText(str(v)))
         self.webm_quality_label = QLabel("Quality")
+        self.webm_quality_label.setVisible(False)
         
         webm_quality_layout = QHBoxLayout()
         webm_quality_layout.addWidget(self.webm_quality)
         webm_quality_layout.addWidget(self.webm_quality_value)
-        webm_layout.addRow(self.webm_quality_label, webm_quality_layout)
+        self.settings_group.add_row(self.webm_quality_label, webm_quality_layout)
         
         # WebM Quality Variants
         self.webm_quality_variants = UnifiedVariantInput()
         self.webm_quality_variants.setPlaceholderText("e.g., 20,30,40")
-        self.webm_quality_variants.setText("20,30,40")  
         self.webm_quality_variants.setVisible(False)
         self.webm_quality_variants_label = QLabel("Quality variants")
         self.webm_quality_variants_label.setVisible(False)
-        webm_layout.addRow(self.webm_quality_variants_label, self.webm_quality_variants)
-        
-        # Add WebM container to main layout
-        self.webm_controls_container.setVisible(False)  # Hidden by default
-        self.settings_group.add_row(self.webm_controls_container)
+        self.settings_group.add_row(self.webm_quality_variants_label, self.webm_quality_variants)
         
         # ============================================================
         # TRANSFORM FOLDER (Bottom)
@@ -233,13 +217,45 @@ class LoopTab(BaseTab):
         layout.addWidget(transform_row)
         
         # === RESIZE SECTION ===
-        self.resize_section = ResizeSection(
-            parent=self,
-            focus_callback=self._focus_callback,
-            variant_label="Size variants"
-        )
-        self.resize_section.paramChanged.connect(self._notify_param_change)
-        self.transform_group.add_row(self.resize_section)
+        self.resize_container = QWidget()
+        resize_layout = QVBoxLayout(self.resize_container)
+        resize_layout.setContentsMargins(0, 0, 0, 0)
+        resize_layout.setSpacing(8)
+        
+        self.resize_mode = CustomComboBox()
+        self.resize_mode.addItems(["No resize", "By width (pixels)", "By longer edge (pixels)", "By ratio (percent)"])
+        self.resize_mode.setStyleSheet(COMBOBOX_STYLE)
+        self.resize_mode.currentTextChanged.connect(self._on_resize_mode_changed)
+        resize_layout.addWidget(self.resize_mode)
+        
+        self.multiple_resize = ThemedCheckBox("Multiple size variants")
+        self.multiple_resize.toggled.connect(self._toggle_resize_mode)
+        resize_layout.addWidget(self.multiple_resize)
+        
+        single_val_row = QHBoxLayout()
+        self.resize_value_label = QLabel("Width (pixels)")
+        self.resize_value = CustomSpinBox(on_enter_callback=self._focus_callback)
+        self.resize_value.setRange(1, 10000)
+        self.resize_value.setValue(720)
+        single_val_row.addWidget(self.resize_value_label)
+        single_val_row.addWidget(self.resize_value)
+        resize_layout.addLayout(single_val_row)
+        
+        variants_row = QHBoxLayout()
+        self.resize_variants_label = QLabel("Size variants")
+        self.resize_variants = UnifiedVariantInput()
+        self.resize_variants.setPlaceholderText("e.g., 480,720,1080")
+        self.resize_variants.setText("480,720,1080")
+        variants_row.addWidget(self.resize_variants_label)
+        variants_row.addWidget(self.resize_variants)
+        resize_layout.addLayout(variants_row)
+        
+        self.resize_value.setVisible(False)
+        self.resize_value_label.setVisible(False)
+        self.resize_variants.setVisible(False)
+        self.resize_variants_label.setVisible(False)
+        
+        self.transform_group.add_row(self.resize_container)
         
         # === ROTATION SECTION ===
         self.rotate_container = QWidget()
@@ -300,8 +316,30 @@ class LoopTab(BaseTab):
         """Collect loop conversion parameters from UI."""
         is_gif = self.format_selector.currentText() == "GIF"
         
-        # Get resize params from ResizeSection
-        resize_params = self.resize_section.get_params()
+        # Map resize_mode + resize_value to current_resize format
+        resize_mode = self.resize_mode.currentText()
+        resize_value = self.resize_value.value()
+        
+        if resize_mode == "No resize":
+            current_resize = None
+        elif resize_mode == "By longer edge (pixels)":
+            current_resize = f"L{resize_value}"
+        elif resize_mode == "By ratio (percent)":
+            current_resize = f"{resize_value}%"
+        else:  # "By width (pixels)"
+            current_resize = str(resize_value)
+        
+        # Format resize variants based on resize_mode
+        raw_variants = self._parse_variants(self.resize_variants.text())
+        formatted_variants = []
+        if raw_variants:
+            for variant in raw_variants:
+                if resize_mode == "By longer edge (pixels)":
+                    formatted_variants.append(f"L{variant}")
+                elif resize_mode == "By ratio (percent)":
+                    formatted_variants.append(f"{variant}%")
+                else:  # "By width (pixels)" or "No resize"
+                    formatted_variants.append(str(variant))
         
         # Common parameters for both formats
         params = {
@@ -309,6 +347,11 @@ class LoopTab(BaseTab):
             'loop_format': self.format_selector.currentText(),
             'max_size_mb': self.max_size_spinbox.value() if self.max_size_spinbox.isVisible() else None,
             'auto_resize': self.auto_resize_checkbox.isChecked(),
+            'current_resize': current_resize,
+            'resize_mode': resize_mode,
+            'resize_value': resize_value,
+            'multiple_resize': self.multiple_resize.isChecked(),
+            'resize_variants': formatted_variants,
             'rotation_angle': self.rotation_angle.currentText(),
             'enable_time_cutting': self.enable_time_cutting.isChecked(),
             'time_start': self.time_range_slider.startValue() if self.enable_time_cutting.isChecked() else 0.0,
@@ -316,8 +359,6 @@ class LoopTab(BaseTab):
             'retime_enabled': self.enable_retime.isChecked(),
             'retime_speed': self.retime_slider.value() / 10.0 if self.enable_retime.isChecked() else 1.0,
         }
-        # Merge resize params
-        params.update(resize_params)
         
         # Add format-specific parameters only
         if is_gif:
@@ -346,11 +387,8 @@ class LoopTab(BaseTab):
         """Apply theme styling to all elements."""
         self._is_dark_theme = is_dark
         
-        # Update ResizeSection
-        self.resize_section.update_theme(is_dark)
-        
         # Update all CustomComboBox instances
-        comboboxes = [self.gif_fps, self.gif_colors]
+        comboboxes = [self.gif_fps, self.gif_colors, self.resize_mode]
         for combobox in comboboxes:
             if hasattr(combobox, 'update_theme'):
                 combobox.update_theme(is_dark)
@@ -358,7 +396,7 @@ class LoopTab(BaseTab):
         # Update all checkboxes
         checkboxes = [
             self.auto_resize_checkbox, self.gif_variants_checkbox, self.gif_blur,
-            self.webm_variants_checkbox,
+            self.webm_variants_checkbox, self.multiple_resize,
             self.enable_time_cutting, self.enable_retime
         ]
         for checkbox in checkboxes:
@@ -371,8 +409,8 @@ class LoopTab(BaseTab):
     def _update_format_visibility(self):
         """
         Centralized method to update format-specific control visibility.
-        Uses container widgets for clean, reliable visibility switching.
-        Also handles single vs variant control visibility within each container.
+        This is the single source of truth for GIF/WebM parameter visibility.
+        Checks both current format AND current mode to determine final visibility.
         """
         # Determine current format
         current_format = self.format_selector.currentText()
@@ -381,41 +419,55 @@ class LoopTab(BaseTab):
         # Use stored mode instead of inferring from widget visibility
         is_manual = (self._current_mode == "Manual")
         
-        # Show/hide entire containers based on format and mode
-        self.gif_controls_container.setVisible(is_gif and is_manual)
-        self.webm_controls_container.setVisible(not is_gif and is_manual)
+        # GIF controls: only visible when GIF is selected AND in manual mode
+        show_gif = is_gif and is_manual
+        gif_variants_on = self.gif_variants_checkbox.isChecked()
         
-        # Handle GIF variant controls (single vs multi-variant)
-        if is_gif and is_manual:
-            gif_variants_on = self.gif_variants_checkbox.isChecked()
-            
-            # FPS: show single OR variant, never both
-            self.gif_fps_label.setVisible(not gif_variants_on)
-            self.gif_fps.setVisible(not gif_variants_on)
-            self.gif_fps_variants_label.setVisible(gif_variants_on)
-            self.gif_fps_variants.setVisible(gif_variants_on)
-            
-            # Colors: show single OR variant, never both
-            self.gif_colors_label.setVisible(not gif_variants_on)
-            self.gif_colors.setVisible(not gif_variants_on)
-            self.gif_colors_variants_label.setVisible(gif_variants_on)
-            self.gif_colors_variants.setVisible(gif_variants_on)
-            
-            # Dither/Quality: show single OR variant, never both
-            self.gif_dither_label.setVisible(not gif_variants_on)
-            self.gif_dither_slider.setVisible(not gif_variants_on)
-            self.gif_dither_value.setVisible(not gif_variants_on)
-            self.gif_dither_variants_label.setVisible(gif_variants_on)
-            self.gif_dither_variants.setVisible(gif_variants_on)
+        # GIF variant checkbox (always visible when GIF mode is active)
+        self.gif_variants_checkbox.setVisible(show_gif)
         
-        # Handle WebM variant controls (single vs multi-variant)
-        if not is_gif and is_manual:
-            webm_variants_on = self.webm_variants_checkbox.isChecked()
-            
-            # Quality: show single OR variant, never both
-            self.webm_quality.setVisible(not webm_variants_on)
-            self.webm_quality_value.setVisible(not webm_variants_on)
-            self.webm_quality_variants.setVisible(webm_variants_on)
+        # GIF FPS controls (single value OR variants, never both)
+        self.gif_fps_label.setVisible(show_gif and not gif_variants_on)
+        self.gif_fps.setVisible(show_gif and not gif_variants_on)
+        self.gif_fps_variants_label.setVisible(show_gif and gif_variants_on)
+        self.gif_fps_variants.setVisible(show_gif and gif_variants_on)
+        
+        # GIF Colors controls (single value OR variants, never both)
+        self.gif_colors_label.setVisible(show_gif and not gif_variants_on)
+        self.gif_colors.setVisible(show_gif and not gif_variants_on)
+        self.gif_colors_variants_label.setVisible(show_gif and gif_variants_on)
+        self.gif_colors_variants.setVisible(show_gif and gif_variants_on)
+        
+        # GIF Dither controls (single value OR variants, never both)
+        self.gif_dither_label.setVisible(show_gif and not gif_variants_on)
+        self.gif_dither_slider.setVisible(show_gif and not gif_variants_on)
+        self.gif_dither_value.setVisible(show_gif and not gif_variants_on)
+        self.gif_dither_variants_label.setVisible(show_gif and gif_variants_on)
+        self.gif_dither_variants.setVisible(show_gif and gif_variants_on)
+        
+        # GIF Blur (always visible when GIF mode is active)
+        self.gif_blur.setVisible(show_gif)
+        
+        # WebM controls: only visible when WebM is selected AND in manual mode
+        show_webm = not is_gif and is_manual
+        webm_variants_on = self.webm_variants_checkbox.isChecked()
+        
+        # WebM variant checkbox (always visible when WebM mode is active)
+        self.webm_variants_checkbox.setVisible(show_webm)
+        
+        # WebM Quality controls (single value OR variants, never both)
+        self.webm_quality_label.setVisible(show_webm)
+        self.webm_quality.setVisible(show_webm and not webm_variants_on)
+        self.webm_quality_value.setVisible(show_webm and not webm_variants_on)
+        self.webm_quality_variants_label.setVisible(show_webm and webm_variants_on)
+        self.webm_quality_variants.setVisible(show_webm and webm_variants_on)
+        
+        # Force layout to recalculate and repaint
+        self.settings_group.get_content_layout().invalidate()
+        self.settings_group.content_widget.adjustSize()
+        self.settings_group.adjustSize()
+        self.adjustSize()
+        self.update()
     
     def set_mode(self, mode: str):
         """Set the size mode (Max Size, Presets, Manual)."""
@@ -434,7 +486,7 @@ class LoopTab(BaseTab):
     
     def set_transform_mode(self, mode: str):
         """Set which transform section is visible."""
-        self.resize_section.setVisible(mode == 'resize')
+        self.resize_container.setVisible(mode == 'resize')
         self.rotate_container.setVisible(mode == 'rotate')
         self.time_container.setVisible(mode == 'time')
     
@@ -467,6 +519,37 @@ class LoopTab(BaseTab):
         self._update_format_visibility()
         self._notify_param_change()
     
+    def _toggle_resize_mode(self, multiple: bool):
+        """Toggle resize variant mode."""
+        self.resize_value.setVisible(not multiple)
+        self.resize_value_label.setVisible(not multiple)
+        self.resize_variants.setVisible(multiple)
+        self.resize_variants_label.setVisible(multiple)
+        self._notify_param_change()
+    
+    def _on_resize_mode_changed(self, mode: str):
+        """Handle resize mode change."""
+        show_value = (mode != "No resize")
+        
+        if self.multiple_resize.isChecked():
+            self.resize_variants.setVisible(show_value)
+            self.resize_variants_label.setVisible(show_value)
+            self.resize_value.setVisible(False)
+            self.resize_value_label.setVisible(False)
+        else:
+            self.resize_value.setVisible(show_value)
+            self.resize_value_label.setVisible(show_value)
+            self.resize_variants.setVisible(False)
+            self.resize_variants_label.setVisible(False)
+        
+        if "width" in mode.lower():
+            self.resize_value_label.setText("Width (pixels)")
+        elif "longer" in mode.lower():
+            self.resize_value_label.setText("Longer edge (pixels)")
+        elif "ratio" in mode.lower():
+            self.resize_value_label.setText("Ratio (%)")
+        
+        self._notify_param_change()
     
     def _toggle_time_cutting(self, enabled: bool):
         """Toggle time range slider."""

@@ -15,9 +15,10 @@ from client.gui.tabs.base_tab import BaseTab
 from client.gui.command_group import CommandGroup
 from client.gui.custom_spinbox import CustomSpinBox
 from client.gui.custom_widgets import (
-    CustomComboBox, FormatButtonRow, RotationButtonRow, 
+    FormatButtonRow, RotationButtonRow, 
     ThemedCheckBox, CustomTargetSizeSpinBox, UnifiedVariantInput
 )
+from client.gui.sections import ResizeSection
 from client.gui.theme import get_combobox_style
 
 COMBOBOX_STYLE = get_combobox_style(True)  # Default dark mode
@@ -145,48 +146,13 @@ class ImageTab(BaseTab):
         layout.addWidget(transform_row)
         
         # === RESIZE SECTION ===
-        self.resize_container = QWidget()
-        resize_layout = QVBoxLayout(self.resize_container)
-        resize_layout.setContentsMargins(0, 0, 0, 0)
-        resize_layout.setSpacing(8)
-        
-        self.resize_mode = CustomComboBox()
-        self.resize_mode.addItems(["No resize", "By width (pixels)", "By longer edge (pixels)", "By ratio (percent)"])
-        self.resize_mode.setStyleSheet(COMBOBOX_STYLE)
-        self.resize_mode.currentTextChanged.connect(self._on_resize_mode_changed)
-        resize_layout.addWidget(self.resize_mode)
-        
-        self.multiple_resize = ThemedCheckBox("Multiple resize variants")
-        self.multiple_resize.toggled.connect(self._toggle_resize_mode)
-        resize_layout.addWidget(self.multiple_resize)
-        
-        # Single value row
-        single_val_row = QHBoxLayout()
-        self.resize_value_label = QLabel("Width (pixels)")
-        self.resize_value = CustomSpinBox(on_enter_callback=self._focus_callback)
-        self.resize_value.setRange(1, 10000)
-        self.resize_value.setValue(720)
-        single_val_row.addWidget(self.resize_value_label)
-        single_val_row.addWidget(self.resize_value)
-        resize_layout.addLayout(single_val_row)
-        
-        # Variants row
-        variants_row = QHBoxLayout()
-        self.resize_variants_label = QLabel("Resize values")
-        self.resize_variants = UnifiedVariantInput()
-        self.resize_variants.setPlaceholderText("e.g., 30,50,80 or 720,1280,1920")
-        self.resize_variants.setText("720,1280,1920")
-        variants_row.addWidget(self.resize_variants_label)
-        variants_row.addWidget(self.resize_variants)
-        resize_layout.addLayout(variants_row)
-        
-        # Initial visibility
-        self.resize_value_label.setVisible(False)
-        self.resize_value.setVisible(False)
-        self.resize_variants_label.setVisible(False)
-        self.resize_variants.setVisible(False)
-        
-        self.transform_group.add_row(self.resize_container)
+        self.resize_section = ResizeSection(
+            parent=self,
+            focus_callback=self._focus_callback,
+            variant_label="Resize values"
+        )
+        self.resize_section.paramChanged.connect(self._notify_param_change)
+        self.transform_group.add_row(self.resize_section)
         
         # === ROTATION SECTION ===
         self.rotate_container = QWidget()
@@ -203,30 +169,8 @@ class ImageTab(BaseTab):
     
     def get_params(self) -> dict:
         """Collect image conversion parameters from UI."""
-        # Map resize_mode + resize_value to current_resize format
-        resize_mode = self.resize_mode.currentText()
-        resize_value = self.resize_value.value()
-        
-        if resize_mode == "No resize":
-            current_resize = None
-        elif resize_mode == "By longer edge (pixels)":
-            current_resize = f"L{resize_value}"
-        elif resize_mode == "By ratio (percent)":
-            current_resize = f"{resize_value}%"
-        else:  # "By width (pixels)"
-            current_resize = str(resize_value)
-        
-        # Format resize variants based on resize_mode
-        raw_variants = self._parse_variants(self.resize_variants.text())
-        formatted_variants = []
-        if raw_variants:
-            for variant in raw_variants:
-                if resize_mode == "By longer edge (pixels)":
-                    formatted_variants.append(f"L{variant}")
-                elif resize_mode == "By ratio (percent)":
-                    formatted_variants.append(f"{variant}%")
-                else:  # "By width (pixels)" or "No resize"
-                    formatted_variants.append(str(variant))
+        # Get resize params from ResizeSection
+        resize_params = self.resize_section.get_params()
         
         params = {
             'type': 'image',
@@ -236,25 +180,21 @@ class ImageTab(BaseTab):
             'quality_variants': self._parse_variants(self.quality_variants.text()),
             'max_size_mb': self.max_size_spinbox.value() if self.max_size_spinbox.isVisible() else None,
             'auto_resize': self.auto_resize_checkbox.isChecked(),
-            'current_resize': current_resize,
-            'resize_mode': resize_mode,
-            'resize_value': resize_value,
-            'multiple_resize': self.multiple_resize.isChecked(),
-            'resize_variants': formatted_variants,
             'rotation_angle': self.rotation_angle.currentText(),
         }
+        # Merge resize params
+        params.update(resize_params)
         return params
     
     def update_theme(self, is_dark: bool):
         """Apply theme styling to all elements."""
         self._is_dark_theme = is_dark
         
-        # Update CustomComboBox instance
-        if hasattr(self.resize_mode, 'update_theme'):
-            self.resize_mode.update_theme(is_dark)
+        # Update ResizeSection
+        self.resize_section.update_theme(is_dark)
         
         # Update checkboxes
-        for checkbox in [self.multiple_qualities, self.auto_resize_checkbox, self.multiple_resize]:
+        for checkbox in [self.multiple_qualities, self.auto_resize_checkbox]:
             if hasattr(checkbox, 'update_theme'):
                 checkbox.update_theme(is_dark)
     
@@ -285,7 +225,7 @@ class ImageTab(BaseTab):
     
     def set_transform_mode(self, mode: str):
         """Set which transform section is visible (resize or rotate)."""
-        self.resize_container.setVisible(mode == 'resize')
+        self.resize_section.setVisible(mode == 'resize')
         self.rotate_container.setVisible(mode == 'rotate')
     
     # -------------------------------------------------------------------------

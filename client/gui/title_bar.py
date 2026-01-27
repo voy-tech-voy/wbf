@@ -47,8 +47,9 @@ class TitleBarWindow(QMainWindow):
     
     TITLE_BAR_HEIGHT = 45
     
-    def __init__(self, is_trial=False, is_dev_mode=False):
-        super().__init__()
+    def __init__(self, parent=None, is_trial=False, is_dev_mode=False):
+        # Pass parent to QMainWindow for proper z-order grouping
+        super().__init__(parent)
         
         self.is_trial = is_trial
         self.is_dev_mode = is_dev_mode
@@ -57,7 +58,7 @@ class TitleBarWindow(QMainWindow):
         self._is_dark_theme = True
         
         # Window flags: Frameless, Tool (no taskbar), Translucent for blur
-        # Note: Do NOT use WindowStaysOnTopHint - it makes title bar stay on top of ALL apps
+        # Setting parent ensures z-order follows main window
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.Tool  # Won't appear in taskbar

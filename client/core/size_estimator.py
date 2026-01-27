@@ -29,7 +29,7 @@ def _get_utils():
     Runtime import of utility functions from conversion_engine to avoid circular imports.
     Returns a dict of utility functions.
     """
-    from client.core.conversion_engine import (
+    from client.core.ffmpeg_utils import (
         get_video_dimensions,
         get_video_duration,
         has_audio_stream,

@@ -1,0 +1,188 @@
+"""
+Suffix and path management for file generation.
+Handles creation of descriptive filenames based on conversion parameters.
+"""
+import os
+from pathlib import Path
+from typing import Dict, List, Optional
+from client.core.ffmpeg_utils import get_video_dimensions, ensure_output_directory_exists
+from client.core.dimension_utils import calculate_target_dimensions, format_dimension_suffix
+
+def _resolve_output_dir(params: Dict, input_path: Path) -> Path:
+    """Resolve output directory honoring custom path or nested option."""
+    output_dir = params.get('output_dir', '')
+    use_nested = params.get('use_nested_output', False)
+    nested_name = params.get('nested_output_name', 'output')
+    
+    # If custom output directory is set, use it
+    if output_dir and os.path.isdir(output_dir):
+        base_dir = Path(output_dir)
+        # If both custom dir AND nested output are checked, append nested folder
+        if use_nested:
+            base_dir = base_dir / nested_name
+    else:
+        # Default to source directory
+        base_dir = input_path.parent
+        if use_nested:
+            base_dir = base_dir / nested_name
+            
+    return base_dir
+
+class SuffixManager:
+    """Manages generation of output paths and suffixes for converted files."""
+    
+    @staticmethod
+    def get_output_path(file_path: str, params: Dict, format_ext: str, variants: List[Dict] = None) -> str:
+        """
+        Generate full output path including suffixes.
+        
+        Args:
+            file_path: Original input file path
+            params: Dictionary of conversion parameters
+            format_ext: Target format extension (e.g. 'gif', 'mp4')
+            variants: Optional list of dicts with 'type' and 'value' for variants
+                     (e.g. [{'type': 'size', 'value': '720'}, {'type': 'quality', 'value': 23}])
+        """
+        path = Path(file_path)
+        base_dir = _resolve_output_dir(params, path)
+        base_name = path.stem
+        
+        # Base Suffix (usually '_converted')
+        suffix = params.get('suffix', '_converted')
+        
+
+        
+        # Variant Suffixes
+        variant_suffix = ""
+        suppressed_types = []
+        
+        has_size_variant = False
+        if variants:
+            for v in variants:
+                variant_type = v.get('type')
+                variant_value = v.get('value')
+                if variant_type and variant_value is not None:
+                    # check if this is a size variant to suppress base resize suffix
+                    if variant_type in ['size', 'resize']:
+                        has_size_variant = True
+                        suppressed_types.append('resize')
+                    
+                    if variant_type == 'quality':
+                        suppressed_types.append('quality')
+                        
+                    part = SuffixManager.generate_variant_suffix(file_path, variant_type, variant_value, params)
+                    variant_suffix += part
+        
+        # Generated Suffixes (Params)
+        # Pass suppressed_types to avoid double suffixes
+        generated_part = SuffixManager.generate_suffix(params, format_ext, skip_resize=has_size_variant, file_path=file_path, suppressed_types=suppressed_types)
+        suffix += generated_part
+        
+        full_filename = f"{base_name}{suffix}{variant_suffix}.{format_ext}"
+        output_path = base_dir / full_filename
+        
+        # Ensure dir exists
+        ensure_output_directory_exists(str(base_dir))
+        
+        return str(output_path)
+
+    @staticmethod
+    def generate_suffix(params: Dict, format_ext: str, skip_resize: bool = False, file_path: str = None, suppressed_types: List[str] = None) -> str:
+        """Generate suffix string based on params (Rotation, Resize, Loop, Quality)."""
+        parts = []
+        p = params
+        suppressed = suppressed_types or []
+        
+        # 1. Resize Suffixes
+        if not skip_resize:
+            # Check 'current_resize' (Video/WebM single) or 'gif_resize_values' (GIF)
+            resize_val = None
+            if 'gif_resize_values' in p and p['gif_resize_values']:
+                resize_val = p['gif_resize_values'][0]
+            elif 'current_resize' in p:
+                 resize_val = p['current_resize']
+            
+            if resize_val and file_path:
+                # Use dimension_utils for consistent calculation
+                try:
+                    width, height = get_video_dimensions(file_path)
+                    if width > 0 and height > 0:
+                        dims = calculate_target_dimensions(file_path, str(resize_val), width, height)
+                        if dims:
+                            parts.append(format_dimension_suffix(dims[0], dims[1]))
+                        else:
+                            # Fallback to raw value if calculation fails
+                            parts.append(f"_{resize_val}")
+                    else:
+                        parts.append(f"_{resize_val}")
+                except Exception:
+                    parts.append(f"_{resize_val}")
+        
+        # 2. Rotation Suffix (Video Tab)
+        rot = p.get('rotation_angle')
+        if rot and rot != 'No rotation':
+             if '90' in rot: parts.append('_rot90')
+             elif '180' in rot: parts.append('_rot180')
+             elif '270' in rot: parts.append('_rot270')
+             else: parts.append('_rot')
+        
+        # 3. GIF Specifics (FPS/Colors/Dither)
+        is_gif = format_ext.lower() == 'gif' or p.get('type') == 'gif' or p.get('loop_format') == 'GIF'
+        if is_gif:
+             # FPS
+             if 'ffmpeg_fps' in p:
+                 parts.append(f"_{p['ffmpeg_fps']}fps")
+             elif 'gif_fps' in p and p.get('type') == 'loop': 
+                  parts.append(f"_{p['gif_fps']}fps")
+             
+             # Colors
+             if 'ffmpeg_colors' in p:
+                 parts.append(f"_{p['ffmpeg_colors']}colors")
+            
+             # Dither
+             if 'ffmpeg_dither' in p and p.get('gif_multiple_variants'):
+                parts.append(f"_d{p['ffmpeg_dither']}")
+
+        # 4. Quality Suffix For Non-GIF (e.g. WebM/MP4)
+        else:
+             # Only if quality variants are OFF (otherwise handled by explicit variant_info)
+             # AND quality is not in suppressed types
+             if not p.get('multiple_qualities') and not p.get('webm_multiple_variants') and 'quality' not in suppressed:
+                 q_val = None
+                 if 'webm_quality' in p:
+                     q_val = p['webm_quality']
+                 elif 'quality' in p:
+                     q_val = p['quality']
+                 
+                 if q_val is not None:
+                      parts.append(f"_q{q_val}")
+                      
+        return "".join(parts)
+
+    @staticmethod
+    def generate_variant_suffix(file_path: str, variant_type: str, value, params: Dict) -> str:
+        """Generate suffix for a specific variant (Size, Quality, etc)."""
+        if variant_type == 'quality':
+            return f"_q{value}"
+            
+        elif variant_type == 'size' or variant_type == 'resize':
+            # Use dimension_utils for consistent calculation
+            try:
+                width, height = get_video_dimensions(file_path)
+                if width > 0 and height > 0:
+                    dims = calculate_target_dimensions(file_path, str(value), width, height)
+                    if dims:
+                        return format_dimension_suffix(dims[0], dims[1])
+                # Fallback to raw value
+                return f"_{value}"
+            except Exception:
+                return f"_{value}"
+                
+        elif variant_type == 'fps':
+             return f"_{value}fps"
+        elif variant_type == 'colors':
+             return f"_{value}colors"
+        elif variant_type == 'dither':
+             return f"_d{value}"
+             
+        return f"_{value}"

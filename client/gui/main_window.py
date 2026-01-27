@@ -150,7 +150,9 @@ class MainWindow(QMainWindow):
         root_layout.setContentsMargins(0, 0, 0, 0)
         
         # Create SEPARATE title bar window (with blur)
+        # Parent=self ensures z-order follows main window
         self.title_bar_window = TitleBarWindow(
+            parent=self,
             is_trial=self.is_trial,
             is_dev_mode=self.DEVELOPMENT_MODE
         )
@@ -569,16 +571,16 @@ class MainWindow(QMainWindow):
         output_mode = self.output_footer.get_output_mode()
         if output_mode == "source":
             params['output_same_folder'] = True
-            params['output_nested'] = False
+            params['use_nested_output'] = False  # Fixed: was 'output_nested'
             params['output_custom'] = False
         elif output_mode == "organized":
             params['output_same_folder'] = False
-            params['output_nested'] = True
-            params['nested_folder_name'] = self.output_footer.get_organized_name()
+            params['use_nested_output'] = True  # Fixed: was 'output_nested'
+            params['nested_output_name'] = self.output_footer.get_organized_name()  # Fixed: was 'nested_folder_name'
             params['output_custom'] = False
         elif output_mode == "custom":
             params['output_same_folder'] = False
-            params['output_nested'] = False
+            params['use_nested_output'] = False  # Fixed: was 'output_nested'
             params['output_custom'] = True
             params['output_dir'] = self.output_footer.get_custom_path()
         
