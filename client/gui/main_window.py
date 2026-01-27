@@ -118,7 +118,11 @@ class MainWindow(QMainWindow):
         self.setup_ui()
         self.setup_status_bar()
         self.connect_signals()
-        self.apply_theme()
+        
+        # Connect to theme changes and apply initial theme
+        self.theme_manager.theme_changed.connect(self._on_theme_changed)
+        self._on_theme_changed(self.theme_manager.is_dark_mode())
+        
         self.check_tools()
         
         # Reset drop area rendering after 1ms
@@ -776,22 +780,20 @@ class MainWindow(QMainWindow):
             
             self.dialogs.show_tool_status(message)
         
-    def apply_theme(self):
-        """Apply the current theme to the main window"""
-        # Apply main window styles
+    def _on_theme_changed(self, is_dark: bool):
+        """Handle theme changes via ThemeManager signal"""
+        # Apply main window styles (with caching to avoid redundant updates)
         main_style = self.theme_manager.get_main_window_style()
-        self.setStyleSheet(main_style)
         
-        # NOTE: convert_btn styling removed - button now in OutputFooter
+        # Only call setStyleSheet if the style actually changed
+        if not hasattr(self, '_cached_main_style') or self._cached_main_style != main_style:
+            self.setStyleSheet(main_style)
+            self._cached_main_style = main_style
         
         # Update drag drop area theme
         self.drag_drop_area.set_theme_manager(self.theme_manager)
         
-        # Do not clear files when switching themes
-        # self.drag_drop_area.clear_files()
-        
-        # Update command panel theme (for toggle boxes)
-        is_dark = self.theme_manager.get_current_theme() == 'dark'
+        # Update command panel theme
         if hasattr(self.command_panel, 'update_theme'):
             self.command_panel.update_theme(is_dark)
         
@@ -833,7 +835,8 @@ class MainWindow(QMainWindow):
         current_theme = self.theme_manager.get_current_theme()
         new_theme = 'light' if current_theme == 'dark' else 'dark'
         self.theme_manager.set_theme(new_theme)
-        self.apply_theme()
+        # Note: Widgets auto-update via theme_changed signal
+        # MainWindow-specific updates handled in _on_theme_changed()
         
     def toggle_status_bar(self):
         """Toggle the visibility of the status bar section"""

@@ -58,9 +58,9 @@ class StyleFactory:
             """,
             'drag_over': f"""
                 QListWidget {{
-                    border: 3px dashed {Theme.success()};
+                    border: 4px dashed rgba(255, 128, 0, 0.8);        /* ORANGE - Drag Border */
                     border-radius: {Theme.RADIUS_LG}px;
-                    background-color: {Theme.color_with_alpha('accent_success', 0.1)};
+                    background-color: rgba(0, 255, 255, 0.3);         /* CYAN - Drag BG */
                     color: {Theme.success()};
                     font-size: {Theme.FONT_SIZE_BASE}px;
                     padding: 10px;

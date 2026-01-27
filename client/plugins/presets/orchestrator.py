@@ -303,3 +303,7 @@ class PresetOrchestrator(QObject):
     def parameter_form(self) -> Optional[ParameterForm]:
         """Get the parameter form widget."""
         return self._parameter_form
+    
+    def update_theme(self, is_dark: bool):
+        """Update theme for gallery and all preset components."""
+        self._gallery.update_theme(is_dark)

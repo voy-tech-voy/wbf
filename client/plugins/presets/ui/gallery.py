@@ -47,6 +47,7 @@ class PresetGallery(QWidget):
         self._presets: List[PresetDefinition] = []
         self._meta = {}
         self._row_widgets: List[QWidget] = []  # Track row widgets for cleanup
+        self._is_dark = True  # Default to dark mode
         
         # Enable proper background painting
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -106,23 +107,13 @@ class PresetGallery(QWidget):
         from client.plugins.presets.ui.parameter_form import ParameterForm
         self._param_panel = QFrame()
         self._param_panel.setObjectName("ParamPanel")
-        self._param_panel.setStyleSheet("""
-            QFrame#ParamPanel {
-                background-color: rgba(30, 30, 30, 0.95);
-                border-radius: 8px;
-                padding: 12px;
-            }
-        """)
+        self._update_param_panel_style()
         
         param_layout = QVBoxLayout(self._param_panel)
         param_layout.setContentsMargins(12, 12, 12, 12)
         
         self._selected_preset_label = QLabel("Settings")
-        self._selected_preset_label.setStyleSheet("""
-            color: #F5F5F7;
-            font-weight: bold;
-            font-size: 14px;
-        """)
+        self._update_preset_label_style()
         param_layout.addWidget(self._selected_preset_label)
         
         self._parameter_form = ParameterForm()
@@ -131,22 +122,42 @@ class PresetGallery(QWidget):
         self._param_panel.hide()
         main_layout.addWidget(self._param_panel)
     
+    def _update_param_panel_style(self):
+        """Update parameter panel background based on theme."""
+        self._param_panel.setStyleSheet(f"""
+            QFrame#ParamPanel {{
+                background-color: {Theme.color_with_alpha('surface_main', 0.95)};
+                border-radius: {Theme.RADIUS_LG}px;
+                padding: 12px;
+            }}
+        """)
+    
+    def _update_preset_label_style(self):
+        """Update preset label style based on theme."""
+        self._selected_preset_label.setStyleSheet(f"""
+            color: {Theme.text()};
+            font-weight: bold;
+            font-size: {Theme.FONT_SIZE_LG}px;
+            font-family: '{Theme.FONT_BODY}';
+        """)
     
     def _apply_styles(self):
         """Apply gallery-specific styles."""
-        self.setStyleSheet("""
-            QWidget#PresetGallery {
-                background-color: rgba(40, 40, 40, 0.9);
-            }
-            QLabel#CategoryLabel {
-                color: #86868B;
-                font-size: 13px;
+        # Use theme-aware background with opacity
+        bg_color = Theme.color_with_alpha('app_bg', 0.9)
+        self.setStyleSheet(f"""
+            QWidget#PresetGallery {{
+                background-color: {bg_color};
+            }}
+            QLabel#CategoryLabel {{
+                color: {Theme.text_muted()};
+                font-size: {Theme.FONT_SIZE_SM}px;
                 font-weight: 600;
                 letter-spacing: 1px;
                 padding: 4px 0px;
                 margin-top: 8px;
                 background: transparent;
-            }
+            }}
         """)
     
     def get_parameter_values(self) -> dict:
@@ -424,4 +435,22 @@ class PresetGallery(QWidget):
         painter.fillRect(self.rect(), QColor(20, 20, 20, 180))
         
         super().paintEvent(event)
+    
+    def update_theme(self, is_dark: bool):
+        """Update theme for gallery and all child components."""
+        self._is_dark = is_dark
+        Theme.set_dark_mode(is_dark)
+        
+        # Update gallery styles
+        self._apply_styles()
+        self._update_param_panel_style()
+        self._update_preset_label_style()
+        
+        # Update parameter form
+        self._parameter_form.update_theme(is_dark)
+        
+        # Update all visible cards
+        for card in self._cards:
+            if hasattr(card, 'update_theme'):
+                card.update_theme(is_dark)
 

@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QLabel, QPushButton, QFileDialog, QMessageBox, QStyledItemDelegate
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QEvent, QSize, QByteArray
+from PyQt6.QtCore import Qt, pyqtSignal, QEvent, QSize, QByteArray, QObject
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QPixmap, QIcon, QAction, QPainter, QColor, QCursor, QBrush
 from PyQt6.QtSvg import QSvgRenderer
 import os
@@ -371,11 +371,11 @@ class DragDropArea(QWidget):
         base_style = f"""
             QListWidget#DropZone {{
                 background-color: {Theme.surface()};
-                border: 2px dashed {Theme.border()};
+                border: 6px dashed {Theme.border()};
                 border-radius: {Theme.RADIUS_LG}px;
                 color: {Theme.text()};
                 font-size: {Theme.FONT_SIZE_BASE}px;
-                padding: 10px;
+                padding: 0px;
                 outline: none;
             }}
             QListWidget#DropZone:hover {{
@@ -485,9 +485,10 @@ class DragDropArea(QWidget):
         self.reset_list_style()
         self.update_placeholder_text()
         
-        # Note: File buttons and Preset button have been moved to MainWindow's control bar
-        # Theme updates for those buttons are handled by MainWindow
-        pass
+        # Propagate theme to preset orchestrator
+        if hasattr(self, '_preset_orchestrator') and self._preset_orchestrator:
+            is_dark = theme_manager.current_theme == 'dark'
+            self._preset_orchestrator.update_theme(is_dark)
         
     def add_files_dialog(self):
         """Open file dialog to add files"""
@@ -768,6 +769,20 @@ class DragDropArea(QWidget):
             )
             # Add scrollbar styling
             modified_style += self._get_scrollbar_style()
+            # Also override padding and hover state to strip Theme Factory defaults
+            # START RESTORATION: User wants dashed line back, but NO padding (thick outline) and NO grey bg
+            modified_style += f"""
+                QListWidget {{
+                    border: 6px dashed {Theme.border()};
+                    border-radius: {Theme.RADIUS_LG}px;
+                    padding: 0px;
+                    background-color: transparent;
+                }}
+                QListWidget:hover {{
+                    border-color: {Theme.border_focus()};
+                    background-color: transparent;
+                }}
+            """
             self.file_list_widget.setStyleSheet(modified_style)
             
             # Add wrapper to list widget with full vertical height
@@ -784,9 +799,13 @@ class DragDropArea(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, "PLACEHOLDER")
             self.file_list_widget.addItem(item)
             self.file_list_widget.setItemWidget(item, wrapper)
+            
+            self.file_list_widget.setItemWidget(item, wrapper)
+            
         else:
             # Remove any placeholder items if files are present
             items_to_remove = []
+
             for i in range(self.file_list_widget.count()):
                 item = self.file_list_widget.item(i)
                 if item and item.data(Qt.ItemDataRole.UserRole) == "PLACEHOLDER":
@@ -798,6 +817,8 @@ class DragDropArea(QWidget):
             
             # Restore original list widget styling
             self.reset_list_style()
+
+
                     
     def remove_file_by_index(self, index):
         """Remove a file by its index in the list"""
@@ -932,4 +953,5 @@ class DragDropArea(QWidget):
     def get_files(self):
         """Return the list of selected files"""
         return self.file_list.copy()
+
 

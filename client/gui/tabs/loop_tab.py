@@ -346,25 +346,17 @@ class LoopTab(BaseTab):
         """Apply theme styling to all elements."""
         self._is_dark_theme = is_dark
         
-        # Update ResizeSection
+        # Update ResizeSection (doesn't auto-connect to ThemeManager)
         self.resize_section.update_theme(is_dark)
         
-        # Update all CustomComboBox instances
-        comboboxes = [self.gif_fps, self.gif_colors]
-        for combobox in comboboxes:
-            if hasattr(combobox, 'update_theme'):
-                combobox.update_theme(is_dark)
+        # Note: CustomComboBox widgets auto-update via ThemeManager signal
+        # No need to manually update: gif_fps, gif_colors
         
-        # Update all checkboxes
-        checkboxes = [
-            self.auto_resize_checkbox, self.gif_variants_checkbox, self.gif_blur,
-            self.webm_variants_checkbox,
-            self.enable_time_cutting, self.enable_retime
-        ]
-        for checkbox in checkboxes:
-            if hasattr(checkbox, 'update_theme'):
-                checkbox.update_theme(is_dark)
+        # Note: ThemedCheckBox widgets auto-update via ThemeManager signal
+        # No need to manually update: auto_resize_checkbox, gif_variants_checkbox, 
+        # gif_blur, webm_variants_checkbox, enable_time_cutting, enable_retime
         
+        # Update time range slider (doesn't auto-connect to ThemeManager)
         if hasattr(self.time_range_slider, 'update_theme'):
             self.time_range_slider.update_theme(is_dark)
     

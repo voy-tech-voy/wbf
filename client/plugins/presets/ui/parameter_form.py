@@ -11,10 +11,12 @@ from PyQt6.QtWidgets import (
     QButtonGroup, QFrame
 )
 from PyQt6.QtCore import Qt, pyqtSignal
+from client.gui.custom_widgets import ThemedCheckBox
 
 from jinja2 import Environment, StrictUndefined
 
 from client.plugins.presets.logic.models import ParameterDefinition, ParameterType
+from client.gui.theme import Theme
 
 
 class SegmentedPill(QWidget):
@@ -26,6 +28,7 @@ class SegmentedPill(QWidget):
         super().__init__(parent)
         self._options = options
         self._current_value = default or (options[0] if options else "")
+        self._is_dark = True  # Default to dark mode
         
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -57,30 +60,40 @@ class SegmentedPill(QWidget):
         self._apply_styles()
     
     def _apply_styles(self):
+        """Apply theme-aware styles to buttons."""
         for opt, btn in self._buttons.items():
             if opt == self._current_value:
-                btn.setStyleSheet("""
-                    QPushButton {
-                        background-color: #00E0FF;
-                        color: #000000;
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {Theme.success()};
+                        color: {Theme.bg()};
                         border: none;
                         font-weight: bold;
-                        border-radius: 4px;
-                    }
+                        font-size: {Theme.FONT_SIZE_SM}px;
+                        border-radius: {Theme.RADIUS_MD}px;
+                    }}
                 """)
             else:
-                btn.setStyleSheet("""
-                    QPushButton {
-                        background-color: #2a2a2a;
-                        color: #888888;
-                        border: 1px solid #444444;
-                        border-radius: 4px;
-                    }
-                    QPushButton:hover {
-                        background-color: #3a3a3a;
-                        color: #ffffff;
-                    }
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {Theme.surface()};
+                        color: {Theme.text_muted()};
+                        border: 1px solid {Theme.border()};
+                        font-size: {Theme.FONT_SIZE_SM}px;
+                        border-radius: {Theme.RADIUS_MD}px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {Theme.color('surface_hover')};
+                        color: {Theme.text()};
+                        border: 1px solid {Theme.border_focus()};
+                    }}
                 """)
+    
+    def update_theme(self, is_dark: bool):
+        """Update styles when theme changes."""
+        self._is_dark = is_dark
+        Theme.set_dark_mode(is_dark)
+        self._apply_styles()
     
     def value(self) -> str:
         return self._current_value
@@ -114,15 +127,22 @@ class ParameterForm(QWidget):
         self._widgets: Dict[str, QWidget] = {}
         self._containers: Dict[str, QWidget] = {}  # For visibility control
         self._jinja_env = Environment(undefined=StrictUndefined)
+        self._is_dark = True  # Default to dark mode
         
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(8, 8, 8, 8)
         self._layout.setSpacing(12)
         
-        self.setStyleSheet("""
-            QLabel { color: #F5F5F7; font-size: 12px; }
-            QCheckBox { color: #F5F5F7; }
-            QCheckBox::indicator { width: 18px; height: 18px; }
+        self._apply_styles()
+    
+    def _apply_styles(self):
+        """Apply theme-aware styles."""
+        self.setStyleSheet(f"""
+            QLabel {{ 
+                color: {Theme.text()}; 
+                font-size: {Theme.FONT_SIZE_SM}px;
+                font-family: '{Theme.FONT_BODY}';
+            }}
         """)
     
     def set_parameters(self, params: List[ParameterDefinition], meta: Dict[str, Any] = None):
@@ -179,9 +199,13 @@ class ParameterForm(QWidget):
         widget = None
         
         if param.type == ParameterType.TOGGLE:
-            widget = QCheckBox()
+            # Use ThemedCheckBox for consistent styling
+            # Using empty text since label is already displayed above
+            widget = ThemedCheckBox("")
             widget.setChecked(bool(param.default))
-            widget.stateChanged.connect(lambda: self._on_value_changed())
+            # ThemedCheckBox uses toggled signal, but stateChanged logic remains compatible 
+            # if we use lambda or connect properly
+            widget.toggled.connect(lambda: self._on_value_changed())
             
         elif param.type == ParameterType.SLIDER:
             row = QHBoxLayout()
@@ -280,3 +304,14 @@ class ParameterForm(QWidget):
         """Update meta context and re-evaluate visibility."""
         self._meta = meta
         self._update_visibility()
+    
+    def update_theme(self, is_dark: bool):
+        """Update theme for all widgets."""
+        self._is_dark = is_dark
+        Theme.set_dark_mode(is_dark)
+        self._apply_styles()
+        
+        # Update all child widgets
+        for widget in self._widgets.values():
+            if hasattr(widget, 'update_theme'):
+                widget.update_theme(is_dark)

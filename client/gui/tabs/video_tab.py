@@ -246,16 +246,14 @@ class VideoTab(BaseTab):
         """Apply theme styling to all elements."""
         self._is_dark_theme = is_dark
         
-        # Update ResizeSection
+        # Update ResizeSection (doesn't auto-connect to ThemeManager)
         self.resize_section.update_theme(is_dark)
         
-        # Update checkboxes
-        for checkbox in [self.multiple_qualities, self.auto_resize_checkbox, 
-                        self.enable_time_cutting, self.enable_retime]:
-            if hasattr(checkbox, 'update_theme'):
-                checkbox.update_theme(is_dark)
+        # Note: ThemedCheckBox widgets auto-update via ThemeManager signal
+        # No need to manually update: multiple_qualities, auto_resize_checkbox, 
+        # enable_time_cutting, enable_retime
         
-        # Update time range slider
+        # Update time range slider (doesn't auto-connect to ThemeManager)
         if hasattr(self.time_range_slider, 'update_theme'):
             self.time_range_slider.update_theme(is_dark)
     

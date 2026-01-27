@@ -167,3 +167,8 @@ class PresetCard(QFrame):
     def preset(self) -> PresetDefinition:
         """Get the preset definition."""
         return self._preset
+    
+    def update_theme(self, is_dark: bool):
+        """Update card styling when theme changes."""
+        Theme.set_dark_mode(is_dark)
+        self._apply_styles()
