@@ -332,7 +332,7 @@ class TitleBarWindow(QMainWindow):
         # Update theme button icon with tint
         if hasattr(self, '_sun_moon_svg_path'):
             from PyQt6.QtGui import QColor
-            icon_color = QColor("white") # User specifically asked for white lines
+            icon_color = QColor(Theme.text()) # Use theme text color for icon
             self._theme_btn.setIcon(self._get_tinted_icon(self._sun_moon_svg_path, icon_color))
     
     def apply_theme(self, is_dark: bool):

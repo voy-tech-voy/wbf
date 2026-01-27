@@ -142,8 +142,15 @@ class SuffixManager:
                  parts.append(f"_{p['colors']}colors")
             
              # Dither
-             if 'ffmpeg_dither' in p and p.get('gif_multiple_variants'):
-                parts.append(f"_d{p['ffmpeg_dither']}")
+             # Dither (Quality)
+             dither_val = p.get('ffmpeg_dither')
+             if dither_val is None:
+                 dither_val = p.get('dither')
+             if dither_val is None:
+                 dither_val = p.get('gif_dither')
+                 
+             if dither_val is not None:
+                 parts.append(f"_quality{dither_val}")
 
         # 4. Quality Suffix For Non-GIF (e.g. WebM/MP4)
         else:
