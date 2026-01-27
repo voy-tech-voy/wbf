@@ -297,7 +297,7 @@ class GenericSegmentedControl(QFrame):
         
         self.button_group = QButtonGroup(self)
         self.button_group.setExclusive(True)
-        self.button_group.idClicked.connect(self._on_group_clicked)
+        self.button_group.buttonClicked.connect(self._on_group_clicked)  # Use buttonClicked, not idClicked
         
         self.buttons = {} # id -> button
         self._button_ids = {} # button -> id
@@ -343,7 +343,7 @@ class GenericSegmentedControl(QFrame):
         return None
         
     def _on_group_clicked(self, btn):
-        """Handle group click"""
+        """Handle group click - btn is the button object from buttonClicked signal"""
         if btn in self._button_ids:
             seg_id = self._button_ids[btn]
             self.selectionChanged.emit(seg_id)
