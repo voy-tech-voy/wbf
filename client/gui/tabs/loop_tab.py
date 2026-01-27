@@ -122,7 +122,8 @@ class LoopTab(BaseTab):
         
         # FPS Variants
         self.gif_fps_variants = UnifiedVariantInput()
-        self.gif_fps_variants.setPlaceholderText("e.g., 10,15,24")
+        # self.gif_fps_variants.setPlaceholderText("e.g., 10,15,24")
+        self.gif_fps_variants.setText("10,15,24")
         self.gif_fps_variants.setVisible(False)
         self.gif_fps_variants_label = QLabel("FPS variants")
         self.gif_fps_variants_label.setVisible(False)
@@ -138,6 +139,7 @@ class LoopTab(BaseTab):
         # Colors Variants
         self.gif_colors_variants = UnifiedVariantInput()
         self.gif_colors_variants.setPlaceholderText("e.g., 64,128,256")
+        self.gif_colors_variants.setText("32,64,128")
         self.gif_colors_variants.setVisible(False)
         self.gif_colors_variants_label = QLabel("Colors variants")
         self.gif_colors_variants_label.setVisible(False)
@@ -161,6 +163,7 @@ class LoopTab(BaseTab):
         # Dither Variants
         self.gif_dither_variants = UnifiedVariantInput()
         self.gif_dither_variants.setPlaceholderText("e.g., 0,3,5")
+        self.gif_dither_variants.setText("0,3,5")
         self.gif_dither_variants.setVisible(False)
         self.gif_dither_variants_label = QLabel("Quality variants (0-5)")
         self.gif_dither_variants_label.setVisible(False)
@@ -200,6 +203,7 @@ class LoopTab(BaseTab):
         # WebM Quality Variants
         self.webm_quality_variants = UnifiedVariantInput()
         self.webm_quality_variants.setPlaceholderText("e.g., 20,30,40")
+        self.webm_quality_variants.setText("20,30,40")  
         self.webm_quality_variants.setVisible(False)
         self.webm_quality_variants_label = QLabel("Quality variants")
         self.webm_quality_variants_label.setVisible(False)
@@ -421,6 +425,7 @@ class LoopTab(BaseTab):
         """
         Centralized method to update format-specific control visibility.
         Uses container widgets for clean, reliable visibility switching.
+        Also handles single vs variant control visibility within each container.
         """
         # Determine current format
         current_format = self.format_selector.currentText()
@@ -429,9 +434,41 @@ class LoopTab(BaseTab):
         # Use stored mode instead of inferring from widget visibility
         is_manual = (self._current_mode == "Manual")
         
-        # Show/hide entire containers - much simpler and more reliable!
+        # Show/hide entire containers based on format and mode
         self.gif_controls_container.setVisible(is_gif and is_manual)
         self.webm_controls_container.setVisible(not is_gif and is_manual)
+        
+        # Handle GIF variant controls (single vs multi-variant)
+        if is_gif and is_manual:
+            gif_variants_on = self.gif_variants_checkbox.isChecked()
+            
+            # FPS: show single OR variant, never both
+            self.gif_fps_label.setVisible(not gif_variants_on)
+            self.gif_fps.setVisible(not gif_variants_on)
+            self.gif_fps_variants_label.setVisible(gif_variants_on)
+            self.gif_fps_variants.setVisible(gif_variants_on)
+            
+            # Colors: show single OR variant, never both
+            self.gif_colors_label.setVisible(not gif_variants_on)
+            self.gif_colors.setVisible(not gif_variants_on)
+            self.gif_colors_variants_label.setVisible(gif_variants_on)
+            self.gif_colors_variants.setVisible(gif_variants_on)
+            
+            # Dither/Quality: show single OR variant, never both
+            self.gif_dither_label.setVisible(not gif_variants_on)
+            self.gif_dither_slider.setVisible(not gif_variants_on)
+            self.gif_dither_value.setVisible(not gif_variants_on)
+            self.gif_dither_variants_label.setVisible(gif_variants_on)
+            self.gif_dither_variants.setVisible(gif_variants_on)
+        
+        # Handle WebM variant controls (single vs multi-variant)
+        if not is_gif and is_manual:
+            webm_variants_on = self.webm_variants_checkbox.isChecked()
+            
+            # Quality: show single OR variant, never both
+            self.webm_quality.setVisible(not webm_variants_on)
+            self.webm_quality_value.setVisible(not webm_variants_on)
+            self.webm_quality_variants.setVisible(webm_variants_on)
     
     def set_mode(self, mode: str):
         """Set the size mode (Max Size, Presets, Manual)."""
