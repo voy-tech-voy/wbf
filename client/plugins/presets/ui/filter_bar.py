@@ -131,8 +131,8 @@ class CategoryFilterBar(QWidget):
         if checked:
             return f"""
                 QPushButton {{
-                    background-color: {Theme.accent_turbo()};
-                    color: #000000;
+                    background-color: {Theme.success()};
+                    color: {Theme.bg()};
                     border: none;
                     font-weight: bold;
                     font-size: {Theme.FONT_SIZE_SM}px;
@@ -140,7 +140,8 @@ class CategoryFilterBar(QWidget):
                     padding: {self.BUTTON_PADDING_V}px {self.BUTTON_PADDING_H}px;
                 }}
                 QPushButton:hover {{
-                    background-color: #33E8FF;
+                    background-color: {Theme.success()};
+                    opacity: 0.9;
                 }}
             """
         else:

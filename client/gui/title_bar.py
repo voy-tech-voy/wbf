@@ -260,7 +260,25 @@ class TitleBarWindow(QMainWindow):
         """Enable blur when shown"""
         super().showEvent(event)
         self.enable_blur()
-    
+        
+    def _get_tinted_icon(self, icon_path, color):
+        """Helper to tint SVG icon with specific color"""
+        from PyQt6.QtSvg import QSvgRenderer
+        from PyQt6.QtGui import QPainter, QPixmap, QColor
+        from PyQt6.QtCore import QSize
+        
+        renderer = QSvgRenderer(icon_path)
+        pixmap = QPixmap(QSize(24, 24))
+        pixmap.fill(Qt.GlobalColor.transparent)
+        
+        painter = QPainter(pixmap)
+        renderer.render(painter)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        painter.fillRect(pixmap.rect(), color)
+        painter.end()
+        
+        return QIcon(pixmap)
+        
     def _apply_theme(self, is_dark: bool):
         """Apply theme styling using centralized Theme class"""
         self._is_dark_theme = is_dark
@@ -310,6 +328,12 @@ class TitleBarWindow(QMainWindow):
             }}
         """)
         self._theme_btn.setStyleSheet(button_style)
+        
+        # Update theme button icon with tint
+        if hasattr(self, '_sun_moon_svg_path'):
+            from PyQt6.QtGui import QColor
+            icon_color = QColor("white") # User specifically asked for white lines
+            self._theme_btn.setIcon(self._get_tinted_icon(self._sun_moon_svg_path, icon_color))
     
     def apply_theme(self, is_dark: bool):
         """Public method to apply theme"""

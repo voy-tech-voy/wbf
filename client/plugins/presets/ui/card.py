@@ -80,8 +80,15 @@ class PresetCard(QFrame):
         layout.addWidget(self.title_label, 0)
         layout.addWidget(self.subtitle_label, 0)
     
-    def _load_icon(self):
-        """Load the preset icon."""
+    def _load_icon(self, color: QColor = None):
+        """Load the preset icon with optional color override.
+        
+        Args:
+            color: QColor to apply to the icon. If None, uses Theme.text()
+        """
+        if color is None:
+            color = QColor(Theme.text())
+        
         icon_name = self._preset.style.icon
         
         # Try to load from assets
@@ -89,19 +96,66 @@ class PresetCard(QFrame):
         
         try:
             if icon_path:
-                icon = QIcon(icon_path)
-                pixmap = icon.pixmap(self.ICON_SIZE, self.ICON_SIZE)
+                from PyQt6.QtSvg import QSvgRenderer
+                from PyQt6.QtCore import QByteArray
+                
+                # Read SVG file
+                with open(icon_path, 'r', encoding='utf-8') as f:
+                    svg_content = f.read()
+                
+                # Replace color values in SVG with theme color
+                # Only replace actual color values (hex, rgb, named colors), NOT "none"
+                import re
+                
+                # Replace fill with color values (but preserve fill="none")
+                svg_content = re.sub(
+                    r'fill="(?!none)[^"]*"', 
+                    f'fill="{color.name()}"', 
+                    svg_content
+                )
+                
+                # Replace stroke with color values (but preserve stroke="none")
+                svg_content = re.sub(
+                    r'stroke="(?!none)[^"]*"', 
+                    f'stroke="{color.name()}"', 
+                    svg_content
+                )
+                
+                # Replace style attribute colors
+                svg_content = re.sub(
+                    r'(fill|stroke):(?!none)[^;}"]+', 
+                    fr'\1:{color.name()}', 
+                    svg_content
+                )
+                
+                # Render SVG to pixmap
+                renderer = QSvgRenderer(QByteArray(svg_content.encode('utf-8')))
+                pixmap = QPixmap(self.ICON_SIZE, self.ICON_SIZE)
+                pixmap.fill(Qt.GlobalColor.transparent)
+                
+                painter = QPainter(pixmap)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                renderer.render(painter)
+                painter.end()
+                
                 self.icon_label.setPixmap(pixmap)
             else:
                 # Fallback: use first letter as icon
                 self.icon_label.setText(self._preset.name[0].upper())
-                self.icon_label.setStyleSheet("""
+                self.icon_label.setStyleSheet(f"""
                     font-size: 32px;
                     font-weight: bold;
-                    color: #F5F5F7;
+                    color: {color.name()};
                 """)
-        except Exception:
+        except Exception as e:
+            # Fallback on any error
             self.icon_label.setText(self._preset.name[0].upper())
+            self.icon_label.setStyleSheet(f"""
+                font-size: 32px;
+                font-weight: bold;
+                color: {color.name()};
+            """)
     
     def _apply_styles(self):
         """Apply the card styling from design spec."""
@@ -172,3 +226,5 @@ class PresetCard(QFrame):
         """Update card styling when theme changes."""
         Theme.set_dark_mode(is_dark)
         self._apply_styles()
+        # Reload icon with new theme color
+        self._load_icon()

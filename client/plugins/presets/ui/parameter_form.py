@@ -140,7 +140,7 @@ class ParameterForm(QWidget):
         self.setStyleSheet(f"""
             QLabel {{ 
                 color: {Theme.text()}; 
-                font-size: {Theme.FONT_SIZE_SM}px;
+                font-size: {Theme.FONT_SIZE_BASE}px;
                 font-family: '{Theme.FONT_BODY}';
             }}
         """)
@@ -186,23 +186,27 @@ class ParameterForm(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
         
-        # Label
-        label = QLabel(param.label)
-        label.setStyleSheet("font-weight: bold;")
-        layout.addWidget(label)
-        
-        # Tooltip
-        if param.tooltip:
-            label.setToolTip(param.tooltip)
+        # Show top label only for non-toggle widgets
+        if param.type != ParameterType.TOGGLE:
+            label = QLabel(param.label)
+            label.setStyleSheet("font-weight: bold;")
+            layout.addWidget(label)
+            
+            # Tooltip
+            if param.tooltip:
+                label.setToolTip(param.tooltip)
         
         # Widget based on type
         widget = None
         
         if param.type == ParameterType.TOGGLE:
             # Use ThemedCheckBox for consistent styling
-            # Using empty text since label is already displayed above
-            widget = ThemedCheckBox("")
+            # Display label inline next to checkbox
+            widget = ThemedCheckBox(param.label)
             widget.setChecked(bool(param.default))
+            if param.tooltip:
+                widget.setToolTip(param.tooltip)
+            
             # ThemedCheckBox uses toggled signal, but stateChanged logic remains compatible 
             # if we use lambda or connect properly
             widget.toggled.connect(lambda: self._on_value_changed())

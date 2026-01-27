@@ -697,6 +697,7 @@ class ModeButtonsWidget(QWidget):
     """
     
     # Signal emitted when mode changes: emits "Max Size" or "Manual"
+    # Signal emitted when mode changes: emits "Max Size" or "Manual"
     modeChanged = pyqtSignal(str)
     
     def __init__(self, default_mode="Manual", orientation=Qt.Orientation.Horizontal, parent=None):
@@ -708,6 +709,7 @@ class ModeButtonsWidget(QWidget):
         """
         super().__init__(parent)
         self.orientation = orientation
+        self._is_dark = True
         
         # Set up layout based on orientation
         if orientation == Qt.Orientation.Vertical:
@@ -721,84 +723,60 @@ class ModeButtonsWidget(QWidget):
             layout.setSpacing(8)
             button_size = None
         
-        # Button style - consistent across all instances
-        if orientation == Qt.Orientation.Vertical:
-            # Square buttons for vertical orientation - reflected horizontally
-            # (Rounded on left, straight on right where it touches the panel)
-            self.button_style_base = (
-                "QPushButton { padding: 4px; border-top-left-radius: 8px; border-bottom-left-radius: 8px; "
-                "border-top-right-radius: 0px; border-bottom-right-radius: 0px; "
-                "border: 1px solid #555555; border-right: none; background-color: transparent; }"
-                "QPushButton:hover { background-color: rgba(255, 255, 255, 0.1); }"
-                "QPushButton:checked { background-color: #4CAF50; color: white; border-color: #43a047; }"
-            )
-        else:
-            self.button_style_base = (
-                "QPushButton { padding: 8px; border-radius: 6px; border: 1px solid #555555; background-color: transparent; }"
-                "QPushButton:hover { background-color: rgba(255, 255, 255, 0.1); }"
-                "QPushButton:checked { background-color: #4CAF50; color: white; border-color: #43a047; }"
-            )
+        icon_size = QSize(32, 32)
         
-        icon_size = QSize(32, 32)  # Increased from 26x26
-        
+        # Create Buttons
         if orientation == Qt.Orientation.Vertical:
-            # Use animated version for vertical sidebar
             self.max_size_btn = AnimatedSideModeButton()
-        else:
-            self.max_size_btn = QPushButton()
-        self.max_size_btn.setIcon(QIcon(get_resource_path("client/assets/icons/target_icon.svg")))
-        self.max_size_btn.setIconSize(icon_size)
-        self.max_size_btn.setCheckable(True)
-        self.max_size_btn.setToolTip("Max Size: Auto-optimize to fit target file size")
-        if button_size:
-            self.max_size_btn.setFixedSize(button_size)
-        else:
-            self.max_size_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        
-        # Presets button
-        if orientation == Qt.Orientation.Vertical:
             self.presets_btn = AnimatedSideModeButton()
-        else:
-            self.presets_btn = QPushButton()
-        self.presets_btn.setIcon(QIcon(get_resource_path("client/assets/icons/presets.svg")))
-        self.presets_btn.setIconSize(icon_size)
-        self.presets_btn.setCheckable(True)
-        self.presets_btn.setToolTip("Lab Presets: Select from social media and common aspect ratio presets")
-        if button_size:
-            self.presets_btn.setFixedSize(button_size)
-        else:
-            self.presets_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        
-        # Manual button
-        if orientation == Qt.Orientation.Vertical:
             self.manual_btn = AnimatedSideModeButton()
         else:
+            self.max_size_btn = QPushButton()
+            self.presets_btn = QPushButton()
             self.manual_btn = QPushButton()
-        self.manual_btn.setIcon(QIcon(get_resource_path("client/assets/icons/settings.svg")))
-        self.manual_btn.setIconSize(icon_size)
+            
+        # Configure Max Size Button
+        self.max_size_btn.setCheckable(True)
+        self.max_size_btn.setToolTip("Max Size: Auto-optimize to fit target file size")
+        self._configure_button_sizing(self.max_size_btn, button_size)
+        
+        # Configure Presets Button
+        self.presets_btn.setCheckable(True)
+        self.presets_btn.setToolTip("Lab Presets: Select from social media and common aspect ratio presets")
+        self._configure_button_sizing(self.presets_btn, button_size)
+        
+        # Configure Manual Button
         self.manual_btn.setCheckable(True)
         self.manual_btn.setToolTip("Manual: Set quality settings yourself")
-        if button_size:
-            self.manual_btn.setFixedSize(button_size)
-        else:
-            self.manual_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._configure_button_sizing(self.manual_btn, button_size)
         
-        # Button group for exclusive selection
+        # Set Icons
+        self.max_size_btn.setIconSize(icon_size)
+        self.presets_btn.setIconSize(icon_size)
+        self.manual_btn.setIconSize(icon_size)
+        
+        # Button Group
         self.button_group = QButtonGroup(self)
         self.button_group.setExclusive(True)
         self.button_group.addButton(self.max_size_btn)
         self.button_group.addButton(self.presets_btn)
         self.button_group.addButton(self.manual_btn)
         
-        # Set default mode
-        if default_mode == "Max Size":
-            self.max_size_btn.setChecked(True)
-        elif default_mode == "Presets":
-            self.presets_btn.setChecked(True)
-        else:
-            self.manual_btn.setChecked(True)
+        # Add to Layout
+        layout.addWidget(self.max_size_btn)
+        layout.addWidget(self.presets_btn)
+        layout.addWidget(self.manual_btn)
         
-        # Connect signals
+        # Connect to ThemeManager
+        from client.gui.theme_manager import ThemeManager
+        theme_manager = ThemeManager.instance()
+        theme_manager.theme_changed.connect(self.update_theme)
+        
+        # Initialize Theme
+        self._is_dark = theme_manager.is_dark_mode()
+        self.update_theme(self._is_dark)
+        
+        # Connect button signals
         self.max_size_btn.toggled.connect(
             lambda checked: checked and self.modeChanged.emit("Max Size")
         )
@@ -809,25 +787,147 @@ class ModeButtonsWidget(QWidget):
             lambda checked: checked and self.modeChanged.emit("Manual")
         )
         
-        # Add buttons to layout
-        layout.addWidget(self.max_size_btn)
-        layout.addWidget(self.presets_btn)
-        layout.addWidget(self.manual_btn)
-        
-        if orientation == Qt.Orientation.Vertical:
-            layout.addStretch()
-        
-        # Initial theme application
-        from client.utils.theme_utils import is_dark_mode
-        self.update_theme(is_dark_mode())
-        
-        # Fixed size for consistency
-        if orientation == Qt.Orientation.Vertical:
-            self.setFixedWidth(44)
-            self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        # Set default mode (signals will be handled by logic using this widget)
+        if default_mode == "Max Size":
+            self.max_size_btn.setChecked(True)
+        elif default_mode == "Presets":
+            self.presets_btn.setChecked(True)
         else:
-            self.setFixedHeight(42)
-            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            self.manual_btn.setChecked(True)
+
+    def _configure_button_sizing(self, btn, fixed_size):
+        if fixed_size:
+            btn.setFixedSize(fixed_size)
+        else:
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def update_theme(self, is_dark: bool):
+        """Update theme for all buttons."""
+        self._is_dark = is_dark
+        Theme.set_dark_mode(is_dark)
+        
+        self._apply_styles()
+        self._update_icons()
+
+    def _apply_styles(self):
+        """Apply theme-aware styles."""
+        
+        # Colors
+        text_color = Theme.text()
+        border_color = Theme.border()
+        success_color = Theme.success()
+        bg_hover = Theme.color_with_alpha('surface_element', 0.5)
+        
+        if self.orientation == Qt.Orientation.Vertical:
+            # Vertical style
+            style = f"""
+                QPushButton {{ 
+                    padding: 4px; 
+                    border-top-left-radius: 8px; 
+                    border-bottom-left-radius: 8px;
+                    border-top-right-radius: 0px; 
+                    border-bottom-right-radius: 0px;
+                    border: 1px solid {border_color}; 
+                    border-right: none; 
+                    background-color: transparent; 
+                }}
+                QPushButton:hover {{ 
+                    background-color: {bg_hover}; 
+                }}
+                QPushButton:checked {{ 
+                    background-color: {success_color}; 
+                    color: {Theme.bg()}; 
+                    border-color: {success_color}; 
+                }}
+            """
+        else:
+            # Horizontal style
+            style = f"""
+                QPushButton {{ 
+                    padding: 8px; 
+                    border-radius: 6px; 
+                    border: 1px solid {border_color}; 
+                    background-color: transparent; 
+                }}
+                QPushButton:hover {{ 
+                    background-color: {bg_hover}; 
+                }}
+                QPushButton:checked {{ 
+                    background-color: {success_color}; 
+                    color: {Theme.bg()}; 
+                    border-color: {success_color}; 
+                }}
+            """
+            
+        self.max_size_btn.setStyleSheet(style)
+        self.presets_btn.setStyleSheet(style)
+        self.manual_btn.setStyleSheet(style)
+
+    def _update_icons(self):
+        """Reload icons with theme-appropriate colors."""
+        color = QColor(Theme.text()) if not self._is_dark else QColor("white")
+        # In light mode, text is dark, so icons should be dark.
+        # In dark mode, text is light, so icons should be light.
+        # However, Theme.text() handles this automatically.
+        
+        # For checked state, usually we want white icon if background is green (success).
+        # But QIcon doesn't support state-based coloring easily without subclassing.
+        # Since these are mode buttons, selected one is green. Green bg needs white icon.
+        # Unselected ones need Theme.text() icon.
+        # This is tricky with static QIcon.
+        # For now, let's just match Theme.text(). 
+        # Actually, checked buttons (Green) with black text (Theme.bg() in light mode? No, success text is usually white or dark).
+        # We used color: Theme.bg() for checked state. Theme.bg() is dark in light mode -> Black text. 
+        # Wait, usually checked success button has White text for contrast on Green.
+        # If we use Theme.bg(), in Dark Mode (bg is Black), implies Black text on Green. OK.
+        # In Light Mode (bg is White), implies White text on Green. OK.
+        
+        # So icons should ideally follow text color.
+        # Creating a QIcon that changes state is complex here.
+        # Let's just generate the icon for the current theme's text color.
+        # The user's issue is "invisible in light mode", meaning white icons on white bg.
+        # So changing them to black (Theme.text() in light mode) will fix it for unselected state.
+        
+        self.max_size_btn.setIcon(self._create_themed_icon("target_icon.svg"))
+        self.presets_btn.setIcon(self._create_themed_icon("presets.svg"))
+        self.manual_btn.setIcon(self._create_themed_icon("settings.svg"))
+
+    def _create_themed_icon(self, icon_name):
+        """Create a QIcon from SVG with theme coloring."""
+        try:
+            icon_path = get_resource_path(f"client/assets/icons/{icon_name}")
+            if not os.path.exists(icon_path):
+                return QIcon()
+                
+            from PyQt6.QtSvg import QSvgRenderer
+            
+            # Read SVG
+            with open(icon_path, 'r', encoding='utf-8') as f:
+                svg_content = f.read()
+            
+            # Replace colors with Theme.text()
+            # This is a simple replacement for common stroke definitions
+            color = Theme.text() # e.g. #000000 or #FFFFFF
+            
+            # Use regex to replace stroke colors, preserving "none"
+            import re
+            # Replace stroke="#..." or stroke="name" but not none
+            svg_content = re.sub(r'stroke=["\'](?!none).*?["\']', f'stroke="{color}"', svg_content)
+            # Replace fill if it's not none (though usually these icons are stroked)
+            # svg_content = re.sub(r'fill=["\'](?!none).*?["\']', f'fill="{color}"', svg_content)
+            
+            renderer = QSvgRenderer(QByteArray(svg_content.encode('utf-8')))
+            pixmap = QPixmap(64, 64) # Render high-res
+            pixmap.fill(Qt.GlobalColor.transparent)
+            
+            painter = QPainter(pixmap)
+            renderer.render(painter)
+            painter.end()
+            
+            return QIcon(pixmap)
+        except Exception as e:
+            print(f"Error creating icon {icon_name}: {e}")
+            return QIcon()
     
     def set_hidden_mode(self, hidden):
         """Force buttons into hidden (shy) mode"""
@@ -977,11 +1077,15 @@ class SideButtonGroup(QWidget):
         
         # Fixed width for sidebar
         self.setFixedWidth(44)
-        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
+        # Connect to ThemeManager
+        from client.gui.theme_manager import ThemeManager
+        theme_manager = ThemeManager.instance()
+        theme_manager.theme_changed.connect(self.update_theme)
         
         # Apply initial theme
-        from client.utils.theme_utils import is_dark_mode
-        self.update_theme(is_dark_mode())
+        self.update_theme(theme_manager.is_dark_mode())
     
     def set_hidden_mode(self, hidden, colored=True):
         """
@@ -1049,9 +1153,12 @@ class SideButtonGroup(QWidget):
     
     def update_theme(self, is_dark):
         """Update button icons and styles based on theme"""
-        icon_color = QColor(255, 255, 255) if is_dark else QColor(0, 0, 0)
+        Theme.set_dark_mode(is_dark)
         
         # Update icons for all buttons
+        # Use Theme.text() for icon color to ensure visibility in both modes
+        icon_color = QColor(Theme.text())
+        
         for config in self.buttons_config:
             btn_id = config.get('id', '')
             icon_path = config.get('icon_path', '')
@@ -1059,19 +1166,18 @@ class SideButtonGroup(QWidget):
                 self.buttons[btn_id].setIcon(self._get_tinted_icon(icon_path, icon_color))
         
         # Theme-aware styling
-        if is_dark:
-            bg_hover = "rgba(255, 255, 255, 0.1)"
-            border_color = "#555555"
-        else:
-            bg_hover = "rgba(0, 0, 0, 0.05)"
-            border_color = "#cccccc"
+        bg_hover = Theme.color_with_alpha('surface_element', 0.5)
+        border_color = Theme.border()
+        # Use blue for transform buttons (Resize, Rotate, Time)
+        selected_color = "#2196F3"  # Material Blue
+        selected_border = "#1e88e5"  # Darker blue for border
         
         button_style = (
-            f"QPushButton {{ padding: 6px; border-top-left-radius: 8px; border-bottom-left-radius: 8px; "
+            f"QPushButton {{ padding: 6px; border-top-left-radius: {Theme.RADIUS_MD}px; border-bottom-left-radius: {Theme.RADIUS_MD}px; "
             f"border-top-right-radius: 0px; border-bottom-right-radius: 0px; "
             f"border: 1px solid {border_color}; border-right: none; background-color: transparent; }}"
             f"QPushButton:hover {{ background-color: {bg_hover}; }}"
-            "QPushButton:checked { background-color: #2196F3; color: white; border-color: #1e88e5; }"
+            f"QPushButton:checked {{ background-color: {selected_color}; color: white; border-color: {selected_border}; }}"
         )
         
         for btn in self.buttons.values():
@@ -1123,7 +1229,13 @@ class CustomComboBox(QComboBox):
         self.arrow_label.setStyleSheet("background: transparent; color: #CCCCCC;")
         self.arrow_label.raise_()
         
-        self._apply_custom_style(self.is_dark)
+        # Connect to ThemeManager
+        from client.gui.theme_manager import ThemeManager
+        theme_manager = ThemeManager.instance()
+        theme_manager.theme_changed.connect(self.update_theme)
+        
+        # Apply initial theme
+        self._apply_custom_style(theme_manager.is_dark_mode())
     
     def update_theme(self, is_dark):
         """Update styling based on theme"""

@@ -138,6 +138,8 @@ class SuffixManager:
              # Colors
              if 'ffmpeg_colors' in p:
                  parts.append(f"_{p['ffmpeg_colors']}colors")
+             elif 'colors' in p:
+                 parts.append(f"_{p['colors']}colors")
             
              # Dither
              if 'ffmpeg_dither' in p and p.get('gif_multiple_variants'):

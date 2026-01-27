@@ -126,7 +126,7 @@ class PresetGallery(QWidget):
         """Update parameter panel background based on theme."""
         self._param_panel.setStyleSheet(f"""
             QFrame#ParamPanel {{
-                background-color: {Theme.color_with_alpha('surface_main', 0.95)};
+                background-color: {Theme.color_with_alpha('surface_element', 0.95)};
                 border-radius: {Theme.RADIUS_LG}px;
                 padding: 12px;
             }}

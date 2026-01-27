@@ -288,6 +288,9 @@ class CommandPanel(QWidget):
         saved_mode = self.tab_modes.get(index, "Max Size")
         self.mode_buttons.set_mode(saved_mode)
         
+        # Update side buttons visibility based on current mode
+        self._update_side_buttons_visibility(saved_mode)
+        
         # Update UI icons
         self.update_tab_icons()
     
